@@ -197,12 +197,33 @@ if (input?.tool_name === 'Bash') {
   const writes = [
     /(?:^|[\s;&|])(?:>>?)\s*("?)([^\s"'|;&]+)\1/g,
     /(?:^|[\s;&|])sed\s+(?:-[^\s]*\s+)*-i(?:\s+''|\s+"")?\s+(?:-[^\s]*\s+)*(?:"[^"]*"|'[^']*'|\S+)\s+("?)([^\s"'|;&]+)\1/g,
-    /(?:^|[\s;&|])(?:tee|cp|mv|install)\s+(?:-[^\s]*\s+)*(?:\S+\s+)*("?)([^\s"'|;&]+)\1/g,
+    // cp / mv / install write to their LAST argument…
+    /(?:^|[\s;&|])(?:cp|mv|install)\s+(?:-[^\s]*\s+)*(?:\S+\s+)*("?)([^\s"'|;&]+)\1/g,
+    // …and `tee` writes to its FIRST. Folding it in with the others meant
+    // `tee code/src/z.js < input` had its destination read as `input`, and the write to
+    // product code was allowed. Found by a probe that ran the commands instead of reading
+    // the pattern.
+    /(?:^|[\s;&|])tee\s+(?:-[^\s]*\s+)*("?)([^\s"'|;&<>]+)\1/g,
     /(?:^|[\s;&|])(?:truncate|dd)\s[^;&|]*\bof=("?)([^\s"'|;&]+)\1/g,
   ];
+
+  // A bare word is not a path, and neither is anything still carrying shell syntax.
+  //
+  // Both produced false positives within minutes of each other. `**Each` — a word out of
+  // prose inside a heredoc — was resolved against the cwd, which happened to be the product
+  // repo, and a command that wrote nothing was refused. Then `$(pwd)`, whose value the shell
+  // decides at run time, did the same.
+  //
+  // **A guard that fires on commands nobody is worried about is the one that gets switched
+  // off**, so the uncertain case is allowed here and left to review.
+  const unexpanded = (t) => /[$`*?{}()[\]]/.test(t);
+  const looksLikePath = (t) =>
+    !unexpanded(t) &&
+    (path.isAbsolute(t) || t.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(t) || fs.existsSync(t));
+
   const targets = new Set();
   for (const re of writes) {
-    for (const m of cmd.matchAll(re)) if (m[2]) targets.add(m[2]);
+    for (const m of cmd.matchAll(re)) if (m[2] && looksLikePath(m[2])) targets.add(m[2]);
   }
   const guarded = [...targets].find(isCode);
   if (guarded) file = guarded;

@@ -440,6 +440,49 @@ console.log(`\n${'─'.repeat(72)}`);
   }
 }
 
+
+// ── the Bash write-detector, both directions ─────────────────────────────────
+//
+// The blocking half and the SILENT half, because this detector produced three false
+// positives in one sitting and each one is a reason somebody switches the guard off:
+//
+//   a bare word from prose inside a heredoc, resolved against a cwd that happened to be the
+//     product repo, so a command that wrote nothing at all was refused
+//   shell syntax the hook cannot evaluate, guessed at anyway
+//   tee folded in with cp/mv, whose destination is the LAST argument — tee's is the FIRST,
+//     so a tee into product code had its destination read as the input file and was allowed.
+//     That one is the opposite direction: a real hole, found by a probe that RAN the
+//     commands instead of reading the pattern.
+{
+  console.log('\\n▸ Bash write-detection — what it catches and what it must ignore');
+  const guard = path.join(HOOKS, 'guard-edit.mjs');
+  const fire = (command) =>
+    run(guard, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } }).code;
+
+  const q = String.fromCharCode(62);          // >   built, not typed
+  const app = q + q;                          // >>
+  const code = ['code', 'src'].join('/');
+
+  const SILENT = [
+    ['prose in a heredoc', 'python3 - <<PY\\ns = "**Each fix broke it"\\nPY'],
+    ['unexpanded shell syntax', 'node x.mjs "$(pwd)/a" "$(pwd)"'],
+    ['a redirect to /dev/null', 'echo hello ' + q + ' /dev/null'],
+    ['reading, not writing', 'grep -r "code/" .'],
+    ['a path inside a sentence', 'echo "see code/src for details"'],
+  ];
+  for (const [why, cmd] of SILENT) check('ignores ' + why, fire(cmd) === 0);
+
+  const BLOCKED = [
+    ['a redirect into product code', 'echo x ' + q + ' ' + code + '/thing.js'],
+    ['an append into product code', 'printf hi ' + app + ' ' + code + '/append.js'],
+    ['sed -i on product code', "sed -i '' s/a/b/ " + code + '/server.js'],
+    ['cp into product code', 'cp /tmp/x ' + code + '/y.js'],
+    ['tee into product code (its destination is the FIRST arg)',
+      'tee ' + code + '/z.js < /tmp/x'],
+  ];
+  for (const [why, cmd] of BLOCKED) check('refuses ' + why, fire(cmd) === 2);
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');
