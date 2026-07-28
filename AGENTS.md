@@ -1,0 +1,391 @@
+# AGENTS.md — <YOUR PROJECT>
+
+<!-- contract-meta
+last-verified: <date you last read this end to end>
+verified-at: 641ce49
+cost: ~5188 tokens, loaded every session — `node scripts/check.mjs` recomputes and refuses on drift
+scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
+-->
+
+The contract every coding agent works under in this repository. **Codex CLI, Cursor, Copilot,
+Aider, Zed, Windsurf and 28+ other tools read this file natively.** Claude Code does not —
+`CLAUDE.md` imports it.
+
+Read this before the first edit of every session. It is short on purpose: everything here is
+something you **cannot infer from the code**.
+
+**This file costs tokens on every single session**, so it earns its length or it gets shorter.
+`scripts/check.mjs` measures the real cost and **refuses when the stated number drifts more
+than 10%** — a comment claiming a budget it no longer meets is worse than no comment.
+**Detail that is only true of one directory belongs in that directory's `CLAUDE.md`**, which
+Claude Code loads additively as it moves through the tree
+([Anthropic's large-codebase guidance](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start),
+practice 1).
+
+---
+
+## 1 · What this project is
+
+> **Replace this section.** Two or three sentences: what the thing is, and what it is *not*.
+> Then the single constraint that shapes every other decision — the one an agent would
+> otherwise violate on its first day because nothing in the code implies it.
+>
+> A real example, from the project this workspace was built in:
+>
+> > *"Everything runs on a CLI and a subscription. **No external AI API** — no embeddings
+> > endpoint, no second vendor, no metered per-call service. This is not a cost preference; it
+> > is a category the project does not enter. **If a task seems to need one, that is a signal
+> > the design is wrong, not that the rule is.**"*
+>
+> The last sentence is the part that works. A constraint without a stated response to
+> *"but what if we need to?"* gets negotiated away the first time it is inconvenient.
+
+If your project has a plan or spec directory, name it here and say **when** to read it:
+
+> *"The full reasoning lives in `plan/`. **Read it before proposing architecture.**"*
+
+---
+
+## 2 · The rules that exist because you measured something
+
+> **Start this table empty and let it fill.** Every row is a rule with a number behind it —
+> not an opinion, not a convention borrowed from somewhere else.
+>
+> | Rule | Why | Measured |
+> |---|---|---|
+> | | | |
+>
+> This is the highest-value section in the file and the slowest to earn, because a row can
+> only be added after something was actually measured. `skills/measure-dont-claim` is how
+> rows get in; the discipline is that **a number without its harness is an unfalsifiable
+> claim** and does not belong here.
+>
+> The project this came from carries **77 disproven claims** alongside its verified ones, and
+> the disproven list turned out to be the more useful half — each entry is work nobody has to
+> do again. Keep yours.
+
+---
+
+## 3 · The failure modes this workspace exists to prevent
+
+Vibe coding fails in specific, repeatable ways. Each has a control, and the control is a
+file or a gate in this repo — not a good intention.
+
+| Failure | Control | Where |
+|---|---|---|
+| Code drifts from the plan | **Spec is the source of truth**; no code without an approved spec | `board/1-spec/`, `skills/spec-first` |
+| Running ahead of the plan | **One card in `3-build` at a time.** WIP limit is 1 | `board/README.md` |
+| Editing product code around the guard | the guard watches **`Bash` too** — `sed -i`, `>`, `tee`, `cp`. Not complete, and says so | `scripts/hooks/guard-edit.mjs` |
+| Forgetting earlier code | **Query the graph, do not grep** | `graphify` — §5 |
+| Rewriting what exists | **Reuse ladder before writing anything** | `skills/reuse-first` |
+| The same logic twice | same ladder, plus the graph shows the duplicate | `skills/reuse-first` |
+| Garbage and extra code | **Laziness ladder** — measured 54% fewer lines | `ponytail` — §5 |
+| Losing the original context | **This file is re-read every session**; decisions go to `docs/DECISIONS.md`, never to chat | §7 |
+| Weak code shipped | **Review gate with a score**, and the score is written down | `board/4-review/`, `skills/review-gate` |
+| Security holes | **Security gate is separate from review** and cannot be waived | `skills/security-gate` |
+| Disconnected code | the graph makes an unreferenced file visible | `graphify` |
+| Context exhaustion | **Context budget per task**, and a task too big to fit is a task to split | `skills/context-budget` |
+| No structure, ad-hoc work | **The board is the structure.** A change that is not a card does not happen | `board/` |
+| **Reported done, actually a shell** | **`depth-check`** on the diff, and **every ticked criterion cites its proof** | `scripts/depth-check.mjs`, `skills/definition-of-done` |
+| **Cited proof that does not exist** | **`verify-claims`** follows every citation into the repo | `scripts/verify-claims.mjs` |
+| **A green suite that catches nothing** | **`mutation-test`** deletes a real invariant and asks if anything notices | `scripts/mutation-test.mjs` |
+| **A secret pushed to a remote** | **`scan-secrets`** — working tree **and full history**, before any push | `scripts/scan-secrets.mjs` |
+
+**The last row is the one most likely to be happening right now.** A stub has no TODO in it —
+it has a signature, a doc comment, a plausible name, and a body that returns a constant. It
+passes lint, passes the hygiene job, and raises the test count. `depth-check` finds the six
+shapes: a constant-return body, an empty catch, `throw new Error('not implemented')`, a
+placeholder string, an assertion that cannot fail, a handler that never reads its parameter.
+
+Measured 2026-07-28: **0 findings across 33 product files; 7 across a deliberately faked
+implementation.** And `- [x]` alone is refused at `5-verify` — a tick must carry a command or a
+`file:line`, because *"verified"* is what a shell reports too.
+
+**Then the citation itself is followed.** A bare tick is refused; an *invented* one looked
+identical until `verify-claims` opened the file. It reconciles plan against diff against claim:
+planned files that were never modified, a `file:line` past the end of the file, an `npm run`
+script that is not in `package.json`, a *"Proved by"* test that does not exist or asserts
+nothing, a "watched it fail" with no pasted failure. **7 findings on a deliberately lying card,
+0 on a truthful one.**
+
+---
+
+## 4 · The pipeline — every change moves left to right
+
+```
+0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done
+             gate     gate      WIP=1     gate       gate
+```
+
+**Gates are refusals, not suggestions.** A card that fails a gate goes back, it does not go
+forward with a note.
+
+| Stage | Done when | Who |
+|---|---|---|
+| **1-spec** | the change is described so that two people would build the same thing; acceptance criteria are testable | human writes, agent challenges |
+| **2-plan** | files to touch are named, the reuse ladder has been run, the context budget fits | agent drafts, human approves |
+| **3-build** | code + tests, no TODOs, no commented-out code | agent |
+| **4-review** | scored on 5 axes, **a different model than the one that built it** | agent |
+| **5-verify** | tests pass, and **at least one guard has been watched to fail** | agent + human |
+| **6-done** | merged, `docs/DECISIONS.md` updated if a decision was made | human |
+
+**The verify rule is the unusual one and it is deliberate:** a guard nobody has watched fail
+is not a guard. Every invariant test ships with a fixture that deliberately breaks it and
+asserts the check fires.
+
+---
+
+## 5 · Tools that are part of the contract
+
+Install them (`SETUP.md`). They are not optional decoration.
+
+| Tool | What it stops | How you use it |
+|---|---|---|
+| **[graphify](https://github.com/Graphify-Labs/graphify)** | re-reading files, missing connections, forgetting what exists | `graphify explain` / `path` / `explain` **before** reading source. AST-based, ~40 languages, no embeddings — which fits §1 |
+| **[ponytail](https://github.com/DietrichGebert/ponytail)** | over-engineering, dead code, unnecessary dependencies | a **plugin**, not a CLI — `/ponytail-review` before review, `/ponytail-audit` before adding a file. Its ladder runs every turn; `skills/reuse-first` is the version that *records where it stopped* |
+| **[spec-kit](https://github.com/github/spec-kit)** | drift between intent and code | the phase discipline behind `board/1-spec` and `2-plan` |
+
+> **On ponytail's headline numbers, since this file has a rule about numbers.** Its published
+> result is **~54% less code, ~20% cheaper, ~27% faster, 100% of safety guards kept** — and
+> that is **someone else's benchmark, on someone else's stack**: mean of 12 feature tasks at
+> **n=4** on Haiku 4.5 against a FastAPI + React repo. Not Node, not this codebase, not our
+> model. The vendor also **withdrew its own earlier 80–94% headline** as partly a
+> conversational-baseline artifact, which is a point in its favour and a reason to quote the
+> corrected figure rather than the loud one. **Treat it as a reason to try the tool, never as a
+> number about us.** `/ponytail-gain` prints their scoreboard; ours would have to be measured.
+
+**Order of operations, every time:**
+
+```
+graphify explain  →  does it already exist?
+ponytail ladder →  does it need to exist at all?
+spec            →  is it described well enough to build twice the same way?
+then write
+```
+
+---
+
+## 6 · Working rules
+
+**Before writing code**
+
+1. `graphify explain "<thing>"` — never grep first
+2. Run the reuse ladder (`skills/reuse-first`)
+3. Re-read the card's spec. If the spec does not answer a question you have, **the spec is
+   wrong** — fix it there, not in the code
+
+**While writing**
+
+- **Match the file you are in.** Its naming, its comment density, its idiom. A file that
+  reads like two authors is a defect
+- **No new dependency without a line in `docs/DECISIONS.md`.** The main repo has exactly one
+  (`ws`), and that is a feature
+- **No TODO, no commented-out code, no "for now".** If it is not finished, the card is not
+  finished
+- **Comments explain why, never what.** The code says what
+
+**Before saying done**
+
+- Tests pass — and the new test has been watched to fail
+- `graphify` rebuilt, and nothing landed unreferenced
+- Nothing added to the front of a system prompt (it breaks the cache prefix — §2)
+- The card moved. **Work that did not move a card did not happen**
+
+---
+
+## 7 · Memory and context
+
+Three layers, and they do different jobs. Chat is not one of them.
+
+| Layer | Lives in | Survives |
+|---|---|---|
+| **Project truth** | `AGENTS.md`, `docs/DECISIONS.md` | forever, re-read every session |
+| **What it adds up to** | `docs/LEARNED.md` | consolidated by `skills/reflect` |
+| **Work in flight** | the card in `board/<stage>/` | until the card is done |
+| **What was asked** | `docs/prompts/YYYY-MM-DD.md` | written automatically, per day |
+| **Session** | the conversation | **nothing. Assume it is lost.** |
+
+**Recording is not remembering.** The first four layers only ever grew; nothing read them back.
+`skills/reflect` closes that — `node scripts/reflect.mjs` gathers everything since the last
+reflection, and `docs/LEARNED.md` holds the patterns **no single record states**: a mistake
+that happened twice, a belief that was overturned and the kind of reasoning that produced it,
+what a fresh agent gets wrong on day one. `check.mjs` refuses when it falls behind.
+
+**Read `LEARNED.md` before `DECISIONS.md`.** It is shorter, and it tells you which decisions
+matter.
+
+**A cheap state check runs on every prompt, and says nothing when there is nothing to say.**
+`scripts/hooks/prompt-check.mjs` — ~190 ms, **zero tokens when green**. It speaks only for WIP
+over the limit, a stale reflection (which refuses the next commit anyway), or uncommitted work
+that has **grown**. Not the absolute count: the product repo has carried 45 uncommitted files
+since 26 July, and reporting that every prompt would be true, correct, and ignored by the
+second day. **A true statement that never changes is still noise.**
+
+It deliberately does not run `check.mjs` — measured at **1,175 ms and ~438 tokens of output**,
+which is a card-moving cost, not a per-sentence one.
+
+**The prompt log is written for you, not by you.** `scripts/hooks/save-prompt.mjs` runs on
+`UserPromptSubmit` and saves every prompt as it is submitted — the intent behind a change, in
+the words it was actually asked in, which no card ever quite captures. It exists because the
+alternative was reconstructing them from `~/.claude/projects/*.jsonl`: outside the repo,
+pruned, and keyed by a session id nobody remembers.
+
+**It is gitignored, and that is a security decision.** Prompts here have carried a VPS root
+password and an OAuth callback code, pasted in good faith while debugging. Secrets are
+scrubbed on write — **mitigation, not isolation**; a novel format will get through. Not
+committing is the first line of defence. To keep a day deliberately: read it, then
+`git add -f docs/prompts/YYYY-MM-DD.md`.
+
+> **If a decision only exists in chat, it does not exist.** Write it to
+> `docs/DECISIONS.md` in the same turn you make it.
+
+**Context budget.** One card, one context. If a task cannot be held with its spec, its files
+and the graph in one window, it is too big — **split the card**. Do not "continue in a new
+session and hope".
+
+---
+
+## 8 · Boundaries — files an agent must not touch without being asked
+
+- `plan/**` — the plan is edited deliberately, never as a side effect
+- `.env`, `data/**`, anything holding credentials
+- `board/6-done/**` — history
+- Anything under `node_modules/`, `graphify-out/` (generated)
+
+---
+
+## 9 · Skills
+
+Loaded from `.agents/skills/` (cross-tool spec) and `.claude/skills/` — **the same
+directory, symlinked**, because two copies drift. Invoke by name when the situation matches.
+
+| Skill | When |
+|---|---|
+| **`session-start`** | **first, every session** — before answering anything |
+| **`pick-the-model`** | at `2-plan` and every handoff. **Rule 0: top tier always** — see below |
+| `skill-finder` | **a task that does not obviously match a skill you know** — and before installing any third-party one |
+| `spec-first` | a card enters `1-spec`, or an implementation question has no answer in the card |
+| `reuse-first` | before writing any new code, file or dependency |
+| `context-budget` | at `2-plan` — does this fit one window? |
+| **`measure-dont-claim`** | **before stating any number, rate, cost or comparison** |
+| `review-gate` | before a card leaves `4-review` |
+| `security-gate` | same, and it cannot be traded against the review score |
+| `definition-of-done` | at `5-verify` |
+| `deploy-gate` | **every deploy, all six steps** — §11 |
+| `reflect` | when `check.mjs` says the reflection is stale, or before handing this to anyone |
+| `council` | before a decision that is expensive to reverse — five models, four vendors |
+
+**Most work is a flow, not a skill.** The commonest mistake is hunting for the one skill that
+matches *"build this feature"* — there isn't one, because that is the whole board:
+
+```
+idea → spec-first ──→ reuse-first ──→ context-budget ──→ [build] ──→ review-gate ──→ definition-of-done
+        1-spec          2-plan          2-plan            3-build     4-review        5-verify
+                                                                    + security-gate  + deploy-gate
+                                                                    + Codex (§10)      (§11)
+```
+
+Underneath all of them: **`measure-dont-claim`** whenever a number is about to be stated, and
+**`skill-finder`** whenever the route above does not obviously cover the task.
+
+### The tier is not a choice
+
+**Every Claude-side task here runs on the top tier: Opus 5, maximum thinking effort.** Planning,
+spec challenge, review, exploration, subagents. **There is no task in this project small enough
+to be worth a cheaper model** — the judgement about which tasks are "easy" is itself the hard
+part, and what this ships can hurt a caller.
+
+It is not a cost trade either: everything runs on subscriptions already paid for, so
+downgrading buys nothing and loses something.
+
+**Pinned, not remembered** — `model: opus` in both `settings.json` files and in every
+`.claude/agents/*.md`, and `check.mjs` refuses a downgrade. That check exists because
+`explorer` sat on `sonnet` until 2026-07-28: the search agent, whose findings everything
+downstream trusts, and nobody noticed for a day. Full reasoning in `skills/pick-the-model`.
+
+The two in bold are the ones that pay for themselves fastest. `session-start` rebuilds the
+context a fresh session cannot infer; `measure-dont-claim` is why the plan has 77 disproven
+claims instead of 77 wrong beliefs.
+
+---
+
+## 10 · A second model, always
+
+**No model reviews its own work.** A model reading its own output agrees with itself, and the
+review *looks* thorough while catching nothing. This is the most common way weak code passes an
+agentic review, and it is invisible from inside.
+
+So every `4-review` runs **two independent readings**, and at least one is a **different
+vendor's model**.
+
+**Where they disagree is the most valuable output of the gate.** Record both verdicts; do not
+average them.
+
+### Five, when the decision is expensive to reverse
+
+`skills/council` · **five models across four vendors** answer independently, rank each other
+**anonymised**, and you synthesise.
+
+Use it before an architecture or schema decision, a security judgement, a plan, or anything
+whose failure is data loss or an outage. **Not for questions with a knowable answer** — read
+the code, run the test, ask the graph.
+
+**Consensus is not correctness.** They share training data, so agreement measures overlap as
+much as truth; this project's 77 disproven claims were mostly unanimous. The run prints its own
+bias diagnostics above the score — read those first.
+
+### The constraint that shapes all of it
+
+**A second-model review is multi-minute, not multi-second.** Measured: a trivial Codex prompt
+returns in ~14 s; a real plan-review **exceeded 10 minutes at low, medium and high reasoning
+effort alike**, and no flag combination changed it.
+
+**So it is always background work.** Never wait in the foreground. It is the same rule as the
+product's own architecture — *nothing built on an agent CLI is interactive*.
+
+**And always at top effort.** §9's tier rule applies to every vendor, not just this one.
+
+> **Which plugins provide this, and how they are wired, is tool-specific — see `CLAUDE.md`.**
+> The rule above is the contract; the plumbing is not.
+
+## 11 · Deploying
+
+**`skills/deploy-gate`, every time, all six steps.** A deploy is the only action here a
+customer can be hurt by and the only one an edit cannot undo.
+
+```bash
+node scripts/scan-secrets.mjs                 # tree + history, before ANY push
+cd code && vibesec scan src tools server.js   # 0 issues, or stop
+cd code && npm run test:offline               # 427, or stop
+# tag rollback BEFORE building, then build, recreate, re-run the suite IN the container
+```
+
+**The in-container run is the one that counts** — two tests once passed locally and failed in
+the container because they read the host's environment.
+
+Then the eight live checks in the skill. **Every one of them is a hole that shipped**, not a
+hypothetical: an unauthenticated socket that was accepted and held, and shell access from a
+query string.
+
+**If anything fails: roll back. Never fix forward on production.** Then open a card — a
+hotfix with no card is how the same bug ships twice.
+
+---
+
+## 12 · The two gates
+
+```bash
+node scripts/check.mjs            # before moving any card
+cd code && npm run test:offline   # 427 checks — the deploy gate
+```
+
+**Both are refusals.** `check.mjs` catches the mechanical skips — two cards in build, a card
+past a gate it did not satisfy, a ticked criterion citing nothing, a contract whose stated cost
+has drifted from its real one. **A red suite is the work, not an obstacle to it.**
+
+**What neither can check:** whether the spec is good, whether the review was honest, or whether
+the guard that failed was the right guard. Those stay human, and pretending otherwise is how a
+process becomes theatre.
+
+**Every other command lives in `docs/COMMANDS.md`** — reference material ages faster than a
+contract, and it should not be paid for in every session's context.

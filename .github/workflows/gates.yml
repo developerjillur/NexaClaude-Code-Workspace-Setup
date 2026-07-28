@@ -1,0 +1,110 @@
+# The gates, at merge time.
+#
+# Every check in this workspace was local until this file existed, and a local gate is one a
+# tired person walks around at 1am. This is the same set, run where it cannot be skipped.
+name: gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  board:
+    name: Board gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      # WIP=1, no card in two stages, no card past a gate it did not satisfy,
+      # every skill has frontmatter, CLAUDE.md still imports AGENTS.md.
+      - run: node scripts/check.mjs --strict
+      # The hooks ARE the enforcement. Until 2026-07-28 none of them had a test —
+      # every one was verified by piping JSON in by hand, once, and never in CI.
+      - run: node tests/hooks.test.mjs
+      # Council containment, ranking-parser and aggregation. Every case was an OPEN
+      # hole demonstrated against the running code before it was closed.
+      - run: node tests/council.test.mjs
+
+  # ── The three jobs below need the PRODUCT repo ────────────────────────────────
+  #
+  # `code/` is a local symlink to the product repo and is gitignored, so
+  # a CI checkout of this repo alone does NOT have it. Every one of these jobs used to run
+  # against a path that did not exist — and the hygiene job PASSED because grep over a
+  # missing directory exits 2, which read as "no matches found". A green tick for a check
+  # that never ran is worse than a red one.
+  #
+  # So the product repo is checked out explicitly, and `assert-code` fails loudly if it is
+  # not there. Requires a repo secret CODE_REPO_TOKEN with read access to the private repo.
+
+  tests:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: developerjillur/realtime-codex-calling-agent
+          token: ${{ secrets.CODE_REPO_TOKEN }}
+          path: code
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: assert-code
+        run: test -f code/package.json || { echo "::error::code/ is missing — set the CODE_REPO_TOKEN secret"; exit 1; }
+      - working-directory: code
+        run: npm ci --ignore-scripts || npm install --ignore-scripts
+      # test:offline only — test:live spends subscription tokens and must never run in CI.
+      - working-directory: code
+        run: npm run test:offline
+
+  security:
+    name: vibesec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: developerjillur/realtime-codex-calling-agent
+          token: ${{ secrets.CODE_REPO_TOKEN }}
+          path: code
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: assert-code
+        run: test -d code/src || { echo "::error::code/ is missing — set the CODE_REPO_TOKEN secret"; exit 1; }
+      - run: npm install -g @reliabilityworks/vibesec
+      # Secrets, injection (incl. prompt injection), dangerous functions, weak crypto.
+      # Local static analysis; never executes the code. Baseline 2026-07-27: 0 issues.
+      - run: vibesec scan code/src code/tools code/server.js
+
+  hygiene:
+    name: No unfinished work claiming to be finished
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: developerjillur/realtime-codex-calling-agent
+          token: ${{ secrets.CODE_REPO_TOKEN }}
+          path: code
+      - name: assert-code
+        run: test -d code/src || { echo "::error::code/ is missing — set the CODE_REPO_TOKEN secret"; exit 1; }
+      - name: TODO / FIXME / commented-out code in src
+        run: |
+          if grep -rnE '\b(TODO|FIXME)\b' code/src/ code/tools/ 2>/dev/null; then
+            echo "::error::TODO or FIXME in shipped code — definition-of-done forbids it"
+            exit 1
+          fi
+          # Requires the SYNTAX of code, not just a keyword — a prose comment starting
+          # with "await" or "function" is not commented-out code, and a check with false
+          # positives is one people learn to ignore.
+          if grep -rnE '^[[:space:]]*//[[:space:]]*(const |let |var )[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*=|^[[:space:]]*//[[:space:]]*(if|while|for|switch)[[:space:]]*\(|^[[:space:]]*//[[:space:]]*return[[:space:]].*;[[:space:]]*$|^[[:space:]]*//[[:space:]]*import[[:space:]].*[[:space:]]from[[:space:]]|^[[:space:]]*//[[:space:]]*[A-Za-z_$][A-Za-z0-9_$.]*\(.*\);[[:space:]]*$' code/src/ code/tools/ 2>/dev/null; then
+            echo "::error::commented-out code — delete it, git remembers"
+            exit 1
+          fi
+          echo "clean"
+      # Work that LOOKS finished. "No TODO" passes a stub — a stub has no TODO in it,
+      # it has a signature and a body that returns a constant. Measured 2026-07-28:
+      # 0 findings on 33 real files, 7 on a deliberately faked implementation.
+      - name: depth-check — does it do what it says
+        run: node scripts/depth-check.mjs code/src code/tools code/server.js

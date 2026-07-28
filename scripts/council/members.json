@@ -1,0 +1,102 @@
+{
+  "$comment": [
+    "The council. Every entry was verified by running it on 2026-07-28 — command, flags,",
+    "and a live round-trip. Latencies are for a one-word answer and are a FLOOR, not an",
+    "estimate: a real question is minutes, and Codex has been measured exceeding 10 minutes on",
+    "a plan review. The council is background work. Nothing waits on it in the foreground.",
+    "",
+    "Every member runs READ-ONLY. codex --sandbox read-only, agy --mode plan, grok with no",
+    "tools, claude --print. They advise; they never touch the repo. That is a security",
+    "decision, not a convenience: five agents with write access to a tree holding a live",
+    "OAuth token is the lethal trifecta with extra seats.",
+    "",
+    "They also run from a neutral scratch directory rather than the repo, so a member cannot",
+    "read the project unless the prompt hands it the context deliberately.",
+    "",
+    "No external AI API is used. Every one of these is a CLI on a subscription this machine",
+    "already has — which is what AGENTS.md §1 requires."
+  ],
+  "scratchDir": "~/.nexa-council-scratch",
+  "members": [
+    {
+      "id": "codex",
+      "label": "GPT-5.6 sol (Codex CLI)",
+      "cmd": "codex",
+      "args": [
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "-c",
+        "model_reasoning_effort=\"xhigh\"",
+        "{prompt}"
+      ],
+      "verified": "2026-07-28, 17s floor",
+      "note": "The other vendor already load-bearing in §10. Reasoning effort pinned per skills/pick-the-model. --skip-git-repo-check is required because the scratch dir is deliberately not a repo — it relaxes a git check, NOT the sandbox, which stays read-only."
+    },
+    {
+      "id": "grok",
+      "label": "Grok 4.5",
+      "cmd": "grok",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--output-format",
+        "plain",
+        "--reasoning-effort",
+        "high",
+        "--disable-web-search"
+      ],
+      "verified": "2026-07-28, 14s floor",
+      "note": "Only grok-4.5 is offered on this account. Web search off so the council reasons rather than retrieves."
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini 3.1 Pro (Antigravity)",
+      "cmd": "agy",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--mode",
+        "plan",
+        "--model",
+        "gemini-3.1-pro-high",
+        "--effort",
+        "high"
+      ],
+      "verified": "2026-07-28, 16s floor",
+      "note": "Reached via Antigravity (agy 1.1.7), NOT the gemini CLI — that one now refuses this account outright: 'no longer supported for Gemini Code Assist for individuals'. gemini-3.1-pro-high is the highest 3.1 tier offered; there is no -max."
+    },
+    {
+      "id": "claude-fable",
+      "label": "Fable 5",
+      "cmd": "claude",
+      "args": [
+        "--print",
+        "--model",
+        "fable",
+        "{prompt}"
+      ],
+      "verified": "2026-07-28",
+      "note": "A second Claude voice, deliberately not the chairman's."
+    },
+    {
+      "id": "claude-sonnet",
+      "label": "Sonnet 5",
+      "cmd": "claude",
+      "args": [
+        "--print",
+        "--model",
+        "sonnet",
+        "{prompt}"
+      ],
+      "verified": "2026-07-28",
+      "note": "Included as a COUNCIL member only. skills/pick-the-model rule 0 pins the top tier for work; a council is the one place a different vantage point is the product, and no council member's answer is adopted without the chairman's synthesis."
+    }
+  ],
+  "chairman": {
+    "id": "opus",
+    "label": "Opus 5 (this session)",
+    "note": "The chairman is whoever invoked the council — it reads the transcript and writes the synthesis in-session, so nothing is lost to a subprocess boundary. Pinned to opus by settings.json."
+  }
+}

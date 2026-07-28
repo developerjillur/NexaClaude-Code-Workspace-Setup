@@ -1,0 +1,12 @@
+# Version-controlled exclusions, so every session gets the same noise reduction.
+# Anthropic's large-codebase guidance: commit these rather than leaving each developer
+# to discover the noise separately.
+node_modules/
+graphify-out/
+data/
+*.db
+*.db-wal
+*.db-shm
+._*
+.DS_Store
+board/6-done/

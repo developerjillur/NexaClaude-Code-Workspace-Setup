@@ -1,0 +1,35 @@
+{
+  "$comment": [
+    "The only file you must edit to adopt this workspace. Everything else reads from here.",
+    "",
+    "codeDirs \u2014 the paths that hold PRODUCT CODE, relative to this file. Edits inside them",
+    "require a card in board/3-build; edits everywhere else (docs, the workspace itself, the",
+    "plan) do not. Get this wrong in the permissive direction and the gate is decoration; get",
+    "it wrong in the strict direction and it fires on your own README and gets switched off",
+    "within a day.",
+    "",
+    "Two ways to point at your code, and both work:",
+    "  1. keep your code in ./code \u2014 a real directory, or a symlink to a sibling repo",
+    "  2. list the directories directly, e.g. [\"src\", \"lib\", \"server.js\"]",
+    "",
+    "depthCheckPaths \u2014 what `depth-check` scans for stub-shaped code at 4-review and later.",
+    "Leave empty to scan everything under codeDirs.",
+    "",
+    "Nothing here is validated at startup on purpose: a config that refuses to load takes the",
+    "guards down with it, and a guard that is off is worse than one that is loose, because",
+    "everyone still believes in it."
+  ],
+  "codeDirs": [
+    "code"
+  ],
+  "depthCheckPaths": [],
+  "planDir": "plan",
+  "requireCardForCodeEdits": true,
+  "council": {
+    "briefFiles": [
+      ".council/BRIEF.md",
+      "AGENTS.md",
+      "CLAUDE.md"
+    ]
+  }
+}

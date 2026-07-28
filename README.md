@@ -1,0 +1,259 @@
+# NexaClaude Code Workspace
+
+**A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
+Kanban pipeline with WIP=1, thirteen skills, three subagents, seven commands, and a five-model
+council that reviews your decisions across four vendors.**
+
+Clone it, point it at your code, and the process runs itself. No special commands to memorise —
+**Claude Code loads what it needs, when the situation matches.**
+
+```bash
+git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git
+cd NexaClaude-Code-Workspace-Setup
+node scripts/check.mjs        # 19 checks; should say "All checks pass"
+```
+
+---
+
+## Why this exists
+
+Vibe coding fails in a small number of ways, over and over, and **they are all failures of
+memory or of nerve**:
+
+| What goes wrong | What this does about it |
+|---|---|
+| Code drifts from the plan | **an edit to product code is refused** unless a card is in `board/3-build` |
+| Two things half-built at once | **WIP = 1**, enforced by the same hook |
+| The agent forgets what it was doing | `SessionStart` rebuilds the state; `PreCompact` preserves the card before the window is squeezed |
+| The same logic written three times | `reuse-first` runs *before* new code, not after |
+| *"Done"* that is a stub | `depth-check` finds six stub shapes; `verify-claims` checks every citation resolves |
+| A green suite that never caught anything | `mutation-test` deletes an invariant and asks whether the suite notices |
+| Confident numbers nobody measured | `measure-dont-claim`, and a decisions log that demands a falsifier |
+| Reviews by the model that wrote the code | **the review path is pinned to a different vendor** |
+| Secrets pasted into a prompt | scrubbed on the way into the log; scanned in the tree **and the full git history** before deploy |
+
+**None of it is advice.** Every item is a script that exits non-zero, or a hook that returns
+exit code 2 and stops the turn.
+
+---
+
+## The honest part
+
+This workspace was extracted from a real project, and the most useful thing it learned is
+about itself:
+
+> **Seven controls were built. Every one was wrong on its first version, and every one was
+> wrong in the same direction — it failed *open*.** It passed when it should have refused, and
+> a passing check looks exactly like a correct one.
+>
+> Not one was found by the case it was built to catch. **Every one was found by testing the
+> case it was supposed to stay silent on.**
+
+The sharpest instance: a guard against `git reset --hard` was written as
+`reset\s+(?:-[^\s]+\s+)*--hard`. The optional flag group swallowed `--hard` itself, so the
+literal never matched — and **the exact command it was written to stop walked straight
+through**.
+
+That is why `tests/` exists and why every guard here ships with the case it must *ignore*
+beside the case it must catch. **140 assertions, and the blocking paths were watched blocking.**
+
+```bash
+node tests/hooks.test.mjs      # 85 passed
+node tests/council.test.mjs    # 55 passed
+```
+
+---
+
+## Install
+
+### Option A — your code lives inside the workspace
+
+```bash
+git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git my-project
+cd my-project && rm -rf .git code/README.md && git init
+# put your code in code/, or edit workspace.config.json to name your real dirs
+```
+
+### Option B — your code is its own repo (how the original ran)
+
+```bash
+git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git
+ln -s ../my-app NexaClaude-Code-Workspace-Setup/code       # one tree for the agent
+cd my-app
+ln -s ../NexaClaude-Code-Workspace-Setup/AGENTS.md AGENTS.md
+ln -s ../NexaClaude-Code-Workspace-Setup/CLAUDE.md CLAUDE.md
+cp -r ../NexaClaude-Code-Workspace-Setup/code/.claude .     # then fix ../WORKSPACE inside it
+```
+
+**Link, never copy.** Two copies of a contract drift, and the drift is silent — the original
+project shipped a duplicated pricing table that showed a customer **$6.05 for a call the
+database recorded at $1.92**.
+
+### Then — the one file you must edit
+
+`workspace.config.json`:
+
+```json
+{ "codeDirs": ["code"] }        // or ["src", "lib"], or wherever your code actually is
+```
+
+**This is the only required edit.** It decides which paths need a card. Get it too wide and the
+gate fires on your own README and you switch it off within a day; too narrow and it is
+decoration. A malformed config falls back to `code/` only — deliberately, so a broken config
+makes the gate *quieter* rather than turning your whole repo into guarded territory.
+
+Then rewrite `AGENTS.md` §1 and §2. They ship as templates with the questions written out.
+
+---
+
+## How it works without you asking
+
+**Nothing here needs a magic phrase.** Three mechanisms, all automatic:
+
+**1 · Hooks fire on events.** Wired in `.claude/settings.json` — **seven scripts across six
+events** (`UserPromptSubmit` runs two):
+
+| Event | Script | What it does |
+|---|---|---|
+| `SessionStart` | `session-start.mjs` | prints the board, the card in build, and what changed since last time |
+| `UserPromptSubmit` | `save-prompt.mjs` | archives every prompt you type, **with secrets scrubbed** |
+| `UserPromptSubmit` | `prompt-check.mjs` | one quiet line when the working state has drifted — silent when it has not |
+| `PreToolUse` | `guard-edit.mjs` | **the one that refuses.** No card in build → the edit is blocked |
+| `PostToolUse` | `after-edit.mjs` | notices what an edit implies you now owe |
+| `Stop` | `session-end.mjs` | the turn cannot end quietly with a gate unrun |
+| `PreCompact` | `pre-compact.mjs` | preserves the card, the files touched and the measurements **before** the window is squeezed |
+
+**2 · Skills load themselves.** Each `SKILL.md` carries a `description:` that says *when* it
+applies, and Claude Code matches on it. You do not invoke `reuse-first` — it arrives because
+you were about to write a new file.
+
+**3 · Gates refuse.** `scripts/check.mjs` is the deploy gate — **19 checks** — and CI runs it. A failure is a
+refusal, not a note.
+
+---
+
+## What is in the box
+
+### 13 skills — `.agents/skills/`
+
+| Skill | When it fires |
+|---|---|
+| `session-start` | first thing, every session — rebuilds what a new session cannot know |
+| `skill-finder` | before any new *kind* of work: find the skill that already covers it |
+| `spec-first` | a card enters `1-spec`, or an agent starts coding without one |
+| `reuse-first` | **before** writing any new code, file or dependency |
+| `context-budget` | at `2-plan` — does this card fit one window, and where does it split |
+| `pick-the-model` | which agent or model does this piece of work |
+| `measure-dont-claim` | you are about to state a number, a rate, or *"this is faster"* |
+| `review-gate` | scoring a change on five axes, **by a different model than wrote it** |
+| `security-gate` | before any card leaves `4-review`; cannot be traded against the score |
+| `definition-of-done` | at `5-verify` — including *"has anyone watched the guard fail?"* |
+| `deploy-gate` | before every deployment, without exception |
+| `council` | a decision that is expensive to reverse |
+| `reflect` | the records have gone stale; read them back and consolidate |
+
+### 7 commands — `.claude/commands/`
+
+`/card` · `/council` · `/review` · `/verify` · `/measure` · `/plan-review` · `/deploy`
+
+### 3 subagents — `.claude/agents/`
+
+`explorer` (maps a subsystem read-only, writes findings to a file so your main context stays
+clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
+before any code exists)
+
+### 9 scripts — `scripts/`
+
+| Script | What it answers |
+|---|---|
+| `check.mjs` | the gate — 19 checks, and CI runs it |
+| `depth-check.mjs` | is this real code, or six shapes of stub |
+| `verify-claims.mjs` | does every citation in the card actually resolve |
+| `mutation-test.mjs` | delete an invariant — does the suite notice? |
+| `scan-secrets.mjs` | tree **and full git history**, with a named allowlist |
+| `reflect.mjs` | what has happened since the last consolidation |
+| `council/*.mjs` | the council, below |
+
+### The council — five models, four vendors, three stages
+
+```bash
+node scripts/council/council.mjs "<question>" --context src/a.js src/b.js
+node scripts/council/council.mjs "x" --preflight     # who is reachable; free
+```
+
+Every member answers **alone**, then ranks the others **without knowing whose answer is
+whose**, then you synthesise. Runs on local CLIs — **no API keys**.
+
+- **Borda count with self-votes excluded**, because 3 of 4 judges ranked their own unlabelled
+  answer first — 75% against a 20% chance rate. **Anonymisation does not prevent
+  self-enhancement; a model recognises its own writing.**
+- **Bias diagnostics printed above the score** — self-enhancement, verbosity correlation,
+  family mix. Read them before the number.
+- **Nothing is ever retried and it never hangs.** A missing CLI is named before anything
+  starts; a quota message is refused rather than ranked as an opinion; a hung member is killed
+  by process group. With no members at all it exits in ~30 ms having spent nothing.
+- **Secrets are refused by shape**, and context is fenced as data with the instruction placed
+  after it, so a file cannot smuggle an instruction.
+
+Also published standalone: [`all-cli-council`](https://github.com/developerjillur/all-cli-council).
+
+### The board — `board/`
+
+`0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done`
+
+**WIP = 1 at `3-build`, enforced.** `templates/CARD.md` is the shape; each stage has a gate
+that must be answered, not ticked.
+
+### Plugins — declared, not assumed
+
+Declared in `.claude/settings.json` so a fresh machine **fails loudly** instead of silently
+losing the review path:
+
+`codex@openai-codex` — **load-bearing**: `/codex:review` and a Stop gate that can block a turn ·
+`ponytail@ponytail` · `code-review` · `feature-dev` · `github` · `code-simplifier` ·
+`security-guidance` · `typescript-lsp`
+
+**Add your own stack's plugins.** The original carried two more for its telephony and hosting;
+they were removed here because they are not yours.
+
+---
+
+## Two rules worth arguing about
+
+**The model tier is pinned, and it is not a choice.** `"model": "opus"` and
+`MAX_THINKING_TOKENS: 31999` in both settings files, checked for drift. A cheaper model on the
+review path does not produce a cheaper review — it produces a formality.
+
+**A second model, always.** The review of a change is run by a different vendor than wrote it.
+Self-review finds typos and misses intent, which is the one thing review is for.
+
+---
+
+## Requirements
+
+- **Node ≥ 20** — no dependencies; every script is plain Node
+- **Claude Code**
+- Optional but recommended: the CLIs the council calls (`codex`, and any others you list in
+  `scripts/council/members.json`). `--preflight` tells you which are reachable and costs
+  nothing.
+
+---
+
+## Credits
+
+Built by **[Jillur Rahman](https://github.com/developerjillur)** (NexaLance), with Claude Code.
+
+The design owes specific debts, and they are worth naming because each one changed something
+concrete:
+
+- **[Anthropic's large-codebase guidance](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start)** — layered, directory-scoped `CLAUDE.md` instead of one file that rides every session
+- **[AGENTS.md](https://agents.md)** — the cross-tool contract format, read natively by Codex CLI, Cursor, Copilot, Aider, Zed, Windsurf and 28+ others
+- **[karpathy/llm-council](https://github.com/karpathy/llm-council)** — the three-stage council, adapted to local CLIs and given bias measurement
+- **[worldflowai/everything-claude-code](https://github.com/worldflowai/everything-claude-code)** — whose sharpest contribution was not a skill: it was **having a `tests/` directory for its hooks at all**
+- **[DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail)** · **[Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify)** — the laziness ladder, and querying a code graph instead of grepping
+- **Mixture-of-Agents ([arXiv:2406.04692](https://arxiv.org/abs/2406.04692))** — the optional revision round
+
+## Licence
+
+**MIT.** Use it, fork it, sell what you build with it. If it saves you an afternoon, a star is
+plenty.
