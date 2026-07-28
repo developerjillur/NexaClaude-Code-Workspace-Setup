@@ -69,7 +69,9 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **148 assertions, and the blocking paths were watched blocking.**
+beside the case it must catch. **~150 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and
+skips elsewhere, so the exact count moves by one — a number that drifts is worth saying so about
+rather than rounding into a claim.)
 
 ```bash
 node tests/hooks.test.mjs      # 93 passed
