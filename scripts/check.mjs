@@ -189,7 +189,9 @@ const agentsMd = fs.existsSync(path.join(ROOT, 'AGENTS.md'))
   ? fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8') : '';
 const verifiedAt = agentsMd.match(/verified-at:\s*([0-9a-f]{7,40})/)?.[1];
 if (!verifiedAt) {
-  soft('AGENTS.md has no `verified-at` in its contract-meta header',
+  soft(/verified-at:\s*INITIAL/.test(agentsMd)
+    ? 'AGENTS.md verified-at is still INITIAL — set it to a real commit once you have read the contract'
+    : 'AGENTS.md has no `verified-at` in its contract-meta header',
     'nothing can tell whether the contract still describes the code');
 } else {
   let behind = 0;

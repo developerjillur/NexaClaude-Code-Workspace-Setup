@@ -2,7 +2,7 @@
 
 <!-- contract-meta
 last-verified: <date you last read this end to end>
-verified-at: 641ce49
+verified-at: INITIAL
 cost: ~5188 tokens, loaded every session — `node scripts/check.mjs` recomputes and refuses on drift
 scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
 -->

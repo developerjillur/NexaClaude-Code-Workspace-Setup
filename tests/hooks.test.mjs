@@ -288,7 +288,7 @@ console.log('\n▸ reflect --check — staleness, and the case that silently rea
   // test that goes red because unrelated work happened teaches people to ignore red.
   if (original !== null) {
     const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    fs.writeFileSync(learned, original.replace(/reflected-at: [0-9a-f]+/, `reflected-at: ${head}`));
+    fs.writeFileSync(learned, original.replace(/reflected-at: (?:[0-9a-f]+|INITIAL)/i, `reflected-at: ${head}`));
     check('passes when the marker is current', runCheck() === 0);
     fs.writeFileSync(learned, original);
   } else check('LEARNED.md exists', false);

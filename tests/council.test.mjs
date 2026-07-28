@@ -60,8 +60,18 @@ console.log('\n▸ Context containment — a denylist cannot be completed, so co
 
   // The allow path — a guard that never allows is an outage.
   check('allows an ordinary workspace file', buildContext(['AGENTS.md'], ROOT).files.length === 1);
-  check('follows the code/ symlink, which is legitimate',
-    buildContext(['code/README.md'], ROOT).files.length === 1);
+  // Builds its own symlink rather than relying on `code/` existing: that path is optional
+  // scaffolding, and a test that depends on optional scaffolding fails on a fresh clone —
+  // which is exactly how it was caught.
+  {
+    const target = path.join(ROOT, 'README.md');
+    const link = path.join(ROOT, `.symlink-probe-${process.pid}`);
+    try {
+      fs.symlinkSync(target, link);
+      check('follows a symlink into the tree, which is legitimate',
+        buildContext([path.basename(link)], ROOT).files.length === 1);
+    } finally { try { fs.unlinkSync(link); } catch {} }
+  }
 }
 
 // ── secret shapes in content ─────────────────────────────────────────────────

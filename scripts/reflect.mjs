@@ -36,6 +36,9 @@ const git = (cmd, fallback = '') => {
 
 const learned = fs.existsSync(LEARNED) ? fs.readFileSync(LEARNED, 'utf8') : '';
 const marker = learned.match(/<!--\s*reflected-at:\s*([0-9a-f]{7,40})/i);
+// A fresh clone ships `INITIAL`: nothing has been reflected on yet, which is a true and
+// uninteresting state rather than a broken one. Treat it as "no history to compare".
+const uninitialised = /<!--\s*reflected-at:\s*INITIAL\s*-->/i.test(learned);
 const since = marker?.[1] ?? '';
 const head = git('rev-parse --short HEAD', '');
 
@@ -45,7 +48,7 @@ const head = git('rev-parse --short HEAD', '');
 // helper returns its fallback, the list comes back empty and the reflection reads as CURRENT.
 // Failing open silently is the exact shape LEARNED.md's first pattern is about, so it is
 // checked separately rather than folded into the count.
-const resolves = since ? git(`cat-file -e ${since}^{commit} && echo ok`, '') === 'ok' : true;
+const resolves = uninitialised ? true : (since ? git(`cat-file -e ${since}^{commit} && echo ok`, '') === 'ok' : true);
 const range = since && resolves ? `${since}..HEAD` : '';
 const commits = resolves ? git(`log --oneline ${range}`, '').split('\n').filter(Boolean) : [];
 
@@ -55,7 +58,7 @@ if (CHECK_ONLY) {
     process.exit(1);
   }
   if (!since) {
-    console.error('docs/LEARNED.md has no `reflected-at` marker — staleness cannot be judged');
+    console.error('docs/LEARNED.md has no `reflected-at` marker — run `node scripts/reflect.mjs --init` once after your first commit');
     process.exit(1);
   }
   if (!resolves) {
