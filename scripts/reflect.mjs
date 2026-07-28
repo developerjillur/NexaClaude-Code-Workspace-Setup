@@ -57,6 +57,11 @@ if (CHECK_ONLY) {
     console.error('docs/LEARNED.md does not exist — nothing has been reflected on yet');
     process.exit(1);
   }
+  // A fresh clone is the most ordinary state there is, and this checker's whole design is that
+  // silence in the ordinary case IS the feature. Nagging a workspace nobody has committed to
+  // yet trains people to ignore the one line it prints, which is the only asset it has. The
+  // README explains `--init`; this is not the place to teach it.
+  if (uninitialised) process.exit(0);
   if (!since) {
     console.error('docs/LEARNED.md has no `reflected-at` marker — run `node scripts/reflect.mjs --init` once after your first commit');
     process.exit(1);
