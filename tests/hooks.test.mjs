@@ -600,6 +600,16 @@ console.log(`\n${'─'.repeat(72)}`);
       fire(`node x.mjs && cd "${ROOT}" && echo x ${gt} code/src/a.js`) === 2);
     check('no cd at all still refuses', fire(`echo x ${gt} code/src/a.js`) === 2);
 
+  // A RELATIVE cd moves the base too. Counting only absolute ones was the sixth false positive
+  // of this family: a file written inside a throwaway clone was judged against the product repo.
+  {
+    const nest = path.join(away, 'w');
+    fs.mkdirSync(nest, { recursive: true });
+    check('a relative cd moves the base too',
+      fire(`cd "${away}" && cd w && printf x ${gt} notes.md`) === 0);
+  }
+
+
   // `.` and `..` are never redirect targets, and fs.existsSync says yes to both — so a
   // sentence containing "> ." resolved to the cwd, and with that cwd inside a guarded tree
   // the guard refused a command that wrote nothing at all. Fifth false positive of this

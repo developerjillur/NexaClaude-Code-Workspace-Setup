@@ -240,7 +240,12 @@ if (input?.tool_name === 'Bash') {
   let base = input?.cwd || process.cwd();
   for (const m of cmd.matchAll(/(?:^|[\s;&|])cd\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
     const to = m[2] ?? m[3] ?? m[4];
-    if (to && path.isAbsolute(to)) base = to;
+    if (!to || to === '-') continue;                 // `cd -` goes somewhere unknowable
+    // A RELATIVE cd moves the base too, and only counting absolute ones was the sixth false
+    // positive of this family: `cd "$TMP" && cd w && printf x > board/1-spec/9.md` kept the
+    // session's cwd as the base, so a file written inside a throwaway clone was judged against
+    // the product repo and refused.
+    base = path.resolve(base, to.replace(/^~(?=\/|$)/, process.env.HOME ?? '~'));
   }
 
   const targets = new Set();
