@@ -42,7 +42,7 @@ exit code 2 and stops the turn.
 This workspace was extracted from a real project, and the most useful thing it learned is
 about itself:
 
-> **Seven controls were built. Every one was wrong on its first version, and every one was
+> **Nine controls were built. Every one was wrong on its first version, and every one was
 > wrong in the same direction — it failed *open*.** It passed when it should have refused, and
 > a passing check looks exactly like a correct one.
 >
@@ -57,8 +57,16 @@ Two instances, and the second happened while publishing this repo:
 - **The first push of this repo shipped without `board/` at all**, because git does not track
   empty directories. `guard-edit` looked for cards in a directory that did not exist, found
   nothing to object to, and **passed silently** — the one blocking hook, off by default, in the
-  exact state a new user would first meet it. Found by cloning into a clean directory and
-  firing the guard, not by reading the code.
+  exact state a new user would first meet it.
+- Then the same guard failed open again on macOS, where `/var` is a link to `/private/var`: a
+  shell hands over `/var/...` while the workspace root resolves to `/private/var/...`, so the
+  file read as outside the tree. **The first fix for that read as applied and was not** — its
+  path helper walked up only one level, and the guard is normally asked about a file inside a
+  directory that does not exist yet either.
+
+All three were found the same way: **cloning into a clean directory and firing the guard by
+hand.** The in-repo tests stayed green through every one of them, because on the machine that
+built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
 beside the case it must catch. **148 assertions, and the blocking paths were watched blocking.**
