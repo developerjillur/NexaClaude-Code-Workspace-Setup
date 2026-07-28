@@ -259,7 +259,7 @@ console.log('\n\u25b8 prompt-check \u2014 silence in the normal case IS the feat
   // WATCHED SPEAKING: a stale reflection, which refuses the next commit anyway.
   const learned = path.join(ROOT, 'docs', 'LEARNED.md');
   const orig = fs.readFileSync(learned, 'utf8');
-  fs.writeFileSync(learned, orig.replace(/reflected-at: [0-9a-f]+/, 'reflected-at: 0000000'));
+  fs.writeFileSync(learned, orig.replace(/reflected-at: (?:[0-9a-f]+|INITIAL)/i, 'reflected-at: 0000000'));
   check('speaks when the reflection is stale', /reflection is stale/i.test(run(pc, {}).stdout));
   fs.writeFileSync(learned, orig);
 
@@ -296,7 +296,7 @@ console.log('\n▸ reflect --check — staleness, and the case that silently rea
   // WATCHED FAILING — this returned 0 until 2026-07-28: `git log <bad>..HEAD` failed, the
   // empty result looked like "no new commits", and a broken marker read as up to date.
   if (original !== null) {
-    fs.writeFileSync(learned, original.replace(/reflected-at: [0-9a-f]+/, 'reflected-at: 0000000'));
+    fs.writeFileSync(learned, original.replace(/reflected-at: (?:[0-9a-f]+|INITIAL)/i, 'reflected-at: 0000000'));
     check('refuses an unresolvable reflected-at marker', runCheck() === 1);
 
     fs.writeFileSync(learned, original.replace(/<!--\s*reflected-at:[^>]*-->/, ''));
