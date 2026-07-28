@@ -387,6 +387,16 @@ console.log(`\n${'─'.repeat(72)}`);
   if (!stray.length) {
     check('with an empty 3-build, an edit to product code is REFUSED',
       run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(ROOT, 'code', 'x.js') } }).code === 2);
+
+    // The same file, named through an UNRESOLVED symlink. On macOS /var is a link to
+    // /private/var, so a shell hands over `/var/...` while ROOT is `/private/var/...`;
+    // path.relative between them yielded `../../..`, the file read as outside the workspace,
+    // and the guard passed silently. Found by cloning to a temp dir and firing it by hand.
+    const unresolved = ROOT.startsWith('/private/') ? ROOT.slice('/private'.length) : null;
+    if (unresolved && fs.existsSync(unresolved)) {
+      check('...and still refused when the path arrives unresolved (/var vs /private/var)',
+        run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(unresolved, 'code', 'x.js') } }).code === 2);
+    }
   }
 }
 

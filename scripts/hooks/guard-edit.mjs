@@ -33,6 +33,17 @@ function codeDirs() {
   } catch { return ['code']; }
 }
 const CODE = codeDirs();
+// macOS resolves /var to /private/var, and a path can arrive in either form: the shell hands
+// over `/var/...` while ROOT is computed as `/private/var/...`. `path.relative` between the two
+// then yields `../../..`, the file reads as outside the workspace, and **the guard passes
+// silently** — the same fail-open shape as every other control here, found by running a fresh
+// clone from a temp directory rather than by reading the code.
+//
+// So both the real and the given form of every path are compared, on both sides.
+const realish = (p) => { try { return fs.realpathSync(p); } catch { 
+  try { return path.join(fs.realpathSync(path.dirname(p)), path.basename(p)); } catch { return p; } } };
+const ROOTS = [...new Set([ROOT, realish(ROOT)])];
+
 /**
  * True when `p` names something inside a configured product-code path.
  *
@@ -46,10 +57,20 @@ const CODE = codeDirs();
 const isCode = (p) => {
   const norm = String(p).replace(/\\/g, '/');
   const rels = new Set();
-  if (path.isAbsolute(norm)) rels.add(path.relative(ROOT, norm).replace(/\\/g, '/'));
-  else { rels.add(norm.replace(/^\.\//, '')); rels.add(path.relative(ROOT, path.resolve(process.cwd(), norm)).replace(/\\/g, '/')); }
+  const add = (abs) => {
+    for (const base of ROOTS) {
+      const r = path.relative(base, abs).replace(/\\/g, '/');
+      if (r && !r.startsWith('..')) rels.add(r);
+    }
+  };
+  if (path.isAbsolute(norm)) { add(norm); add(realish(norm)); }
+  else {
+    rels.add(norm.replace(/^\.\//, ''));
+    add(path.resolve(process.cwd(), norm));
+    add(realish(path.resolve(process.cwd(), norm)));
+  }
   return [...rels].some((rel) =>
-    !rel.startsWith('..') && CODE.some((d) => {
+    CODE.some((d) => {
       const clean = d.replace(/^\.\//, '').replace(/\/$/, '');
       return rel === clean || rel.startsWith(`${clean}/`);
     }));
