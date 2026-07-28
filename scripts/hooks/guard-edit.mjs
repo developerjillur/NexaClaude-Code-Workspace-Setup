@@ -217,8 +217,13 @@ if (input?.tool_name === 'Bash') {
   // **A guard that fires on commands nobody is worried about is the one that gets switched
   // off**, so the uncertain case is allowed here and left to review.
   const unexpanded = (t) => /[$`*?{}()[\]]/.test(t);
+  // `.` and `..` are never a redirect target, and `fs.existsSync` says yes to both — so a
+  // sentence containing `> .` resolved to the cwd, and when the cwd was inside a guarded tree
+  // the guard refused a command that wrote nothing. Fifth false positive of this family, and
+  // the first where the existence check itself was the hole.
+  const selfish = (t) => t === '.' || t === '..' || t === './' || t === '../';
   const looksLikePath = (t) =>
-    !unexpanded(t) &&
+    !unexpanded(t) && !selfish(t) &&
     (path.isAbsolute(t) || t.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(t) || fs.existsSync(t));
 
   // A command that begins by changing directory means its relative paths are relative to

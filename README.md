@@ -180,7 +180,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 37 scripts — `scripts/`
+### 22 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -191,12 +191,12 @@ before any code exists)
 | `mutation-test.mjs` | delete an invariant — does the suite notice? |
 | `scan-secrets.mjs` | tree **and full git history**, with a named allowlist |
 | `reflect.mjs` | what has happened since the last consolidation |
-| `council/*.mjs` | 30 files — the council, below |
+| `council/*.mjs` | 15 files — the council, below |
 
 ### The council — four vendors, three stages, no API keys
 
 Synced from [`all-cli-council`](https://github.com/developerjillur/all-cli-council), which is
-the same code published standalone. **30 scripts, 510 assertions.**
+the same code published standalone. **15 scripts, 510 assertions.**
 
 ```bash
 node scripts/council/council.mjs "<question>" --context src/a.js src/b.js

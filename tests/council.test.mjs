@@ -532,7 +532,7 @@ console.log('\n▸ Rendering — the same reducer drives the terminal and an ext
   // So: NO control byte other than tab and newline, in any source file, ever.
   {
     const offenders = fs.readdirSync(path.join(ROOT, 'scripts'))
-      .filter((f) => f.endsWith('.mjs'))
+      .filter((f) => f.endsWith('.mjs') && !f.startsWith('._'))
       .map((f) => {
         const body = fs.readFileSync(path.join(ROOT, 'scripts', f), 'utf8');
         const i = [...body].findIndex((ch) => {

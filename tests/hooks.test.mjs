@@ -599,6 +599,14 @@ console.log(`\n${'─'.repeat(72)}`);
     check('a cd INTO the guarded tree still refuses',
       fire(`node x.mjs && cd "${ROOT}" && echo x ${gt} code/src/a.js`) === 2);
     check('no cd at all still refuses', fire(`echo x ${gt} code/src/a.js`) === 2);
+
+  // `.` and `..` are never redirect targets, and fs.existsSync says yes to both — so a
+  // sentence containing "> ." resolved to the cwd, and with that cwd inside a guarded tree
+  // the guard refused a command that wrote nothing at all. Fifth false positive of this
+  // family, and the first where the EXISTENCE CHECK was the hole.
+  check('prose containing a caret and a dot is not a write', fire('node -e "ends with >. So"') === 0);
+  check('nor is a caret and two dots', fire('echo "docs > .. more"') === 0);
+
   } finally { fs.rmSync(away, { recursive: true, force: true }); }
 }
 

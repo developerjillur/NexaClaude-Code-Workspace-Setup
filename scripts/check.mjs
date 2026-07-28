@@ -528,6 +528,40 @@ try {
   } else ok(`every card carries what its stage requires (${out.cards ?? 0} checked)`);
 }
 
+
+// ── the README's counts are claims, and claims get checked ───────────────────
+//
+// Published wrong twice: "21 scripts" against 18, and "37 scripts" against 22. Both had the
+// same cause — `.endsWith('.mjs')` also matches `._council.mjs`, the AppleDouble sidecar macOS
+// writes beside every file on an exFAT volume. A number nobody counted is a number that drifts.
+{
+  const readme = path.join(ROOT, 'README.md');
+  if (fs.existsSync(readme)) {
+    const text = fs.readFileSync(readme, 'utf8');
+    const real = (d) => {
+      const p = path.join(ROOT, d);
+      return fs.existsSync(p) ? fs.readdirSync(p).filter((f) => f.endsWith('.mjs') && !f.startsWith('._')).length : 0;
+    };
+    const counts = [
+      ['scripts', real('scripts') + real('scripts/council'), /### (\d+) scripts —/],
+      ['council scripts', real('scripts/council'), /\| `council\/\*\.mjs` \| (\d+) files/],
+      ['skills', fs.existsSync(path.join(ROOT, '.agents/skills'))
+        ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0,
+        /### (\d+) skills —/],
+      ['board stages', fs.existsSync(path.join(ROOT, 'board'))
+        ? fs.readdirSync(path.join(ROOT, 'board')).filter((d) => !d.startsWith('._')).length : 0, null],
+    ];
+    let drift = 0;
+    for (const [label, actual, re] of counts) {
+      if (!re) continue;
+      const m = text.match(re);
+      if (!m) { soft(`README does not state its ${label} count`, 'a number nobody states is a number nobody checks'); continue; }
+      if (Number(m[1]) !== actual) { bad(`README says ${m[1]} ${label}; there are ${actual}`, 'a number in a README is a claim'); drift++; }
+    }
+    if (!drift) ok('the README\'s counts match the filesystem');
+  }
+}
+
 console.log('\n───────────────────────────────────────────────────────────');
 if (fail) {
   console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);

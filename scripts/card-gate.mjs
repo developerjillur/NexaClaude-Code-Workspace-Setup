@@ -146,7 +146,10 @@ else if (fs.existsSync(BOARD)) {
 //               because a control nobody has watched fire is not a control.
 //   learning  — built to find something out. The finding IS the deliverable, so it is measured
 //               on "we now know", not on use. 1–4 waived, 5 owed.
-const KIND = /(?:^|\n)\s*(?:\*\*|__)?\s*kind\s*(?:\*\*|__)?\s*[:|]\s*(bug|control|learning|feature)\b/i;
+// `\s*` does not cross a `>`, and a card's metadata is conventionally in a blockquote — so the
+// first version could not see the declaration it had just told people to write there. The
+// exemption existed and was unreachable, which is worse than not having one.
+const KIND = /(?:^|\n)[>\s]*(?:\*\*|__)?\s*kind\s*(?:\*\*|__)?\s*[:|]\s*(?:\*\*|__)?\s*(bug|control|learning|feature)\b/i;
 const WAIVED_BY = { bug: ['who asked', 'what they do today', 'what breaks without it', 'the number that moves', 'what would make us stop'],
                     control: ['who asked', 'what they do today', 'what breaks without it', 'the number that moves'],
                     learning: ['who asked', 'what they do today', 'what breaks without it'] };
