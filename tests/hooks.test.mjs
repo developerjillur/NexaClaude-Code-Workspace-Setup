@@ -400,6 +400,46 @@ console.log(`\n${'─'.repeat(72)}`);
   }
 }
 
+
+// ── codeDirs, the three shapes a real project actually uses ──────────────────
+//
+// Each of these broke a different version of isCode, and every break was silent:
+//   inside      matched the string `code/` anywhere, so other repositories needed a card here
+//   outside     anchored with path.relative, so `../my-app` produced `..` and was DISCARDED —
+//               the product tree unguarded whenever addressed by its real path
+//   absolute    the same, via a fully-qualified sibling
+{
+  console.log('\n▸ codeDirs works for code inside, beside, and elsewhere');
+  const guard = path.join(HOOKS, 'guard-edit.mjs');
+  const cfgPath = path.join(ROOT, 'workspace.config.json');
+  const saved = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, 'utf8') : null;
+  const sibling = fs.mkdtempSync(path.join(os.tmpdir(), 'sibling-'));
+  const stranger = fs.mkdtempSync(path.join(os.tmpdir(), 'stranger-'));
+  fs.mkdirSync(path.join(stranger, 'code'), { recursive: true });
+  const setDirs = (dirs) => fs.writeFileSync(cfgPath,
+    JSON.stringify({ ...(saved ? JSON.parse(saved) : {}), codeDirs: dirs }, null, 2));
+  const fire = (f) => run(guard, { tool_name: 'Write', tool_input: { file_path: f } }).code;
+  try {
+    setDirs(['code']);
+    check('inside: our code needs a card', fire(path.join(ROOT, 'code', 'x.js')) === 2);
+    check('inside: a doc does not', fire(path.join(ROOT, 'README.md')) === 0);
+    check("inside: another repo's code/ is not ours",
+      fire(path.join(stranger, 'code', 'x.js')) === 0);
+
+    setDirs([sibling]);
+    check('absolute: a configured sibling repo needs a card',
+      fire(path.join(sibling, 'src', 'api.js')) === 2);
+    check('absolute: an unconfigured stranger still does not',
+      fire(path.join(stranger, 'code', 'x.js')) === 0);
+    check('absolute: code/ is no longer guarded once it is not configured',
+      fire(path.join(ROOT, 'code', 'x.js')) === 0);
+  } finally {
+    if (saved !== null) fs.writeFileSync(cfgPath, saved);
+    fs.rmSync(sibling, { recursive: true, force: true });
+    fs.rmSync(stranger, { recursive: true, force: true });
+  }
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

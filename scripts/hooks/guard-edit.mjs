@@ -62,33 +62,34 @@ const ROOTS = [...new Set([ROOT, realish(ROOT)])];
 /**
  * True when `p` names something inside a configured product-code path.
  *
- * **Anchored at the workspace root, not matched anywhere in the string.** The first version
- * tested `(^|/)src(/|$)`, so with `codeDirs: ["src"]` a file at `code/src/thing.js` also
- * matched — a path the config had not named. A gate that fires on paths nobody configured is
- * the shape that gets switched off, so `src` here means `<root>/src` and nothing else.
+ * **Compared as absolute paths, both sides resolved.** Three earlier versions each got this
+ * wrong in a different way, and all three failed in the direction that matters:
  *
- * Shell arguments arrive relative to the cwd rather than absolute, so both forms are tried.
+ *   1. `(^|/)code/` matched the string anywhere, so a file in somebody else's repository
+ *      demanded a card here — the false-positive direction, which is how a guard gets
+ *      switched off.
+ *   2. Anchoring with `path.relative` fixed that and broke the opposite case: a codeDir
+ *      OUTSIDE the workspace (`../my-app`, the normal setup when the code is its own repo)
+ *      produced a relative path starting with `..` and was discarded, so **the product tree
+ *      was unguarded whenever it was addressed by its real path.**
+ *   3. Resolving symlinks one level up was not enough, because the guard is usually asked
+ *      about a file that does not exist yet, inside a directory that does not exist yet.
+ *
+ * So: resolve every configured directory to an absolute, real path once; resolve the incoming
+ * path the same way; compare by prefix. No relative arithmetic, no string search.
  */
+const CODE_ABS = CODE.map((d) => realish(path.resolve(ROOT, d)));
 const isCode = (p) => {
-  const norm = String(p).replace(/\\/g, '/');
-  const rels = new Set();
-  const add = (abs) => {
-    for (const base of ROOTS) {
-      const r = path.relative(base, abs).replace(/\\/g, '/');
-      if (r && !r.startsWith('..')) rels.add(r);
-    }
-  };
-  if (path.isAbsolute(norm)) { add(norm); add(realish(norm)); }
-  else {
-    rels.add(norm.replace(/^\.\//, ''));
-    add(path.resolve(process.cwd(), norm));
-    add(realish(path.resolve(process.cwd(), norm)));
+  const raw = String(p).replace(/\\/g, '/');
+  const abs = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  const candidates = new Set([path.resolve(abs), realish(abs)]);
+  // A relative argument may also be meant relative to the workspace rather than the cwd.
+  if (!path.isAbsolute(raw)) {
+    candidates.add(path.resolve(ROOT, raw));
+    candidates.add(realish(path.resolve(ROOT, raw)));
   }
-  return [...rels].some((rel) =>
-    CODE.some((d) => {
-      const clean = d.replace(/^\.\//, '').replace(/\/$/, '');
-      return rel === clean || rel.startsWith(`${clean}/`);
-    }));
+  return [...candidates].some((c) =>
+    CODE_ABS.some((d) => c === d || c.startsWith(`${d}${path.sep}`)));
 };
 
 const read = () => new Promise((r) => {

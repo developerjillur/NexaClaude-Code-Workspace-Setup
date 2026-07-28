@@ -42,7 +42,7 @@ exit code 2 and stops the turn.
 This workspace was extracted from a real project, and the most useful thing it learned is
 about itself:
 
-> **Nine controls were built. Every one was wrong on its first version, and every one was
+> **Ten controls were built. Every one was wrong on its first version, and every one was
 > wrong in the same direction — it failed *open*.** It passed when it should have refused, and
 > a passing check looks exactly like a correct one.
 >
@@ -69,12 +69,12 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **~150 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and
+beside the case it must catch. **~155 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and
 skips elsewhere, so the exact count moves by one — a number that drifts is worth saying so about
 rather than rounding into a claim.)
 
 ```bash
-node tests/hooks.test.mjs      # 93 passed
+node tests/hooks.test.mjs      # 99 passed
 node tests/council.test.mjs    # 55 passed
 ```
 
