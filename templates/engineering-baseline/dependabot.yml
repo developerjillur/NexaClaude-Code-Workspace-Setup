@@ -1,0 +1,22 @@
+# Goes in .github/ of your PRODUCT repo.
+#
+# A dependency with a known CVE is the one security hole this workspace's own controls cannot
+# see: scan-secrets reads your files, vibesec reads your code, and neither of them reads
+# node_modules. Weekly rather than daily, because a PR nobody merges is noise, and noise is how
+# a security signal gets muted.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for patch bumps; individual PRs for anything that can break.
+      patch-updates:
+        update-types: [patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

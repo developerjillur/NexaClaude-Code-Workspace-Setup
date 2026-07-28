@@ -113,7 +113,7 @@ nothing, a "watched it fail" with no pasted failure. **7 findings on a deliberat
 ## 4 · The pipeline — every change moves left to right
 
 ```
-0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done
+0-discovery → 0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done → 7-operate
              gate     gate      WIP=1     gate       gate
 ```
 

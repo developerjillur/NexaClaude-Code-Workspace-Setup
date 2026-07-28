@@ -21,7 +21,7 @@ const ok = (m) => console.log(`  ✅ ${m}`);
 const bad = (m, why) => { fail++; console.log(`  ❌ ${m}\n       ${why}`); };
 const soft = (m, why) => { warn++; console.log(`  ⚠️  ${m}\n       ${why}`); };
 
-const stages = ['0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done'];
+const stages = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done', '7-operate'];
 const cardsIn = (s) => {
   const d = path.join(ROOT, 'board', s);
   if (!fs.existsSync(d)) return [];
@@ -472,4 +472,38 @@ console.log(`  All checks pass${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}`
 if (warn && STRICT) { console.log('  --strict: warnings are failures here.\n'); process.exit(1); }
 console.log('\n  What this cannot check: whether the spec is good, whether the review was');
 console.log('  honest, or whether the guard that "failed" was the right guard. Those stay');
-console.log('  human. This only catches the mechanical skips.\n');
+console.log('  human. This only catches the mechanical skips.\n');// ── The product repo's engineering baseline ──────────────────────────────────
+//
+// A council put this workspace at "top 10%, not top 1%", and part of why was that it had
+// world-class controls against AGENT failure and none of the hygiene an ordinary engineering
+// org takes for granted. The tools belong to the code being written, not to the process
+// writing it — so this WARNS rather than fails, and ships the configs in
+// templates/engineering-baseline/ so the fix is a copy rather than a research task.
+//
+// It warns forever, though. A workspace that stops mentioning a missing linter has agreed
+// with you that it does not matter.
+{
+  const cfgPath = path.join(ROOT, 'workspace.config.json');
+  let dirs = ['code'];
+  try { dirs = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).codeDirs ?? dirs; } catch { /* default */ }
+  const real = dirs.map((d) => path.resolve(ROOT, d)).filter((d) => fs.existsSync(d));
+  if (!real.length) {
+    soft('product repo not present', 'no configured codeDirs exist yet — nothing to check');
+  } else {
+    const pkgPath = real.map((d) => path.join(d, 'package.json')).find((p) => fs.existsSync(p));
+    if (!pkgPath) {
+      soft('the product repo has no package.json', 'lint, format and typecheck cannot be wired without one — templates/engineering-baseline/');
+    } else {
+      let scripts = {};
+      try { scripts = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).scripts ?? {}; } catch { /* unreadable */ }
+      const want = ['lint', 'format', 'typecheck', 'test'];
+      const missing = want.filter((s) => !scripts[s]);
+      if (missing.length) {
+        soft(`the product repo has no ${missing.join(', ')} script`,
+          'copy templates/engineering-baseline/ and add them — a linter nobody runs is not a linter');
+      } else ok('the product repo wires lint, format, typecheck and test');
+    }
+  }
+}
+
+

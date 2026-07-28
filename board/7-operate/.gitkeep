@@ -1,0 +1,9 @@
+Keeps this stage in git.
+
+A card arrives here from 6-done and stays until production has been asked the four questions in
+operate-after-done: what is erroring, what got slower, what did users do that we did not design
+for, and what did it cost.
+
+The board used to end at 6-done. Paying customers start there. Anything production says that
+would change what gets built leaves here as a NEW card in 0-discovery, with the observation
+pasted in — because an incident that produced no card will happen again identically.

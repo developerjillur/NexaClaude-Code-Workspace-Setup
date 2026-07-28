@@ -482,7 +482,11 @@ console.log('\n▸ Rendering — the same reducer drives the terminal and an ext
   // So: NO control byte other than tab and newline, in any source file, ever.
   {
     const offenders = fs.readdirSync(path.join(ROOT, 'scripts'))
-      .filter((f) => f.endsWith('.mjs'))
+      // `._x.mjs` is an AppleDouble sidecar, written by macOS beside every file it touches on
+      // an exFAT or FAT volume. It is a binary resource fork, not source, and it fails a scan
+      // for control bytes every single time — a red suite that means nothing, which is the
+      // fastest way to teach someone to ignore red.
+      .filter((f) => f.endsWith('.mjs') && !f.startsWith('._'))
       .map((f) => {
         const body = fs.readFileSync(path.join(ROOT, 'scripts', f), 'utf8');
         const i = [...body].findIndex((ch) => {

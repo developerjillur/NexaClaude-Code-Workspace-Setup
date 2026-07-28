@@ -376,7 +376,8 @@ console.log(`\n${'─'.repeat(72)}`);
 // Caught by cloning into a clean directory and firing the guard, not by reading the code.
 {
   console.log('\n▸ The board survives a clone');
-  const STAGES = ['0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done'];
+  const STAGES = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review',
+    '5-verify', '6-done', '7-operate'];
   for (const st of STAGES) {
     check(`board/${st} is tracked`, fs.existsSync(path.join(ROOT, 'board', st, '.gitkeep')));
   }

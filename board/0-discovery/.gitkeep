@@ -1,0 +1,8 @@
+Keeps this stage in git — see board/3-build/.gitkeep for why that matters.
+
+An idea lives here until it can answer discovery-first's five questions: who asked, what they
+do today, what breaks without it, what number moves, and what would make us stop.
+
+A council reviewing this workspace found the pipeline broke BEFORE it started: everything
+downstream assumed somebody had already decided what deserved building. Cards that skip this
+stage are the expensive ones — perfectly built, and unwanted.

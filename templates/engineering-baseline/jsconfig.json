@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Type checking for a JavaScript project, with no TypeScript in it.",
+    "",
+    "checkJs turns JSDoc into a real type system and catches the class of bug that survives",
+    "review most easily: a function called with the wrong shape. Agents produce these",
+    "constantly, because they infer a signature from a name.",
+    "",
+    "strict is on. Turning it off to make the first run quiet defeats the purpose — fix the",
+    "findings or exclude a directory, but do not lower the bar globally."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["**/*.js", "**/*.mjs"],
+  "exclude": ["node_modules", "dist", "build", "coverage"]
+}

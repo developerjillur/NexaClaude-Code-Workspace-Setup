@@ -1,0 +1,233 @@
+{
+  "schema": 1,
+  "question": "Judge this Claude Code workspace against the hardest standard its owner can state, and do not be kind. His question, in his words: is this the equal of a top 1% Claude-Code vibe coder's setup? Have I configured everything needed to get the best output Claude Code CLI can give, and what else is required? Claude Code and vibe coding have known weaknesses — drifting from the plan, losing context, weak or duplicated code, forgotten decisions, security holes, garbage left behind, files nobody connected. Can THIS setup produce the coding standard a large tech company or corporate engineering org would accept for real software, managed from beginning to end? Can it take an idea and carry it to a production app that 10 to 1000 customers actually use? Is this a full production lineup that behaves like a professional, creative, top-1%-experience software team — creative thinking at the front, then everything else — using 100 percent of what agentic AI and today's models can do, including help from other providers' models, and every connector and superpower available outside? He wants the honest answer, not the flattering one, and no quality compromised. You are given the README, the contract every agent works under, the settings that wire the hooks and pin the model, and the config that decides what is guarded. Answer four things. (1) Where on the distribution does this actually sit — top 1 percent, top 10, or ordinary — and name the specific things a genuinely top-1-percent setup has that this does not. (2) What is the single biggest thing MISSING for the beginning-to-end claim: idea to a production app with real paying users. Be concrete about the stage where it breaks. (3) It claims a professional team lineup. Which roles of a real engineering org are represented here and which are absent, and does the absence matter. (4) Rate it out of 10 as a workspace for producing production software, and name precisely what would move it to 9.",
+  "at": "2026-07-28T18:45:52.213Z",
+  "flags": {
+    "lenses": false,
+    "rubric": false,
+    "revise": true,
+    "stage1Only": false,
+    "timeoutMin": 15
+  },
+  "context": {
+    "files": [
+      "README.md",
+      "AGENTS.md",
+      ".claude/settings.json",
+      "workspace.config.json"
+    ],
+    "refused": [],
+    "tokens": 10838,
+    "brief": "AGENTS.md",
+    "briefRefused": null,
+    "verifiedObedientTokens": 27000
+  },
+  "roster": {
+    "path": "/Volumes/T7 Shield/NexaLance-All-Projects-Portable/NexaClaude-Code-Workspace-Setup/scripts/council/members.json",
+    "local": false,
+    "localIgnored": false
+  },
+  "members": [
+    {
+      "id": "codex",
+      "label": "GPT-5.6 sol (Codex CLI)",
+      "family": "OpenAI",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini 3.1 Pro (Antigravity)",
+      "family": "Google",
+      "via": "argv",
+      "present": true
+    },
+    {
+      "id": "claude-fable",
+      "label": "Fable 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "claude-sonnet",
+      "label": "Sonnet 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    }
+  ],
+  "opinions": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 202599,
+      "chars": 9436,
+      "lens": null,
+      "confidence": 91,
+      "changeMind": "An independent clean-clone audit shows a real app moving from validated customer research through required CI into production, then passing rollback, backup-restore, load, security, and incident drills with live SLO telemetry and paying-user evidence."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 31238,
+      "chars": 6341,
+      "lens": null,
+      "confidence": 92,
+      "changeMind": "A demonstration showed this exact workspace automatically provisioning cloud infrastructure, running visual E2E UI tests, and handling live database migrations without human intervention beyond card creation."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 118042,
+      "chars": 8969,
+      "lens": null,
+      "confidence": 72,
+      "changeMind": "the actual `.agents/skills/deploy-gate/SKILL.md` plus a CI workflow file showed (a) the full test suites and a fresh-clone guard-fire running in CI and (b) wired monitoring/alerting with an incident-to-card rule — that would move the rating to 8+ and change my answer to question 2 to the product-intake gap instead."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 185514,
+      "chars": 6094,
+      "lens": null,
+      "confidence": 70,
+      "changeMind": "I could see actual `board/` cards, `docs/DECISIONS.md`/`docs/LEARNED.md`, or a live deployed instance under load — this is built entirely from the workspace's documentation of itself, not observed runtime behavior. If the \"eight live checks\" in the deploy skill turn out to include uptime/error monitoring, or an actual project instance's `enabledPlugins` includes an SRE/observability plugin not sho"
+    }
+  ],
+  "revised": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 149242,
+      "chars": 11466,
+      "revisionFailed": false,
+      "confidence": 90,
+      "changeMind": "An independent clean-clone audit of the actual repository showed completed project-specific contracts, required CI and sandbox controls, representative agent evaluations, and a real paying-user application passing deployment, load, incident, rollback, and backup-restore drills with live telemetry."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 30741,
+      "chars": 11523,
+      "revisionFailed": false,
+      "confidence": 92,
+      "changeMind": "The workspace provided a working GitHub Actions workflow and Docker sandbox configuration demonstrating (1) fail-closed OS-level secret isolation during `Bash` execution, (2) Playwright visual E2E test gates in `5-verify`, and (3) automated Sentry/Datadog production incident ingestion that auto-creates cards in `0-backlog`."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 128858,
+      "chars": 10946,
+      "revisionFailed": false,
+      "confidence": 72,
+      "changeMind": "the actual `deploy-gate` skill and a CI workflow file showed (a) clean-clone CI running both suites plus a guard-fire test and (b) wired monitoring/alerting with an incident-opens-a-card rule — that moves the rating to 8+ and flips my question-2 answer to the discovery/intake gap, i.e. to Response B's position."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 145986,
+      "chars": 7866,
+      "revisionFailed": false,
+      "confidence": 78,
+      "changeMind": "I saw the actual (non-template) `AGENTS.md` §1/§2 for a real project, a CI workflow file running the full 427+487 suites from a clean clone rather than just `check.mjs`, and evidence of a wired monitoring/alerting/incident-to-card mechanism — any of those would move the \"top 1%\" verdict and the rating meaningfully upward."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 116417,
+      "parsed": [
+        "codex",
+        "claude-fable",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response D’s demand for representative tasks and seeded-defect evaluations of the agent workflow itself; sophisticated controls are not proven effective merely because their own tests pass.",
+      "lost": "Response B’s sharper prioritization of the day-two production failure—without telemetry and incident routing, paying users can be harmed before anyone knows—gets subordinated to Response D’s product-discovery framing."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 23464,
+      "parsed": [
+        "claude-fable",
+        "codex",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response B’s point that `AGENTS.md` carrying unedited template text (§1 and §2) wastes ~5,188 tokens on every single prompt cycle for generic boilerplate, undermining context window efficiency.",
+      "lost": "Response B's comprehensive role-by-role organizational matrix and its primary focus on Day 0 product discovery as the first point of failure before a line of code is specced."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 144928,
+      "parsed": [
+        "codex",
+        "claude-fable",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response B's catch that the cross-vendor review guarantee — the workspace's flagship \"second model, always\" rule — silently stops holding whenever the optional external `codex` CLI is uninstalled or unauthenticated, turning a load-bearing gate into an unverified assumption.",
+      "lost": "Response D's win costs Response A's honest 72% calibration (including a stated condition under which it would flip to D's own discovery-first position) and A's leverage-ordered fix list — D's nine-step path to 9/10 is the most complete but is unprioritized, while A tells the owner which two fixes get to 8 cheapest."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 149887,
+      "parsed": [
+        "claude-fable",
+        "codex",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "D's catch that the 427/487-count test suites are shown invoked by hand, not wired into the one CI-run check (`check.mjs`), which converts the README's own \"found only by clean-clone testing\" postmortem from a war story into a diagnosis of a still-open gap.",
+      "lost": "A doesn't develop D's manual-vs-CI test distinction or B's specific (if slightly overstated) Bash/`.env` mechanism claim — a reader who stops at A gets the correct verdict and the best adjudication between competing claims, but misses the two sharpest pieces of forensic evidence for *why* the enforcement gap is real."
+    }
+  ],
+  "tally": {
+    "scores": {
+      "codex": 2,
+      "gemini": 0,
+      "claude-fable": 3,
+      "claude-sonnet": 1
+    },
+    "ranked": {
+      "codex": 3,
+      "gemini": 3,
+      "claude-fable": 3,
+      "claude-sonnet": 3
+    },
+    "counted": 4,
+    "total": 4,
+    "degenerate": false,
+    "selfFirst": 1,
+    "selfN": 4,
+    "selfMean": 2.5,
+    "lengths": {
+      "codex": 11466,
+      "gemini": 11523,
+      "claude-fable": 10946,
+      "claude-sonnet": 7866
+    },
+    "lengthR": 0.13848885348480075,
+    "families": {
+      "OpenAI": 1,
+      "Google": 1,
+      "Anthropic": 2
+    }
+  },
+  "overlap": {
+    "raw": 0.17770837208782087,
+    "distinctive": 0.0854704275845903,
+    "n": 4,
+    "pairs": 6,
+    "thin": false,
+    "excluded": [],
+    "usableN": 4
+  },
+  "rubric": null,
+  "rubricPerJudge": null
+}

@@ -1,0 +1,36 @@
+{
+  "name": "nexaclaude-code-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A complete, opinionated Claude Code workspace — blocking hooks, a WIP=1 pipeline, auto-loading skills, and a multi-vendor council.",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "_comment": [
+    "NO DEPENDENCIES, AND THAT IS A FEATURE. Every script here is plain Node, so a fresh",
+    "clone runs the whole suite with no install step and nothing to audit. The engineering",
+    "baseline a PRODUCT repo needs — linter, formatter, type checking — ships as templates",
+    "under templates/engineering-baseline/ instead, because those tools belong to the code",
+    "being written, not to the process writing it.",
+    "",
+    "This file exists mostly so that `npm run` works at all: the docs referenced npm scripts",
+    "for weeks while there was no package.json, which meant the first command a new user",
+    "typed failed."
+  ],
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node tests/hooks.test.mjs && node tests/council.test.mjs",
+    "test:hooks": "node tests/hooks.test.mjs",
+    "test:council": "node tests/council.test.mjs",
+    "council": "node scripts/council/council.mjs",
+    "council:preflight": "node scripts/council/council.mjs x --preflight",
+    "council:containment": "node scripts/council/verify-containment.mjs",
+    "council:watch": "node scripts/council/watch.mjs",
+    "depth": "node scripts/depth-check.mjs",
+    "claims": "node scripts/verify-claims.mjs",
+    "mutate": "node scripts/mutation-test.mjs",
+    "secrets": "node scripts/scan-secrets.mjs",
+    "reflect": "node scripts/reflect.mjs",
+    "gate": "npm run secrets && npm run check && npm test"
+  }
+}

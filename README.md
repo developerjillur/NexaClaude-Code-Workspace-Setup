@@ -1,7 +1,7 @@
 # NexaClaude Code Workspace
 
 **A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
-Kanban pipeline with WIP=1, thirteen skills, three subagents, seven commands, and a five-model
+Kanban pipeline with WIP=1, fifteen skills, three subagents, seven commands, and a five-model
 council that reviews your decisions across four vendors.**
 
 Clone it, point it at your code, and the process runs itself. No special commands to memorise —
@@ -150,7 +150,7 @@ refusal, not a note.
 
 ## What is in the box
 
-### 13 skills — `.agents/skills/`
+### 15 skills — `.agents/skills/`
 
 | Skill | When it fires |
 |---|---|
@@ -235,12 +235,33 @@ opting it back in prints a warning into the run file.
 your own view first, or you are synthesising their synthesis. **Where they disagree is the
 output** — averaging four models produces something none of them would defend.
 
-### The board — `board/`
+### The board — `board/`, nine stages
 
-`0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done`
+`0-discovery → 0-backlog → 1-spec → 2-plan → 3-build → 4-review → 5-verify → 6-done → 7-operate`
 
 **WIP = 1 at `3-build`, enforced.** `templates/CARD.md` is the shape; each stage has a gate
 that must be answered, not ticked.
+
+**The two outer stages exist because a council found the pipeline broke at both ends:**
+
+- **`0-discovery`** — *"the pipeline breaks between idea and 1-spec. Its own contract says the
+  human writes the specification and the agent challenges it. **That presupposes somebody has
+  already determined what deserves building.**"* The `discovery-first` skill is five questions
+  a card must answer before it may enter `1-spec`, and *"I think"* is not an answer to any.
+- **`7-operate`** — *"**the pipeline ends at the moment of push, and production is where paying
+  users live.** With 10–1000 customers the dominant failure mode is not 'the agent shipped a
+  stub' — this workspace kills that dead — it is **'the app degrades and nobody finds out from
+  the code.'**"* `operate-after-done` asks four questions after every deploy and turns what
+  production says back into cards.
+
+### Engineering baseline — `templates/engineering-baseline/`
+
+The same review found world-class controls against *agent* failure and **none of the hygiene an
+ordinary engineering org takes for granted.** ESLint, Prettier, EditorConfig, `checkJs` and
+Dependabot ship as configs to copy into your product repo — the workspace itself stays
+dependency-free, because a linter belongs to the code being written, not to the process writing
+it. **`check.mjs` warns for every missing `lint` / `format` / `typecheck` / `test` script and
+does not stop warning.**
 
 ### Plugins — declared, not assumed
 
