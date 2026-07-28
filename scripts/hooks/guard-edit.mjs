@@ -40,8 +40,23 @@ const CODE = codeDirs();
 // clone from a temp directory rather than by reading the code.
 //
 // So both the real and the given form of every path are compared, on both sides.
-const realish = (p) => { try { return fs.realpathSync(p); } catch { 
-  try { return path.join(fs.realpathSync(path.dirname(p)), path.basename(p)); } catch { return p; } } };
+// Walks UP until something exists, then rejoins the tail. One level is not enough: the guard
+// is usually asked about a file that does not exist yet, inside a directory that does not
+// exist yet either — `code/x.js` in a fresh clone where `code/` is the user's symlink and has
+// not been made. A one-level fallback returned the path unchanged, so the fix looked applied
+// and the guard still failed open. Found by printing the values instead of reasoning about them.
+const realish = (p) => {
+  let cur = path.resolve(p);
+  const tail = [];
+  for (let i = 0; i < 64; i++) {
+    try { return path.join(fs.realpathSync(cur), ...tail); } catch { /* keep walking up */ }
+    const parent = path.dirname(cur);
+    if (parent === cur) return path.resolve(p);
+    tail.unshift(path.basename(cur));
+    cur = parent;
+  }
+  return path.resolve(p);
+};
 const ROOTS = [...new Set([ROOT, realish(ROOT)])];
 
 /**
