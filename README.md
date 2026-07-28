@@ -49,16 +49,22 @@ about itself:
 > Not one was found by the case it was built to catch. **Every one was found by testing the
 > case it was supposed to stay silent on.**
 
-The sharpest instance: a guard against `git reset --hard` was written as
-`reset\s+(?:-[^\s]+\s+)*--hard`. The optional flag group swallowed `--hard` itself, so the
-literal never matched — and **the exact command it was written to stop walked straight
-through**.
+Two instances, and the second happened while publishing this repo:
+
+- A guard against `git reset --hard` was written as `reset\s+(?:-[^\s]+\s+)*--hard`. The
+  optional flag group swallowed `--hard` itself, so the literal never matched — and **the exact
+  command it was written to stop walked straight through**.
+- **The first push of this repo shipped without `board/` at all**, because git does not track
+  empty directories. `guard-edit` looked for cards in a directory that did not exist, found
+  nothing to object to, and **passed silently** — the one blocking hook, off by default, in the
+  exact state a new user would first meet it. Found by cloning into a clean directory and
+  firing the guard, not by reading the code.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **140 assertions, and the blocking paths were watched blocking.**
+beside the case it must catch. **148 assertions, and the blocking paths were watched blocking.**
 
 ```bash
-node tests/hooks.test.mjs      # 85 passed
+node tests/hooks.test.mjs      # 93 passed
 node tests/council.test.mjs    # 55 passed
 ```
 

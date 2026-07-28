@@ -365,6 +365,31 @@ console.log(`\n${'─'.repeat(72)}`);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+
+// ── the pipeline has to survive a clone ──────────────────────────────────────
+//
+// The first published version of this repo shipped WITHOUT board/, because git does not
+// track empty directories. guard-edit then looked for cards in a directory that did not
+// exist, found nothing to complain about, and **passed silently** — the workspace's one
+// blocking hook, off by default, in the exact state a new user would first meet it.
+//
+// Caught by cloning into a clean directory and firing the guard, not by reading the code.
+{
+  console.log('\n▸ The board survives a clone');
+  const STAGES = ['0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done'];
+  for (const st of STAGES) {
+    check(`board/${st} is tracked`, fs.existsSync(path.join(ROOT, 'board', st, '.gitkeep')));
+  }
+  // The consequence, asserted directly rather than inferred from the directory listing.
+  const guard = path.join(HOOKS, 'guard-edit.mjs');
+  const build = path.join(ROOT, 'board', '3-build');
+  const stray = fs.existsSync(build) ? fs.readdirSync(build).filter((f) => f.endsWith('.md')) : [];
+  if (!stray.length) {
+    check('with an empty 3-build, an edit to product code is REFUSED',
+      run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(ROOT, 'code', 'x.js') } }).code === 2);
+  }
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

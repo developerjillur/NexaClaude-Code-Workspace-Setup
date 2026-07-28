@@ -1,0 +1,5 @@
+Keeps this stage in git. Git does not track empty directories, and without this the
+whole pipeline is absent from a fresh clone — which made guard-edit pass silently
+instead of refusing, because there was no board/3-build to find nothing in.
+
+A guard that cannot find its own board is a guard that is off.
