@@ -5,7 +5,9 @@
   "type": "module",
   "description": "A complete, opinionated Claude Code workspace — blocking hooks, a WIP=1 pipeline, auto-loading skills, and a multi-vendor council.",
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "_comment": [
     "NO DEPENDENCIES, AND THAT IS A FEATURE. Every script here is plain Node, so a fresh",
     "clone runs the whole suite with no install step and nothing to audit. The engineering",
@@ -19,7 +21,7 @@
   ],
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node tests/hooks.test.mjs && node tests/council.test.mjs",
+    "test": "node tests/council.test.mjs && node tests/hooks.test.mjs && node tests/survives-session-death.mjs",
     "test:hooks": "node tests/hooks.test.mjs",
     "test:council": "node tests/council.test.mjs",
     "council": "node scripts/council/council.mjs",
@@ -31,6 +33,7 @@
     "mutate": "node scripts/mutation-test.mjs",
     "secrets": "node scripts/scan-secrets.mjs",
     "reflect": "node scripts/reflect.mjs",
-    "gate": "npm run secrets && npm run check && npm test"
+    "gate": "npm run secrets && npm run check && npm test",
+    "test:survives-session-death": "node tests/survives-session-death.mjs"
   }
 }

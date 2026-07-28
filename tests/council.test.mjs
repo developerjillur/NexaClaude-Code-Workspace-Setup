@@ -23,11 +23,35 @@ import { up, clearBelow } from '../scripts/council/ansi.mjs';
 import { prepare, deliveryOf, canary, argvCeiling } from '../scripts/council/prompt-delivery.mjs';
 import { checkWritable, safeWrite } from '../scripts/council/safe-write.mjs';
 import { rankedLabels, borda, familyMix, familyMajority, reasoningOverlap, parseConfidence, parseRubric,
-  aggregateScores, shuffled, contentTokens } from '../scripts/council/diagnostics.mjs';
+  aggregateScores, shuffled, contentTokens, labelled, labelledAll } from '../scripts/council/diagnostics.mjs';
 import { assignLenses, LENSES, stage1, stage2, rubric, rubric1b, RUBRIC_DIMENSIONS } from '../scripts/council/prompts.mjs';
 import { judgeOutput, MIN_ANSWER_CHARS } from '../scripts/council/judge-output.mjs';
+import { parseArgs, without, FLAGS } from '../scripts/council/args.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Did the CLI LOAD and parse its flags — whether or not any member CLI exists on this machine?
+ *
+ * **Exit 2 is a correct answer, not a failure.** It means "could not convene": no member CLI is
+ * installed. That is the state of every CI runner and every fresh machine. Ten integration tests
+ * asserted `status === 0`, so they passed on the author's laptop and failed everywhere else — which
+ * is precisely the mistake the convening section below already records CI catching once before:
+ *
+ *     "the first version asserted exit 0, which is right on a developer machine and WRONG on a CI
+ *      runner, where no member CLI is installed and exit 2 is the correct answer."
+ *
+ * Written down as a helper this time, so the next test cannot quietly repeat it. What these cases
+ * actually verify is that the process got far enough to make a decision, rather than dying on a bad
+ * import or a malformed flag — so the check is a sane exit code AND nothing crash-shaped on stderr.
+ */
+const CRASH = /ReferenceError|TypeError|SyntaxError|is not defined|is not a function/;
+const loadsCleanly = (r) => (r.status === 0 || r.status === 2) && !CRASH.test(r.stderr ?? '');
+
+/** A useful detail line: the crash if there was one, otherwise the exit code. */
+const crashed = (r) => (CRASH.test(r.stderr ?? '')
+  ? (r.stderr ?? '').split('\n').find((l) => /Error/.test(l))
+  : `exit ${r.status}`);
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
   console.log(`  ${ok ? '✅' : '❌'} ${name}${detail ? ` — ${detail}` : ''}`);
@@ -443,11 +467,37 @@ console.log('\n▸ Events — the progress a UI consumes, and the reducer that r
   check('a status line is length-capped', redactLine('y'.repeat(500)).length <= 120);
 
   // Telemetry must never be able to kill a 20-minute council.
-  const bad = createEmitter({ file: '/proc/definitely/not/writable/x.ndjson' });
-  let threw = false;
-  try { bad.emit('run_start', {}); bad.close(); } catch { threw = true; }
-  check('an unwritable sink never throws mid-run', !threw);
-  check('...but it is reported, so --events can fail loudly', bad.broken !== null);
+  //
+  // **This test used to HANG THE WHOLE SUITE on Linux, and CI is what found it.** The path was
+  // `/proc/definitely/not/writable/x.ndjson`, and `fs.mkdirSync(..., { recursive: true })` under procfs
+  // does not throw EACCES on Linux — it blocks forever. macOS throws immediately, so the suite ran in
+  // 2 seconds locally and timed out at 10 minutes on ubuntu-latest.
+  //
+  // That was a real product bug, not only a test bug: a user passing `--events=/proc/x/y.ndjson` would
+  // have hung the council before a single member started, in a package whose central robustness claim
+  // is that it cannot hang. `checkWritable` now verifies the parent is a writable directory with a
+  // non-blocking `access` before anything blocking is attempted.
+  //
+  // Run in a SUBPROCESS with a hard timeout, so a regression shows up as a failed check rather than as
+  // a suite that never finishes — which is how this one hid.
+  {
+    const probe = path.join(os.tmpdir(), `council-hangprobe-${process.pid}.mjs`);
+    fs.writeFileSync(probe, [
+      `import { createEmitter } from '${path.join(ROOT, 'scripts', 'council', 'events.mjs')}';`,
+      "const e = createEmitter({ file: '/proc/definitely/not/writable/x.ndjson' });",
+      "let threw = false;",
+      "try { e.emit('run_start', {}); e.close(); } catch { threw = true; }",
+      "console.log(JSON.stringify({ threw, broken: e.broken !== null }));",
+    ].join('\n'));
+    const r = spawnSync('node', [probe], { encoding: 'utf8', timeout: 20_000 });
+    fs.rmSync(probe, { force: true });
+    check('an unwritable sink is refused instead of HANGING', r.signal !== 'SIGTERM' && r.status === 0,
+      r.signal ? `killed by ${r.signal} — recursive mkdir under /proc blocks forever on Linux` : `exit ${r.status}`);
+    let v = {};
+    try { v = JSON.parse((r.stdout ?? '').trim().split('\n').pop()); } catch { /* it hung or crashed */ }
+    check('...and never throws mid-run', v.threw === false);
+    check('...and it is reported, so --events can fail loudly', v.broken === true);
+  }
 
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -482,11 +532,7 @@ console.log('\n▸ Rendering — the same reducer drives the terminal and an ext
   // So: NO control byte other than tab and newline, in any source file, ever.
   {
     const offenders = fs.readdirSync(path.join(ROOT, 'scripts'))
-      // `._x.mjs` is an AppleDouble sidecar, written by macOS beside every file it touches on
-      // an exFAT or FAT volume. It is a binary resource fork, not source, and it fails a scan
-      // for control bytes every single time — a red suite that means nothing, which is the
-      // fastest way to teach someone to ignore red.
-      .filter((f) => f.endsWith('.mjs') && !f.startsWith('._'))
+      .filter((f) => f.endsWith('.mjs'))
       .map((f) => {
         const body = fs.readFileSync(path.join(ROOT, 'scripts', f), 'utf8');
         const i = [...body].findIndex((ch) => {
@@ -1292,8 +1338,8 @@ console.log('\n▸ Round three — 7.0/10, and two of these were regressions fro
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-bareev-'));
     const r = spawnSync('node', [path.join(ROOT, 'scripts', 'council', 'council.mjs'), '--events', 'a real question', '--preflight'],
       { encoding: 'utf8', timeout: 40_000, cwd: dir });
-    check('a bare --events before the question is accepted', r.status === 0,
-      `exit ${r.status} — the guard used to reject it and suggest something wrong`);
+    check('a bare --events before the question is accepted', loadsCleanly(r),
+      `${crashed(r)} — the guard used to reject it and suggest something wrong`);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
@@ -1448,7 +1494,8 @@ console.log('\n▸ Round five — 7.3/10, and the entry point was the last silen
       /different question in a different mode/.test(split.stderr ?? ''),
       'a wrong answer reported as success is the outcome this project ranks worst');
     check('a genuinely unknown flag is refused too', run(['q', '--nope', '--preflight']).status === 1);
-    check('...while every real flag still works', run(['q', '--preflight', '--lenses', '--rubric', '--no-live']).status === 0);
+    check('...while every real flag still works',
+      loadsCleanly(run(['q', '--preflight', '--lenses', '--rubric', '--no-live'])));
 
     // --context swallows every following word, so an unquoted question after it becomes file paths.
     const swallowed = run(['--context', 'README.md', 'and', 'is', 'this', 'safe']);
@@ -1565,7 +1612,7 @@ console.log('\n▸ Round five — 7.3/10, and the entry point was the last silen
     const target = path.join(dir, 'explicit.ndjson');
     const r = spawnSync('node', [path.join(ROOT, 'scripts', 'council', 'council.mjs'), 'q', '--preflight', `--events=${target}`],
       { encoding: 'utf8', timeout: 40_000, cwd: ROOT });
-    check('an explicit --events path outside the workspace is honoured', r.status === 0, `exit ${r.status}`);
+    check('an explicit --events path outside the workspace is honoured', loadsCleanly(r), crashed(r));
     check('...and the stream is written there', fs.existsSync(target));
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1641,7 +1688,7 @@ console.log('\n▸ Round six — 7.3/10, and one line closed a silent-corruption
     const r = spawnSync('node', [path.join(ROOT, 'scripts', 'council', 'council.mjs'),
       'is README.md stale?', '--context', 'README.md', '--preflight'],
       { encoding: 'utf8', timeout: 40_000, cwd: dir });
-    check('a question word matching a context filename survives', r.status === 0, `exit ${r.status}`);
+    check('a question word matching a context filename survives', loadsCleanly(r), crashed(r));
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
@@ -1723,6 +1770,446 @@ console.log('\n▸ Round six — 7.3/10, and one line closed a silent-corruption
     /reviews parsed/.test(councilSrc));
 }
 
+// ── running a 10–30 minute council from a session that might not survive it ───
+console.log('\n▸ Detach, status, feed — the three things a supervising agent needs');
+{
+  const cli = path.join(ROOT, 'scripts', 'council', 'council.mjs');
+  const statusCli = path.join(ROOT, 'scripts', 'council', 'status.mjs');
+  const feedCli = path.join(ROOT, 'scripts', 'council', 'feed.mjs');
+
+  // ── status.mjs: the exit code IS the answer ──
+  //
+  // The state that matters is the third one. A stream that stopped growing is either a council
+  // thinking hard — normal for minutes at a time — or a process that died and will never write
+  // again. From the file alone those are IDENTICAL, and confusing them means either killing a
+  // working run or waiting forever on a dead one. So `run_start` carries the pid.
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-status-'));
+    const runs = path.join(dir, '.council', 'runs');
+    fs.mkdirSync(runs, { recursive: true });
+    const write = (name, events) => {
+      const f = path.join(runs, `${name}.events.ndjson`);
+      fs.writeFileSync(f, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      return f;
+    };
+    const ask = (f) => spawnSync('node', [statusCli, f, '--json'], { encoding: 'utf8', timeout: 20_000, cwd: dir });
+
+    const finished = write('done', [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: process.pid, members: [{ id: 'a', label: 'A' }] },
+      { t: 1, ev: 'member_done', stage: '1', id: 'a', label: 'A', ok: true, ms: 1000, chars: 50 },
+      { t: 2, ev: 'run_done', ok: true, answered: 1, requested: 1, file: 'r.md', exitCode: 0, score: 7.5 },
+    ]);
+    let r = ask(finished);
+    check('a finished run exits 0', r.status === 0, `exit ${r.status}`);
+    check('...and reports the score', /"score": 7.5/.test(r.stdout ?? ''));
+
+    // A LIVE pid with no terminal event = still running. Using our own pid guarantees it is alive.
+    const live = write('live', [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: process.pid, members: [{ id: 'a', label: 'A' }] },
+      { t: 1, ev: 'stage_start', stage: '1', members: ['a'] },
+      { t: 2, ev: 'member_start', stage: '1', id: 'a', label: 'A', via: 'stdin', promptChars: 10 },
+    ]);
+    r = ask(live);
+    check('a run whose pid is ALIVE exits 3 — still running', r.status === 3, `exit ${r.status}`);
+    check('...and is not mistaken for finished', /"state": "running"/.test(r.stdout ?? ''));
+
+    // A DEAD pid with no terminal event = the run is lost. pid 2^22 cannot exist on any real system.
+    const dead = write('dead', [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: 4194303, members: [{ id: 'a', label: 'A' }] },
+      { t: 1, ev: 'stage_start', stage: '1', members: ['a'] },
+    ]);
+    r = ask(dead);
+    check('a run whose pid is GONE exits 4 — died without finishing', r.status === 4, `exit ${r.status}`);
+    check('...and says the run is lost', /"state": "died"/.test(r.stdout ?? ''));
+
+    const failed = write('failed', [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: process.pid, members: [] },
+      { t: 1, ev: 'run_error', message: 'interrupted by SIGINT' },
+    ]);
+    check('a failed run exits 1', ask(failed).status === 1);
+
+    const none = spawnSync('node', [statusCli, '--json'], { encoding: 'utf8', timeout: 20_000, cwd: os.tmpdir() });
+    check('no run at all exits 2, rather than hanging or crashing', none.status === 2, `exit ${none.status}`);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── feed.mjs: one line per notification, and silence must never look like success ──
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-feed-'));
+    const f = path.join(dir, 'r.events.ndjson');
+
+    // A run that already ended: the feed must fold the backlog into ONE line and exit, not replay it.
+    fs.writeFileSync(f, [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: process.pid, members: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+      { t: 1, ev: 'stage_start', stage: '1', members: ['a', 'b'] },
+      { t: 2, ev: 'member_tick', stage: '1', id: 'a', elapsedMs: 1000, bytes: 0, lastLine: '' },
+      { t: 3, ev: 'member_tick', stage: '1', id: 'a', elapsedMs: 2000, bytes: 0, lastLine: '' },
+      { t: 4, ev: 'member_done', stage: '1', id: 'a', label: 'A', ok: true, ms: 3000, chars: 90 },
+      { t: 5, ev: 'member_done', stage: '1', id: 'b', label: 'B', ok: false, ms: 900, reason: 'quota' },
+      { t: 6, ev: 'run_done', ok: true, answered: 1, requested: 2, file: 'r.md', exitCode: 0, score: null },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+    const r = spawnSync('node', [feedCli, f, '--every=1'], { encoding: 'utf8', timeout: 30_000 });
+    const lines = (r.stdout ?? '').trim().split('\n').filter(Boolean);
+    check('a finished run is followed and exits 0', r.status === 0, `exit ${r.status}`);
+    check('...the backlog becomes ONE catch-up line, not one per event',
+      lines.filter((l) => /attached to a run already in progress/.test(l)).length === 1,
+      `${lines.length} line(s) total for 7 events`);
+    check('...member_tick never becomes a notification', !lines.some((l) => /tick/.test(l)),
+      'it fires every second — a thousand notifications is the same as none');
+    check('...and the outcome is reported', lines.some((l) => /finished/.test(l)));
+
+    // The important one: a DEAD pid must produce a LINE and a non-zero exit, never silence.
+    const orphan = path.join(dir, 'orphan.events.ndjson');
+    fs.writeFileSync(orphan, [
+      { t: 0, ev: 'run_start', schema: SCHEMA, question: 'q', pid: 4194303, members: [{ id: 'a', label: 'A' }] },
+      { t: 1, ev: 'stage_start', stage: '1', members: ['a'] },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const dead = spawnSync('node', [feedCli, orphan, '--every=1'], { encoding: 'utf8', timeout: 30_000 });
+    check('a run that died is ANNOUNCED, not silently dropped', dead.status === 4, `exit ${dead.status}`);
+    check('...with a line saying the run is lost', /is LOST/.test(dead.stdout ?? ''),
+      'a feed that only reports good news cannot be trusted, because silence looks the same');
+
+    const nothing = spawnSync('node', [feedCli], { encoding: 'utf8', timeout: 20_000, cwd: os.tmpdir() });
+    check('nothing to follow exits 2 with a line', nothing.status === 2 && /no council run/.test(nothing.stdout ?? ''));
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── --detach: return immediately, and outlive the caller ──
+  //
+  // The point is not backgrounding. It is that a 10–30 minute run must not be lost when the session
+  // that started it is killed, restarted, or times out — the members are already spent by then.
+  {
+    const src = fs.readFileSync(cli, 'utf8');
+    check('--detach spawns with detached:true so the child leaves the caller\'s process group',
+      /detached: true,\n\s*stdio: \['ignore', logFd, logFd\]/.test(src),
+      'otherwise the harness\'s SIGTERM reaches it');
+    check('...with stdio to FILES, never inherited pipes', /stdio: \['ignore', logFd, logFd\]/.test(src),
+      'an inherited pipe whose reader goes away turns the next write into EPIPE and kills the child');
+    check('...and unref\'d, so the parent can exit', /kid\.unref\(\)/.test(src));
+    check('...and it forces the event stream on', /if \(!child\.some\(\(a\) => a === '--events'/.test(src),
+      'detaching without it would launch a process nobody can observe');
+    check('...and prints machine-readable paths on stdout',
+      /JSON\.stringify\(\{ detached: true, running: !finishedFast/.test(src));
+    check('the pid is recorded in the stream, so liveness is knowable', /pid: process\.pid,/.test(src));
+
+    // A real detached launch. `--preflight` so nothing is spent — and note that this ALSO exercises
+    // the "finished before we looked" path, which an earlier version of the liveness check reported as
+    // a startup failure because it only asked whether the pid still existed.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-detach-'));
+    const r = spawnSync('node', [cli, 'a detached question', '--preflight', '--detach'],
+      { encoding: 'utf8', timeout: 30_000, cwd: dir });
+    // Exit 0 with members present, and still 0 without them — "could not convene" is an answer.
+    check('--detach returns immediately instead of blocking', r.status === 0, crashed(r));
+    let payload = {};
+    try { payload = JSON.parse((r.stdout ?? '').trim().split('\n').pop()); } catch { /* nothing printed */ }
+    check('...and hands back a pid, an events path and a log path',
+      Boolean(payload.pid && payload.events && payload.log), JSON.stringify(payload).slice(0, 80));
+    check('...and says whether it is still running', typeof payload.running === 'boolean');
+
+    // A child that REFUSES at startup must be reported as not started, with its own reason — not as a
+    // successful launch a watcher then waits forever on.
+    const bad = spawnSync('node', [cli, 'q', '--members=nonexistent-xyz', '--detach'],
+      { encoding: 'utf8', timeout: 30_000, cwd: dir });
+    check('a detached child that dies on startup is REPORTED, not claimed as running',
+      /was NOT started/.test(bad.stderr ?? ''), (bad.stderr ?? '').split('\n')[1] ?? '');
+    check('...quoting the child\'s own reason', /not in the roster/.test(bad.stderr ?? ''));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── a parser that accepts one formatting choice measures formatting ──────────
+console.log('\n▸ Labelled fields — models write markdown, not bare labels');
+{
+  // WAS OPEN, and it was losing data silently across every round of grading. The patterns were
+  // anchored as `/^[^\S\n]*CONFIDENCE:/` — line start, whitespace, bare label. Models do not write
+  // bare labels; they write what looks right in markdown. Measured before the fix: **11 of 15
+  // realistic shapes returned null**, and the run then reported "did not state a confidence" about a
+  // member that had stated one clearly.
+  //
+  // Which means the `—` entries in six rounds of confidence columns were most likely compliance in
+  // bold, not non-compliance. That is the worst kind of bug in a diagnostic: it does not look broken,
+  // it looks like the members were sloppy.
+  for (const [what, line] of [
+    ['a bare label', 'CONFIDENCE: 80'],
+    ['a bold label', '**CONFIDENCE:** 80'],
+    ['a bold whole line', '**CONFIDENCE: 80**'],
+    ['a heading', '## CONFIDENCE: 80'],
+    ['a list item', '- CONFIDENCE: 80'],
+    ['a blockquote', '> CONFIDENCE: 80'],
+    ['title case', '**Confidence:** 80'],
+    ['a table row', '| CONFIDENCE | 80 |'],
+    ['a trailing percent', 'CONFIDENCE: 80%'],
+    ['ragged whitespace', '   CONFIDENCE:   80   '],
+    ['heading plus bold', '### **Confidence:** 80'],
+  ]) check(`confidence survives ${what}`, parseConfidence(line).confidence === 80,
+    `${JSON.stringify(line)} -> ${parseConfidence(line).confidence}`);
+
+  for (const [what, line] of [
+    ['plain', 'WOULD CHANGE MY MIND IF: seeing the caller'],
+    ['bold', '**WOULD CHANGE MY MIND IF:** seeing the caller'],
+    ['bulleted and bold', '- **WOULD CHANGE MY MIND IF:** seeing the caller'],
+  ]) check(`"what would change my mind" survives ${what}`,
+    /seeing the caller/.test(parseConfidence(line).changeMind ?? ''));
+
+  // The properties that had to SURVIVE the loosening.
+  check('the member\'s own last line still beats one it quoted',
+    parseConfidence('It said **CONFIDENCE: 99**\nmy answer\n**CONFIDENCE:** 40').confidence === 40,
+    'same reasoning as parseRanking taking the LAST block');
+  check('an absent confidence is still null, not a default',
+    parseConfidence('no numbers here at all').confidence === null);
+  check('an absurd confidence is still clamped', parseConfidence('CONFIDENCE: 900').confidence === 100);
+
+  // Rubric scores and the overall, same treatment.
+  for (const [what, line] of [
+    ['plain', 'SCORE: correctness | 7/10 | one real defect'],
+    ['bold', '**SCORE: correctness | 7/10 | one real defect**'],
+    ['bulleted', '- SCORE: correctness | 7/10 | one real defect'],
+    ['a table row', '| SCORE: correctness | 7/10 | one real defect |'],
+  ]) check(`a dimension score survives ${what}`, parseRubric(line).scores.correctness === 7,
+    JSON.stringify(parseRubric(line).scores));
+  check('...and the reason is still captured', /one real defect/.test(parseRubric('SCORE: correctness | 7/10 | one real defect').notes.correctness ?? ''));
+
+  for (const [what, line] of [
+    ['plain', 'OVERALL: 7/10'],
+    ['bold', '**OVERALL: 7/10**'],
+    ['a heading', '## OVERALL: 7/10'],
+    ['bulleted with a decimal', '- OVERALL: 7.5/10'],
+  ]) check(`the overall survives ${what}`,
+    parseRubric(line).overall === (what.includes('decimal') ? 7.5 : 7),
+    `${JSON.stringify(line)} -> ${parseRubric(line).overall}`);
+
+  check('prose mentioning 10 is still not harvested as a score',
+    Object.keys(parseRubric('I would rate this about 10 out of 10 honestly').scores).length === 0
+    && parseRubric('I would rate this about 10 out of 10 honestly').overall === null,
+    'loosening the anchor must not make it credulous');
+
+  // Findings are the many-occurrence case, where losing the decorated ones loses most of the review.
+  const findings = labelledAll('FINDING: a\n- **FINDING:** b\n> FINDING: c\n## FINDING: d', 'FINDING');
+  check('every FINDING shape is collected', findings.length === 4, `${findings.length}/4: ${findings.join('|')}`);
+  check('...in the order the judge wrote them', findings.join('') === 'abcd');
+  check('a singleton label takes the LAST, a repeated label takes ALL',
+    labelled('FINDING: a\nFINDING: b', 'FINDING') === 'b' && labelledAll('FINDING: a\nFINDING: b', 'FINDING').length === 2,
+    'the two helpers exist because those are different questions');
+
+  // And the stage-2 dissent fields, which the chairman is told to weigh most carefully.
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'council', 'council.mjs'), 'utf8');
+  check('stage 2 extracts the minority view through the tolerant helper',
+    /labelled\(r\.text, 'MINORITY VIEW WORTH KEEPING'\)/.test(src));
+  check('...and "what is lost" too', /labelled\(r\.text, 'WHAT IS LOST IF THE TOP ANSWER WINS'\)/.test(src));
+  check('...and rubric findings', /labelledAll\(src\?\.text \?\? '', 'FINDING'\)/.test(src));
+  check('no hand-rolled label regex is left in council.mjs',
+    !/\^\[\^\\S\\n\]\*(?:FINDING|MINORITY|WHAT IS LOST|SINGLE BIGGEST)/.test(src));
+}
+
+// ── a telemetry channel must not be able to take the run down ────────────────
+console.log('\n▸ fd 3 — a consumer that stops reading must not stop the council');
+{
+  // WAS OPEN, and it was a hang in a package whose central claim is that it cannot hang. `fs.writeSync`
+  // to a pipe nobody drains fills the ~64 KiB pipe buffer and then blocks FOREVER. Measured before the
+  // fix: a child writing 400-byte lines to an unread fd 3 stopped dead and had to be SIGKILLed.
+  //
+  // So a parent that asked for `--json-events` and then fell behind — or crashed, or simply forgot to
+  // read — would take the whole council with it, mid-run, after the members were already paid for.
+  //
+  // fd 3 is written through an async stream now, with a BOUNDED queue: past the cap events are dropped
+  // and counted. That follows this module's stated rule rather than bending it — the stream is
+  // telemetry, the run is the product. A consumer that fell behind loses events and is told how many.
+  const probe = path.join(os.tmpdir(), `council-fd3-${process.pid}.mjs`);
+  fs.writeFileSync(probe, [
+    "import { spawn } from 'node:child_process';",
+    `const EVENTS = ${JSON.stringify(path.join(ROOT, 'scripts', 'council', 'events.mjs'))};`,
+    "const child = spawn(process.execPath, ['--input-type=module', '-e', `",
+    "  import { createEmitter } from '${EVENTS}';",
+    "  const em = createEmitter({ toFd: 3 });",
+    "  for (let i = 0; i < 20000; i++) em.emit('member_tick', { stage: '1', id: 'a', elapsedMs: i, bytes: 0, lastLine: 'x'.repeat(300) });",
+    "  console.log(JSON.stringify({ finished: true, dropped: em.dropped }));",
+    "  em.close();",
+    "  process.exit(0);",
+    "`], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });",
+    "// fd 3 is deliberately NEVER read — the stalled-consumer case.",
+    "let out = '';",
+    "child.stdout.on('data', (d) => { out += d; });",
+    "child.stderr.on('data', () => {});",
+    "child.on('close', () => { console.log(out.trim() || '{}'); process.exit(0); });",
+    "setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 15000);",
+  ].join('\n'));
+
+  const r = spawnSync('node', [probe], { encoding: 'utf8', timeout: 40_000 });
+  fs.rmSync(probe, { force: true });
+  let v = {};
+  try { v = JSON.parse((r.stdout ?? '').trim().split('\n').filter(Boolean).pop()); } catch { /* it hung */ }
+
+  check('a stalled fd-3 consumer does NOT block the run', v.finished === true,
+    v.finished ? '' : 'the emitter blocked and the child had to be killed');
+  check('...events are dropped rather than queued without limit', Number(v.dropped) > 0,
+    `dropped ${v.dropped} — a bounded queue is the point, not a perfect one`);
+  check('...and the drop count is reported, so a consumer knows it missed some',
+    Number.isFinite(Number(v.dropped)));
+
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'council', 'events.mjs'), 'utf8');
+  check('fd 3 is written through a stream, not writeSync', /fs\.createWriteStream\(null, \{ fd: toFd/.test(src));
+  check('...with a bounded queue', /writableLength > FD_QUEUE_MAX/.test(src));
+  check('...and close() FLUSHES rather than destroying it', /fdStream\.end\(\)/.test(src),
+    'whatever is queued at the finish line includes the run_done a supervisor waits for');
+  check('the FILE sink stays synchronous, so a watcher sees events immediately',
+    /The FILE sink stays synchronous on purpose/.test(src));
+}
+
+// ── the entry point, parsed once against a schema ────────────────────────────
+console.log('\n▸ Arguments — four defects, one root: parsing that did not know what the flags were');
+{
+  const P = (...a) => parseArgs(a);
+
+  // WAS A FORK BOMB, found independently by three of four judges. `has('detach')` matched the `=`
+  // form, and the child argv was built with `argv.filter((a) => a !== '--detach')` — which removes the
+  // BARE token only. So the child re-detached, and its child re-detached, without end, and **the
+  // council never ran**. A boolean that accepts a value is the whole cause; refusing one makes it
+  // unreachable rather than merely fixed.
+  check('--detach=1 is REFUSED, so the respawn chain is unreachable', P('q', '--detach=1').ok === false,
+    P('q', '--detach=1').errors?.[0]);
+  check('...with a message naming the token and the correct form',
+    /is a switch and takes no value/.test(P('q', '--detach=1').errors?.[0] ?? ''));
+  check('...and the bare switch still works', P('q', '--detach').flags.detach === true);
+  check('without() strips BOTH spellings, which the hand-rolled filter did not',
+    without(['q', '--detach=1', '--lenses'], ['detach']).join(' ') === 'q --lenses',
+    without(['q', '--detach=1'], ['detach']).join(' '));
+  for (const b of Object.entries(FLAGS).filter(([, s]) => s.type === 'bool').map(([n]) => n)) {
+    check(`--${b}=x is refused (every switch, not just --detach)`, P('q', `--${b}=x`).ok === false);
+  }
+
+  // WAS OPEN: `--context=a.js` passed the known-flag check and was then thrown away, so the council
+  // ran with ZERO context — which this package's own README calls "five informed guesses". Silent.
+  check('--context=a.js is collected (it used to be discarded)',
+    P('q', '--context=a.js').list.context?.join() === 'a.js');
+  check('--context a.js b.js still works', P('q', '--context', 'a.js', 'b.js').list.context?.join() === 'a.js,b.js');
+  check('--context is repeatable in the = form',
+    P('q', '--context=a.js', '--context=b.js').list.context?.join() === 'a.js,b.js');
+  check('--card folds into the same list', P('q', '--card=c.md').list.context?.join() === 'c.md');
+  check('--context with no files is refused', P('q', '--context').ok === false);
+  check('--context= with an empty value is refused', P('q', '--context=').ok === false);
+
+  // WAS OPEN: Number('abc') is NaN, NaN fails `> 0`, and the code fell into the 15-minute default —
+  // so a typo silently chose a budget nobody asked for.
+  check('--timeout=abc is refused, not silently defaulted', P('q', '--timeout=abc').ok === false,
+    P('q', '--timeout=abc').errors?.[0]);
+  check('--timeout=20 passes through untouched', P('q', '--timeout=20').flags.timeout === 20);
+  check('--timeout=0.001 clamps to the floor', P('q', '--timeout=0.001').flags.timeout === 1);
+  check('...and records that it clamped', Boolean(P('q', '--timeout=0.001').flags.timeoutClamped));
+  check('--timeout=99999 clamps to the ceiling', P('q', '--timeout=99999').flags.timeout === 120);
+  check('--timeout=015 is honoured and NOT reported as clamped',
+    P('q', '--timeout=015').flags.timeout === 15 && !P('q', '--timeout=015').flags.timeoutClamped,
+    'the old check compared strings, so a cosmetic difference read as a clamp');
+
+  // The space form is refused rather than supported, because `--members codex` would take "codex"
+  // out of the question — changing the roster and the question at once.
+  check('--members without = is refused', P('q', '--members', 'codex').ok === false);
+  check('...naming the corrected form', /--members=codex/.test(P('q', '--members', 'codex').errors?.[0] ?? ''));
+  check('--members=codex works', P('q', '--members=codex').flags.members === 'codex');
+
+  // --events is the one flag that is meaningful bare AND with a value.
+  check('--events bare means "yes"', P('q', '--events').flags.events === true);
+  check('--events=path means that path', P('q', '--events=/tmp/x.ndjson').flags.events === '/tmp/x.ndjson');
+
+  check('an unknown flag is refused', P('q', '--nope').ok === false);
+  check('...and the hint explains the quoting trap', P('q', '--nope').hint === 'unknown');
+
+  // A question word that matches a context filename must survive — it used to be filtered out by
+  // value, so `--context README.md` plus "is README.md stale?" lost the word from the question.
+  check('a question word matching a context path survives',
+    P('is README.md stale?', '--context', 'README.md').question === 'is README.md stale?');
+
+  // `--` is the escape hatch for a question that legitimately contains a flag-shaped word.
+  check('everything after -- is question text, flags included',
+    P('--', 'use', '--lenses', 'here').question === 'use --lenses here');
+  check('...and no flag from after -- is switched on', P('--', 'use', '--lenses').flags.lenses === undefined);
+
+  // Nothing may be silently dropped: council.mjs must not keep its own parsing any more.
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'council', 'council.mjs'), 'utf8');
+  check('council.mjs parses through args.mjs rather than scanning argv itself',
+    /const parsed = parseArgs\(argv\)/.test(src));
+  check('...and no hand-rolled startsWith("--") flag scan is left',
+    !/argv\.find\(\(a\) => a\.startsWith\(`--\$\{n\}=`\)\)/.test(src));
+  check('...and --detach strips its own flag with without()', /without\(argv, \['detach'\]\)/.test(src));
+}
+
+// ── round seven: 6.9/10, DOWN from 7.3 — and correctly ───────────────────────
+console.log('\n▸ Round seven — the newest feature was not held to the standard the rest enforces');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'council', 'council.mjs'), 'utf8');
+
+  // WAS OPEN: the env allowlist stripped the proxy variables, so on any corporate machine EVERY
+  // member fails with an opaque connection error and nothing points at the allowlist as the cause.
+  {
+    const allow = src.match(/const ENV_ALLOW = \[[\s\S]*?\];/)?.[0] ?? '';
+    for (const v of ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'NODE_EXTRA_CA_CERTS']) {
+      check(`${v} reaches members — a member with no network is a member that fails`, allow.includes(v));
+    }
+    check('...and NODE_OPTIONS still does not', !allow.includes('NODE_OPTIONS'),
+      'it can inject --require before a member\'s permission mode exists');
+    check('...and nothing credential-shaped was added', !/API_KEY|_TOKEN|SECRET|PASSWORD/.test(allow));
+  }
+
+  // WAS OPEN: `run_start.detached` asked `has('detach')` in the CHILD, which by design no longer
+  // carries the flag — so the field was always false in the stream that is the source of truth.
+  check('a detached run identifies itself as detached', /COUNCIL_DETACHED === '1'/.test(src));
+  check('...because the parent sets it on the child\'s environment', /COUNCIL_DETACHED: '1'/.test(src));
+
+  // WAS OPEN: the detach log was the one output opened with a plain 'w', skipping O_NOFOLLOW and the
+  // boundary every other output goes through — the newest code, not held to the file's own standard.
+  check('the detach log is opened with O_NOFOLLOW like every other output',
+    /const logFd = fs\.openSync\(logPath, fs\.constants\.O_WRONLY[\s\S]{0,120}O_NOFOLLOW/.test(src));
+
+  // WAS OPEN: --detach reported "the council is running" and exited 0 before anything confirmed the
+  // child had survived its own synchronous startup — so a watcher waited forever on a dead stream.
+  check('--detach confirms the child got past startup before claiming success',
+    /const outcome = await new Promise/.test(src));
+  check('...by racing the EXIT CODE, not merely asking whether the pid exists',
+    /kid\.once\('exit'/.test(src),
+    'liveness alone cannot tell a crash from a run that legitimately finished fast');
+  check('...and exit 2 ("could not convene") is not treated as a crash',
+    /outcome\.code !== 2/.test(src), 'that is the state of every CI runner');
+  check('...and prints the child\'s own output when it is not',
+    /The detached council exited immediately/.test(src));
+
+  // WAS OPEN: a typo'd --members fell through to "install one", about CLIs the user has installed.
+  check('a typo\'d --members id names the roster instead of blaming the install',
+    /not in the roster/.test(src));
+
+  // WAS OPEN: the budget warning counted the pack but not the brief — up to 8,000 characters of the
+  // very thing it exists to measure.
+  check('the context-budget estimate includes the brief',
+    /\(ctx\.chars \+ \(brief\.text\?\.length \?\? 0\)\) \/ 4/.test(src));
+
+  // WAS OPEN: `**1.** Response C` puts the emphasis around the ORDINAL, so the marker sat between the
+  // digit and the period and the pattern missed it — falling through to the permissive fallback,
+  // where prose can vote.
+  check('bolded ordinals are still ordinals',
+    rankedLabels('FINAL RANKING:\n**1.** Response C\n**2.** Response A').join('') === 'CA');
+  check('...and plain ones still work',
+    rankedLabels('FINAL RANKING:\n1. Response C\n2. Response A').join('') === 'CA');
+  check('...and prose still cannot vote',
+    rankedLabels('FINAL RANKING:\n**1.** Response C\n**2.** Response A — weaker than Response C').join('') === 'CA');
+
+  // WAS OPEN: `[^a-z0-9_.$/-]` contains `$/-`, which is a RANGE from 0x24 to 0x2d — so %, &, ', (,
+  // ), *, + and , all counted as word characters and got glued onto tokens, which then failed to
+  // match the same word written cleanly.
+  {
+    const t = contentTokens('retry(queue) & cache%hit');
+    check('punctuation is not glued into tokens', ![...t].some((w) => /[%&()*+,]/.test(w)),
+      [...t].join(','));
+    check('...and the real words still come through', t.has('retry') && t.has('queue') && t.has('cache'));
+  }
+
+  // WAS OPEN, and it was mine: three `void {…}` blocks of unreachable code left behind when
+  // loadBrief was changed to collect refusals and continue.
+  check('no unreachable void-object blocks are left in context.mjs',
+    !/void \{\n/.test(fs.readFileSync(path.join(ROOT, 'scripts', 'council', 'context.mjs'), 'utf8')),
+    'dead code that looks like it does something is worse than none');
+}
+
 // ── the CLI actually runs, end to end, with the flags it documents ───────────
 console.log('\n▸ Integration — the suite must run the CLI, not only import its parts');
 {
@@ -1742,8 +2229,7 @@ console.log('\n▸ Integration — the suite must run the CLI, not only import i
   // `--events` with `--preflight` exercises the emitter, the write boundary and the renderer without
   // spending anything.
   const withEvents = run(['a question', '--preflight', '--events']);
-  check('the CLI loads and runs with --events', withEvents.status === 0,
-    `exit ${withEvents.status}${withEvents.stderr?.includes('ReferenceError') ? ' — ' + withEvents.stderr.split('\n')[0] : ''}`);
+  check('the CLI loads and runs with --events', loadsCleanly(withEvents), crashed(withEvents));
   check('...and no stack trace reaches the user',
     !/ReferenceError|TypeError|is not defined/.test(withEvents.stderr ?? ''),
     (withEvents.stderr ?? '').split('\n').find((l) => /Error/.test(l)) ?? '');
@@ -1764,8 +2250,7 @@ console.log('\n▸ Integration — the suite must run the CLI, not only import i
     ['q', '--preflight', '--events', '--lenses', '--rubric', '--no-live'],
   ]) {
     const r = run(args);
-    check(`the CLI loads with ${args.slice(1).join(' ')}`, r.status === 0 && !/is not defined/.test(r.stderr ?? ''),
-      `exit ${r.status}`);
+    check(`the CLI loads with ${args.slice(1).join(' ')}`, loadsCleanly(r), crashed(r));
   }
 
   // Usage errors must be usage errors, not stack traces.
@@ -1774,7 +2259,8 @@ console.log('\n▸ Integration — the suite must run the CLI, not only import i
     noQ.status === 1 && /Usage:/.test(noQ.stderr ?? ''), `exit ${noQ.status}`);
   const spaced = run(['q', '--members', 'codex', '--preflight']);
   check('a space-separated =-flag is refused with the right form',
-    spaced.status === 1 && /takes its value with an "="/.test(spaced.stderr ?? ''), `exit ${spaced.status}`);
+    spaced.status === 1 && /needs its value attached with "="/.test(spaced.stderr ?? ''),
+    `exit ${spaced.status} — the message now comes from args.mjs and names the corrected form`);
 
   // Every script must at least parse and import cleanly — the cheapest possible catch for the bug
   // above, applied to all of them rather than to the one that broke.

@@ -42,6 +42,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { checkWritable, mkdirpSafe } from './safe-write.mjs';
 
 /** Bump when a field changes meaning. A consumer that cannot read this must say so, not guess. */
 export const SCHEMA = 1;
@@ -106,11 +107,18 @@ export function createEmitter({ file = null, toFd = null } = {}) {
 
   if (file) {
     try {
+      // Guarded by the same boundary the run files use, and for a reason CI found: on Linux,
+      // `fs.mkdirSync('/proc/a/b', { recursive: true })` **hangs forever** instead of throwing. This
+      // module is exercised directly by the tests and by any future caller, so it cannot rely on
+      // council.mjs having checked first — the check has to be here, where the blocking call is.
+      const w = checkWritable(file, path.parse(path.resolve(file)).root);
+      if (!w.ok) throw new Error(w.reason);
+
       // WAS OPEN: this computed the directory with a regex that requires a slash, so
       // `--events=run.ndjson` produced "run.ndjson" as the DIRECTORY name, created it, and then
       // failed to open the file — with --events treated as fatal, the run refused to start at all.
       // path.dirname returns "." for a bare filename, which is what was meant.
-      fs.mkdirSync(path.dirname(file), { recursive: true });
+      mkdirpSafe(path.dirname(file));
 
       // `'w'`, not `'a'`. **One file is one run.**
       //
@@ -136,9 +144,40 @@ export function createEmitter({ file = null, toFd = null } = {}) {
     try { fs.writeSync(toFd, ''); } catch (e) { broken = `fd ${toFd} is not writable: ${e.message}`; }
   }
 
+  // ── fd 3 is written ASYNCHRONOUSLY, with a bounded queue ────────────────────────────────────
+  //
+  // **`fs.writeSync` to a pipe nobody drains blocks forever.** Measured: a child writing 400-byte lines
+  // to an unread fd 3 filled the ~64 KiB pipe buffer and then stopped dead — it never returned, and had
+  // to be SIGKILLed. So a parent that asked for `--json-events` and then stopped reading would hang the
+  // entire council mid-run. In a package whose central robustness claim is that it cannot hang, a
+  // *telemetry* channel taking the run down with it is the wrong way round.
+  //
+  // A write stream queues in memory instead of blocking, which converts a hang into unbounded growth —
+  // better, but still not acceptable. So the queue is capped, and past the cap events are **dropped and
+  // counted**. That is the right trade and it follows this module's stated rule: the stream is
+  // telemetry, the run is the product. A consumer that fell behind loses events and is told how many;
+  // it does not get to stop the council.
+  const FD_QUEUE_MAX = 1024 * 1024;
+  let fdStream = null;
+  let dropped = 0;
+  if (toFd !== null && broken === null) {
+    try {
+      fdStream = fs.createWriteStream(null, { fd: toFd, autoClose: false });
+      // A reader that closes the pipe gives EPIPE. That is its choice, not an error in the run.
+      fdStream.on('error', () => { fdStream = null; });
+    } catch { fdStream = null; }
+  }
+
   const write = (line) => {
-    if (fd !== null) { try { fs.writeSync(fd, line); } catch { /* telemetry, not the product */ } }
-    if (toFd !== null) { try { fs.writeSync(toFd, line); } catch { /* reader went away mid-run */ } }
+    if (fd !== null) {
+      // The FILE sink stays synchronous on purpose: a regular file does not block, and a watcher
+      // tailing it should see an event the instant it happens rather than on a flush boundary.
+      try { fs.writeSync(fd, line); } catch { /* telemetry, not the product */ }
+    }
+    if (fdStream) {
+      if (fdStream.writableLength > FD_QUEUE_MAX) { dropped++; return; }
+      try { fdStream.write(line); } catch { /* reader went away mid-run */ }
+    }
   };
 
   return {
@@ -148,7 +187,15 @@ export function createEmitter({ file = null, toFd = null } = {}) {
     emit(ev, data = {}) {
       write(`${JSON.stringify({ t: Date.now() - t0, ts: new Date().toISOString(), ev, ...data })}\n`);
     },
-    close() { if (fd !== null) { try { fs.closeSync(fd); } catch { /* already gone */ } fd = null; } },
+    /** How many events were dropped because an fd-3 consumer fell behind. 0 in the normal case. */
+    get dropped() { return dropped; },
+
+    close() {
+      if (fd !== null) { try { fs.closeSync(fd); } catch { /* already gone */ } fd = null; }
+      // `end()`, not `destroy()`: whatever is still queued is a consumer's last events, and throwing
+      // them away at the finish line would lose exactly the run_done a supervisor is waiting for.
+      if (fdStream) { try { fdStream.end(); } catch { /* already gone */ } fdStream = null; }
+    },
   };
 }
 

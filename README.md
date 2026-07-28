@@ -69,13 +69,15 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **487 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and skips
+beside the case it must catch. **648 assertions across three suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
 elsewhere, so the exact count moves by one — a number that drifts is worth saying so about rather
 than rounding into a claim.)
 
 ```bash
-node tests/hooks.test.mjs      # 109 passed
-node tests/council.test.mjs    # 378 passed
+node tests/hooks.test.mjs      # 128 passed
+node tests/council.test.mjs    # 510 passed
+node tests/survives-session-death.mjs   # 10 passed — launches a council,
+                                       # SIGKILLs the session, checks the run lived
 ```
 
 ---
@@ -178,7 +180,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 21 scripts — `scripts/`
+### 37 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -189,12 +191,12 @@ before any code exists)
 | `mutation-test.mjs` | delete an invariant — does the suite notice? |
 | `scan-secrets.mjs` | tree **and full git history**, with a named allowlist |
 | `reflect.mjs` | what has happened since the last consolidation |
-| `council/*.mjs` | 13 files — the council, below |
+| `council/*.mjs` | 30 files — the council, below |
 
 ### The council — four vendors, three stages, no API keys
 
 Synced from [`all-cli-council`](https://github.com/developerjillur/all-cli-council), which is
-the same code published standalone. **13 scripts, 378 assertions.**
+the same code published standalone. **30 scripts, 510 assertions.**
 
 ```bash
 node scripts/council/council.mjs "<question>" --context src/a.js src/b.js
