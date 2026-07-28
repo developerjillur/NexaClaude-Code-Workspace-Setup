@@ -69,13 +69,13 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **~155 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and
-skips elsewhere, so the exact count moves by one — a number that drifts is worth saying so about
-rather than rounding into a claim.)
+beside the case it must catch. **487 assertions, and the blocking paths were watched blocking.** (One is macOS-specific and skips
+elsewhere, so the exact count moves by one — a number that drifts is worth saying so about rather
+than rounding into a claim.)
 
 ```bash
-node tests/hooks.test.mjs      # 99 passed
-node tests/council.test.mjs    # 55 passed
+node tests/hooks.test.mjs      # 109 passed
+node tests/council.test.mjs    # 378 passed
 ```
 
 ---
@@ -178,7 +178,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 9 scripts — `scripts/`
+### 22 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -188,30 +188,52 @@ before any code exists)
 | `mutation-test.mjs` | delete an invariant — does the suite notice? |
 | `scan-secrets.mjs` | tree **and full git history**, with a named allowlist |
 | `reflect.mjs` | what has happened since the last consolidation |
-| `council/*.mjs` | the council, below |
+| `council/*.mjs` | 13 files — the council, below |
 
-### The council — five models, four vendors, three stages
+### The council — four vendors, three stages, no API keys
+
+Synced from [`all-cli-council`](https://github.com/developerjillur/all-cli-council), which is
+the same code published standalone. **13 scripts, 378 assertions.**
 
 ```bash
 node scripts/council/council.mjs "<question>" --context src/a.js src/b.js
-node scripts/council/council.mjs "x" --preflight     # who is reachable; free
+node scripts/council/council.mjs "x" --preflight              # who is reachable; free
+node scripts/council/verify-containment.mjs                   # prove no member can write
+node scripts/council/watch.mjs                                # follow a run from another terminal
 ```
 
-Every member answers **alone**, then ranks the others **without knowing whose answer is
-whose**, then you synthesise. Runs on local CLIs — **no API keys**.
+Every member answers **alone**, then ranks the others **without knowing whose answer is whose**,
+then you synthesise. Runs on local CLIs.
 
-- **Borda count with self-votes excluded**, because 3 of 4 judges ranked their own unlabelled
-  answer first — 75% against a 20% chance rate. **Anonymisation does not prevent
-  self-enhancement; a model recognises its own writing.**
-- **Bias diagnostics printed above the score** — self-enhancement, verbosity correlation,
-  family mix. Read them before the number.
-- **Nothing is ever retried and it never hangs.** A missing CLI is named before anything
-  starts; a quota message is refused rather than ranked as an opinion; a hung member is killed
-  by process group. With no members at all it exits in ~30 ms having spent nothing.
-- **Secrets are refused by shape**, and context is fenced as data with the instruction placed
-  after it, so a file cannot smuggle an instruction.
+**The finding that justifies the whole package**, and it is not hypothetical:
 
-Also published standalone: [`all-cli-council`](https://github.com/developerjillur/all-cli-council).
+> The promise is one sentence — *"members advise, they never edit."* It was enforced by a test
+> that pattern-matched each member's flags for `read-only|plan|--print|-p` and asserted a
+> match. **That test passed. Three of the five members could write anyway.**
+
+So `verify-containment.mjs` **proves** it per member, by trying to write, instead of believing a
+flag. One member is now excluded by default with `contained: false` recorded against it — and
+opting it back in prints a warning into the run file.
+
+**Other things it does that a first version would not:**
+
+| | |
+|---|---|
+| **Borda, self-votes excluded** | 3 of 4 judges ranked their own unlabelled answer first — 75% against a 20% chance rate. **Anonymisation does not prevent self-enhancement; a model recognises its own writing** |
+| **A position is worth the same from every reviewer** | the first fix equalised each *ballot's* total, which inverted the unfairness instead of removing it — a reviewer ranking 2 of 4 gave its top pick up to 2.5× the influence of a complete ballot's |
+| **UTF-8 across pipe boundaries** | member output was accumulated as raw Buffers, so `toString()` ran per chunk and a 3-byte character split across a ~64 KiB boundary became `U+FFFD`. **Every answer longer than one pipe buffer was silently corrupted.** Measured: 100,000 em-dashes through a pipe arrived with 8 replacement characters; with `setEncoding`, zero |
+| **Bias diagnostics above the score** | self-enhancement, verbosity correlation, family mix. Read them before the number |
+| **Never retries, never hangs** | a missing CLI is named before anything starts; a quota message is refused rather than ranked as an opinion; a hung member is killed by process group. With no members at all it exits in ~30 ms having spent nothing |
+| **Secrets refused by shape** | and context is fenced as data with the instruction placed *after* it, so a file cannot smuggle an instruction |
+| **An event stream** | `--events` writes NDJSON; `watch.mjs` follows a run from another terminal, or after it has finished |
+
+**Flags:** `--context` · `--revise` · `--lenses` · `--rubric` · `--members` · `--stage` ·
+`--peer-review` · `--events` · `--json-events` · `--timeout` · `--print` · `--card` ·
+`--local-roster` · `--allow-uncontained` · `--verify-delivery` · `--no-live` · `--preflight`
+
+**Read every stage-1 answer before the rankings.** The tally pulls you toward consensus; form
+your own view first, or you are synthesising their synthesis. **Where they disagree is the
+output** — averaging four models produces something none of them would defend.
 
 ### The board — `board/`
 

@@ -1,151 +1,145 @@
 ---
 name: council
-description: Put a hard question to five models across four vendors, anonymise their answers, have them rank each other, then synthesise. Use before a decision that is expensive to reverse — architecture, a plan, a security judgement, a number nobody has measured. Not for questions with a knowable answer.
+description: Put a decision to four models across three vendors, have them rank each other blind, then synthesise. Use in plan mode before committing to an approach; before an architecture, schema, security or concurrency decision that is expensive to reverse; when a review is uncertain or two reviewers disagree; before verifying that a design actually holds; and when about to ship something whose failure mode is data loss, a breach, or a production outage. Do NOT use for questions with a knowable answer — read the code, run the test, grep. Costs 10–30 minutes.
 ---
 
 # The council
 
-**Five models, four vendors, three stages.** Adapted from
-[karpathy/llm-council](https://github.com/karpathy/llm-council); rebuilt on the CLIs this
-machine already has, because §1 forbids a metered API.
+**Four models, three vendors, three stages** — five and four before one member was measured able
+to write files and excluded by default. Every member answers alone, then ranks the others
+**without knowing whose answer is whose**, then you synthesise. Runs on local CLIs — no API
+keys.
 
 ```bash
-node scripts/council/council.mjs "<question>" --context <file> [<file>...]
-node scripts/council/council.mjs "<question>" --revise            # +MoA round: answer again, having seen the others
-node scripts/council/council.mjs "<question>" --stage1-only      # opinions, no peer review
-node scripts/council/council.mjs "<question>" --members=codex,grok
+# Installed as a plugin — $CLAUDE_PLUGIN_ROOT resolves to wherever it was installed.
+# Cloned standalone, use the path you cloned to instead.
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" "<question>" --context <file>... --events
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" "<question>" --context <f> --lenses    # +method diversity
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" "<question>" --context <f> --revise    # +MoA round
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" "Grade this" --context <f>... --rubric # score /10
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" "x" --preflight                        # who is here; free
 ```
 
-## Context is the whole game
+**Pass `--events`.** It writes `.council/runs/<slug>.events.ndjson`, one NDJSON line per event, and
+`node "$CLAUDE_PLUGIN_ROOT/scripts/council/watch.mjs"` follows it from any other terminal or process. On a
+10–30 minute run that is the difference between "four models are thinking" and "this has hung" —
+tell the user that command so they can watch instead of waiting blind.
 
-**The budget is ~40k tokens, and it was measured rather than chosen.** The original 30k was a
-guess. Probed against the real members with real source and a one-word instruction at the end:
+**A member's own output cannot be relayed** — measured, every CLI is buffered in plain mode and its
+first byte arrives at 90–98% of the run. The progress is a parent-side clock per member. Do not
+promise the user streaming text.
 
-| | codex | grok | gemini | sonnet |
-|---|---|---|---|---|
-| **~27k** | ✅ | ✅ | ✅ | ✅ |
-| **~80k** | ✅ | ✅ | **❌ ignored the instruction and summarised instead** | — |
+## Two things to check before the first run on a machine
 
-**Capacity was never the limit — instruction-following was.** Every member *accepted* 80k
-without erroring. One stopped doing what it was asked, which is the failure that looks like an
-answer. That is *lost in the middle* in practice, and it is open item **#113**, still unmeasured
-in the plan itself.
-
-So: a large file now arrives **whole** (80k chars, ~20k tokens) rather than halved, the pack
-ceiling **refuses a file rather than trimming it to fit**, and every run prints how much of the
-budget was used — with a warning past 27k, the size all four were verified obedient at.
-
-**Raising it is a measurement, not a preference.** Re-run the probe first.
-
-**A council with no context is five confident guesses about code nobody read.** Members run
-outside the repo and see only what you pass. `--context` assembles it: named files, capped,
-truncation announced inside the text, and a standing brief so nobody proposes an embeddings
-API or a cache on the audio path.
-
-**Assembled, never granted.** The obvious alternative — run them in the repo with their
-read-only flags — is one this project already disproved: `codex exec --sandbox read-only`
-reads the whole container including the OAuth token. Read-only means *cannot write*. So
-`context.mjs` refuses `.env`, `data/`, `auth.json`, keys and the prompt log by path, and
-refuses any file whose contents match a secret shape. **Verified: passing `code/.env` is
-refused, not redacted.**
-
-| | Verified 2026-07-28 |
-|---|---|
-| GPT-5.6 sol | `codex exec`, read-only, `xhigh` |
-| Grok 4.5 | `grok -p`, high effort, web search off |
-| Gemini 3.1 Pro | `agy -p`, plan mode — **via Antigravity**; the `gemini` CLI now refuses this account outright |
-| Fable 5 | `claude --print` |
-| Sonnet 5 | `claude --print` |
-| **Chairman** | **you** — the session that ran it |
-
-## The five judge biases, and what we do about each
-
-Named in the LLM-as-a-judge literature. **Three were measured on our own runs** rather than
-assumed, which is the only reason we know which ones bite here.
-
-| Bias | Us | Handling |
-|---|---|---|
-| **Position** — the first slot wins | — | **each reviewer gets its own permutation**, seeded from the question. Better than the original, which fixes one order for everyone so the tilt compounds invisibly |
-| **Self-enhancement** — a judge prefers its own answer | **measured: 3 of 4 ranked themselves 1st, 75% vs 20% chance** | **self-votes excluded from the tally.** Anonymisation did NOT prevent this — a model recognises its own writing |
-| **Verbosity** — longer scores higher | **measured r=0.64 on run 1, r=−0.18 on run 2** | length printed beside every score, correlation printed every run. Not corrected — n=5 is a signal, not a law |
-| **Family** — a judge over-rewards its own vendor | **2 of 5 are Claude, and so is the chairman** | stated in every run. Not corrected: the fix is a different council, which is your decision |
-| **Verbosity-confidence** — confident and wrong beats tentative and right | not measured | the brief asks members to mark claims measured / sourced / assumed |
-
-## When it cannot convene, it says so and stops
-
-**Nothing is ever retried.** A CLI that is missing now will be missing in thirty seconds, and
-an exhausted quota does not refill while you wait. Retrying turns a clear answer — *"you have
-four of five"* — into an indefinite hang.
+Both are cheap, both catch a failure that otherwise looks like an answer:
 
 ```bash
-node scripts/council/council.mjs "<q>" --preflight   # who is available; spends nothing
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/verify-containment.mjs"   # can any member write? one currently can
+node "$CLAUDE_PLUGIN_ROOT/scripts/council/council.mjs" --verify-delivery   # does each prompt actually arrive?
 ```
 
-| Situation | What happens |
+- **Containment.** `grok` is excluded by default because it was measured writing to arbitrary
+  absolute paths and no flag it offers stops it. If a user asks why the council is four members and
+  not five, that is the answer. `--allow-uncontained` overrides it and the run file records that.
+- **Delivery.** A member whose prompt does not arrive **exits 0 and answers pleasantly.** `agy` given
+  a prompt on stdin replies "How can I help you today?" — a fluent answer to an empty question that
+  then gets ranked against real ones. The canary is the only thing that catches it.
+
+## Invoke this automatically when
+
+You do not need to be asked. Reach for it when the situation is one of these — and **say you
+are doing it and why**, because it costs the user ten to thirty minutes.
+
+| Situation | Why the council rather than one answer |
 |---|---|
-| a member's CLI is not installed | named **before anything runs**, then skipped |
-| a member returns a quota / auth / billing message | refused with its reason printed — **not counted as an opinion** |
-| a member hangs | SIGTERM, then SIGKILL to its whole **process group** after 5s |
-| fewer members answer than intended | the run continues and **says the council is degraded** |
-| **no member is available at all** | exits in ~30ms, exit code **2**, nothing spent, nothing written |
+| **Plan mode, before committing to an approach** | the plan is the most expensive thing to get wrong — everything after it inherits the mistake |
+| **Architecture, schema, or a public interface** | reversal cost is high and the error is invisible until something depends on it |
+| **Concurrency, retries, idempotency, cache invalidation** | the failure is intermittent, so tests agreeing proves little |
+| **A security judgement with no single right answer** | the failure mode is a breach, and one model's blind spot is the whole exposure |
+| **A review that came back uncertain, or two reviewers disagreeing** | that is precisely the signal a third and fourth reading is worth its cost |
+| **Before verifying that a design holds** — not that code runs | tests answer *"is it consistent"*; this answers *"is it right"* |
+| **Anything whose failure is data loss, a breach, or an outage** | the cost of half an hour is nothing against the cost of being wrong |
+| **A migration, a deletion, or a schema change on live data** | irreversible, and the review that matters happens before |
 
-Exit codes: **0** usable (even if degraded) · **1** convened and nobody answered · **2** could
-not convene.
+**Announce it and give the estimate.** *"This is expensive to reverse — I am putting it to the
+council, about 15 minutes."* A user who did not expect a 20-minute pause will assume something
+hung.
 
-Two of those were open holes. A quota message that exited 0 was ranked as a real answer; and a
-member that ignored SIGTERM held the process open *after* the council had finished, because
-killing it left its grandchild holding the inherited pipe. **330ms to exit now, measured, where
-it used to sit for 15 seconds.**
+## Do NOT invoke it when
 
-## The three stages
+- **The answer is knowable.** It is in the code, a test, a log, or `grep`. A council guessing
+  is slower, worse, and **sounds more authoritative than one command that actually checks.**
+- **The question is a preference.** Naming, formatting, file layout. There is no fact to find.
+- **You are stuck, not uncertain.** A council will not tell you what the user wants.
+- **The choice is uncomfortable rather than unclear.** You will get a well-argued average and a
+  decision nobody owns.
+- **Anything latency-sensitive**, or inside a loop.
 
-1. **Independent opinions.** All five in parallel, none sees another's answer.
-2. **Anonymised peer review.** Each sees the others as *Response A, B, …* — **including its
-   own, unlabelled** — and ranks them on accuracy first, insight second. Anonymity is the
-   load-bearing part: it stops a model deferring to a name instead of an argument. It works —
-   on the first live run GPT-5.6 ranked Grok's answer above its own and criticised it anyway.
-3. **Synthesis — yours, not a subprocess's.** The script deliberately stops after stage 2. A
-   chairman running as a pipe would lose the conversation that made the question worth asking.
+**If unsure, do the cheap thing first.** Read the file. Run the test. A council after five
+minutes of looking is a much better council, because the question will be sharper.
 
-## When to call it
+## Pass context, or you get five informed guesses
 
-**Before a decision that is expensive to reverse**, and where more thinking genuinely helps:
+Members run **read-only, outside the repo**, and see only what you send.
 
-- an architecture choice, or a plan before it becomes cards
-- a security judgement — the `security-gate` questions that have no single right answer
-- *"is this actually the right approach"*, when you already have a working one
-- a `4-review` where the two existing reviewers **disagree**
+```bash
+--context src/queue.js src/retry.js       # the files the decision actually turns on
+```
 
-## When not to
+Send **the code the decision is about**, not the whole tree. The budget is ~40k tokens and a
+file that would exceed it is refused rather than trimmed — a member given half a file answers
+confidently about the half it has.
 
-- **A question with a knowable answer.** Read the code, run the test, `graphify explain`. Five
-  models guessing is worse than one `grep`, slower, and reads as more authoritative.
-- **Anything on the caller's path.** Minutes, not milliseconds.
-- **To avoid deciding.** A council produces material for a judgement, never the judgement. If
-  you are calling it because the choice is uncomfortable rather than unclear, the answer will
-  be a well-argued average.
+`.env`, `data/`, keys and anything whose contents look like a secret are **refused
+automatically**. You do not have to filter by hand, and you should not rely on that alone.
 
-## Reading the output
+The project brief is read from `.council/BRIEF.md`, `AGENTS.md` or `CLAUDE.md`. **If none
+exists, say so** — it is the cheapest quality win available and takes ten lines.
 
-`docs/council/<slug>.md`, committed — a council you cannot cite from `DECISIONS.md` was a
-conversation, not evidence.
+## Reading the result
 
-**Three rules for the chairman, in order of how often they are ignored:**
+`.council/runs/<slug>.md`.
 
-1. **Where they disagree is the most valuable output.** Record both sides. Do not average them.
-   §10 says this about two reviewers; it is more true of five.
-2. **Consensus is not correctness.** Five models on overlapping training data agreeing is weak
-   evidence. This project keeps a list of **77 disproven claims** that were all plausible when
-   written, and most were unanimous.
-3. **Every number goes through `measure-dont-claim`** before it is used, no matter how many
-   members stated it.
+**Read every stage-1 answer before the rankings.** The tally pulls you toward consensus; form
+your own view first or you are synthesising their synthesis.
 
-## What it costs
+Then three rules, in the order they are usually ignored:
 
-Each member is **minutes** on a real question — the one-word floors are 10–23 s, and one measured run
-measured Codex exceeding **10 minutes** on a real plan review. Stage 2 runs the whole thing
-again. **Budget half an hour and do something else**, exactly as §10 requires of Codex.
+1. **Where they disagree is the output.** Record both sides in the plan or the decision record.
+   Averaging the members produces something none of them would defend.
+2. **Consensus is not correctness.** They share training data, so agreement measures overlap as
+   much as truth. **Check the bias diagnostics printed above the score** — self-enhancement and
+   verbosity are flagged when present.
+3. **Every number goes through your own verification**, however many members stated it.
+4. **Read the reasoning-overlap number.** It is the measured version of "consensus is not
+   correctness": the pack’s own vocabulary is subtracted, so what is left is how much of the
+   agreement was five arguments rather than one told five times.
+5. **Weigh by confidence, not only by count.** Every answer ends with `CONFIDENCE:` and
+   `WOULD CHANGE MY MIND IF:`. Five members agreeing at 55% is a request for more context, not a
+   decision — and the second line names the measurement to go and take.
+6. **Report the minority view even when you overrule it.** Stage 2 captures
+   `MINORITY VIEW WORTH KEEPING` and `WHAT IS LOST IF THE TOP ANSWER WINS` precisely because a
+   synthesis destroys them first.
 
-Members run **read-only, from a scratch directory outside the repo**. They advise; they never
-edit. Five agents with write access to a tree holding a live OAuth token is the lethal
-trifecta with extra seats.
+**Stage 3 is yours.** The script stops after the peer review deliberately: a chairman running
+as a subprocess has the answers and not the reason the question was asked.
+
+## Two things that will surprise you if nobody says them
+
+**A repo cannot supply the roster.** `.council/members.json` is ignored unless `--local-roster` is
+passed, and even then its `contained` flag is stripped. Every field in a roster is a command this
+script executes, so a cloned repository would otherwise choose what runs. If a user asks why their
+`.council/members.json` had no effect, that is the answer.
+
+**Windows is refused, not degraded.** Use WSL. Executable lookup and the never-hang teardown are both
+POSIX-only, and pretending otherwise reported every member as missing.
+
+## When it cannot run
+
+**Nothing is ever retried**, and it never hangs. A missing CLI is named before anything starts;
+a quota or auth message is refused rather than ranked as an opinion; a hung member is killed by
+process group; and with no members at all it exits in ~30 ms having spent nothing.
+
+If it comes back degraded — fewer answers than intended — **the output says so**, and one
+answer is one opinion rather than a council. Report that to the user rather than presenting
+four as five.

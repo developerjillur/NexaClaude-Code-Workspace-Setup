@@ -221,9 +221,22 @@ if (input?.tool_name === 'Bash') {
     !unexpanded(t) &&
     (path.isAbsolute(t) || t.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(t) || fs.existsSync(t));
 
+  // A command that begins by changing directory means its relative paths are relative to
+  // THERE, not to where the hook happens to be standing. Ignoring the `cd` resolved every
+  // relative token against the session's cwd — and when that cwd was inside a guarded tree,
+  // an edit to a file in a completely different repository was refused. Third false positive
+  // of the same family: **a relative path is meaningless without the directory it is relative
+  // to, and the command says which one.**
+  const cdMatch = cmd.match(/^\s*cd\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;)/);
+  const cdTo = cdMatch ? (cdMatch[2] ?? cdMatch[3] ?? cdMatch[4]) : null;
+  const base = cdTo && path.isAbsolute(cdTo) ? cdTo : (input?.cwd || process.cwd());
+
   const targets = new Set();
   for (const re of writes) {
-    for (const m of cmd.matchAll(re)) if (m[2] && looksLikePath(m[2])) targets.add(m[2]);
+    for (const m of cmd.matchAll(re)) {
+      if (!m[2] || !looksLikePath(m[2])) continue;
+      targets.add(path.isAbsolute(m[2]) ? m[2] : path.resolve(base, m[2]));
+    }
   }
   const guarded = [...targets].find(isCode);
   if (guarded) file = guarded;

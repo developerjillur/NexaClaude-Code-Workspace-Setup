@@ -481,6 +481,21 @@ console.log(`\n${'─'.repeat(72)}`);
       'tee ' + code + '/z.js < /tmp/x'],
   ];
   for (const [why, cmd] of BLOCKED) check('refuses ' + why, fire(cmd) === 2);
+
+  // A leading `cd` changes what a relative path means. Ignoring it resolved every relative
+  // token against the session's cwd, and when that cwd sat inside a guarded tree, an edit to
+  // a file in a DIFFERENT repository was refused. Three real commands were blocked this way
+  // before it was found — the third false positive of the same family.
+  {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'elsewhere-'));
+    try {
+      check('a leading cd means relative paths are relative to THERE',
+        fire(`cd "${elsewhere}" && echo x ${String.fromCharCode(62)} notes.md`) === 0);
+      check('...and a cd back INTO the guarded tree still refuses',
+        fire(`cd "${ROOT}" && echo x ${String.fromCharCode(62)} code/src/thing.js`) === 2);
+    } finally { fs.rmSync(elsewhere, { recursive: true, force: true }); }
+  }
+
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);
