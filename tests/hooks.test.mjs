@@ -499,6 +499,109 @@ console.log(`\n${'─'.repeat(72)}`);
 
 }
 
+
+// ── card-gate — the refusal that turns two skills into gates ─────────────────
+//
+// The SILENT case first. Ten controls in this workspace were wrong on their first version and
+// every one was found by the case it should ignore — this one included: it looked for the
+// answer after a colon, so `**Who asked?** Priya` read as unanswered and a card that had done
+// all the work was refused.
+{
+  console.log('\n▸ card-gate — cards must carry what their stage requires');
+  const gate = path.join(ROOT, 'scripts', 'card-gate.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cardgate-'));
+  const mk = (stage, name, body) => {
+    const d = path.join(tmp, 'board', stage);
+    fs.mkdirSync(d, { recursive: true });
+    const f = path.join(d, name);
+    fs.writeFileSync(f, body);
+    return f;
+  };
+  const fire = (f) => spawnSync('node', [gate, f], { encoding: 'utf8' }).status;
+
+  const ANSWERED = [
+    '# a card that did the work',
+    '**Who asked?** Priya, who runs the Ealing branch, twice in October.',
+    '**What they do today instead?** A paper list by the till, retyped on Sunday.',
+    '**What breaks for them if this never exists?** ~40 minutes a week, two bookings lost.',
+    '**What number moves?** Sunday admin minutes: 40 now, under 10 is success.',
+    '**What would make us stop?** She still keeps the paper list a month after launch.',
+    '**Where errors surface:** the shared ops inbox, checked before opening.',
+  ].join('\n');
+
+  check('a bare idea may sit in 0-discovery', fire(mk('0-discovery', 'a.md', '# idea\n\nsomething\n')) === 0);
+  check('an answered card passes at 1-spec', fire(mk('1-spec', 'b.md', ANSWERED)) === 0);
+  check('...and at 6-done, with errors named', fire(mk('6-done', 'c.md', ANSWERED)) === 0);
+  check('card-gate refuses headings with nothing under them',
+    fire(mk('1-spec', 'd.md', '# x\n**Who asked?**\n**What they do today instead?**\n')) === 1);
+  check('card-gate refuses TBD / n/a / ??? as answers',
+    fire(mk('1-spec', 'e.md', '# x\n**Who asked?** TBD\n**What number moves?** n/a\n')) === 1);
+  check('card-gate refuses a card that reached 3-build having answered nothing',
+    fire(mk('3-build', 'f.md', '# x\n\nstraight to build\n')) === 1);
+  check('card-gate refuses 6-done with nowhere named for errors',
+    fire(mk('6-done', 'g.md', ANSWERED.replace(/\*\*Where errors surface.*/, ''))) === 1);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+
+// ── the gate must EXIT, not merely print ─────────────────────────────────────
+//
+// The eleventh control in this workspace to fail open, and it was introduced while fixing a
+// council's criticism that controls here only advise. The card-gate block was inserted AFTER
+// check.mjs's summary, so bad() printed five refusals and the process still exited 0 — output
+// that looks exactly like a working gate and is not one.
+//
+// Asserting the printed text would have passed. Only the exit code catches it.
+{
+  console.log('\n▸ check.mjs refuses, rather than reporting a refusal');
+  const gate = path.join(ROOT, 'scripts', 'check.mjs');
+  const probe = path.join(ROOT, 'board', '1-spec', '999-exit-probe.md');
+  const runGate = () => spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8' });
+
+  // BASELINE-RELATIVE on purpose. The first version asserted "a clean board exits 0", which
+  // tested the board rather than the gate — a real workspace has cards in flight, and two
+  // legitimate ones failed it immediately. What must hold is that the probe CHANGES the
+  // outcome and removing it puts it back.
+  const before = runGate();
+  const countRefusals = (s) => (s.match(/❌/g) || []).length;
+  const baseline = countRefusals(before.stdout);
+
+  fs.writeFileSync(probe, '# 999 — skipped discovery\n\nJust build it.\n');
+  let during;
+  try { during = runGate(); } finally { fs.rmSync(probe, { force: true }); }
+
+  check('an unanswered card ADDS refusals to the TOTAL, not just the display',
+    countRefusals(during.stdout) > baseline || /and \d+ more/.test(during.stdout));
+  check('...and the gate EXITS non-zero, which is the part that was broken', during.status === 1);
+
+  const after = runGate();
+  check('and the exit code returns to its baseline once removed', after.status === before.status);
+  check('...with the refusal count back where it started', countRefusals(after.stdout) === baseline);
+}
+
+// ── a cd anywhere in the chain moves what a relative path means ──────────────
+//
+// Anchored on ^ at first, so `node build.mjs && cd /elsewhere && echo x > notes.md` still
+// resolved notes.md against the session cwd. Fourth false positive of this family; each one
+// blocked real work.
+{
+  console.log('\n▸ guard-edit follows a cd wherever it appears');
+  const guard = path.join(HOOKS, 'guard-edit.mjs');
+  const fire = (command) =>
+    run(guard, { tool_name: 'Bash', cwd: ROOT, tool_input: { command } }).code;
+  const away = fs.mkdtempSync(path.join(os.tmpdir(), 'away-'));
+  const gt = String.fromCharCode(62);
+  try {
+    check('a cd mid-chain moves where relative paths point',
+      fire(`node x.mjs && cd "${away}" && echo x ${gt} notes.md`) === 0);
+    check('a leading cd still does', fire(`cd "${away}" && echo x ${gt} notes.md`) === 0);
+    check('a cd INTO the guarded tree still refuses',
+      fire(`node x.mjs && cd "${ROOT}" && echo x ${gt} code/src/a.js`) === 2);
+    check('no cd at all still refuses', fire(`echo x ${gt} code/src/a.js`) === 2);
+  } finally { fs.rmSync(away, { recursive: true, force: true }); }
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

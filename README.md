@@ -178,10 +178,11 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 22 scripts — `scripts/`
+### 21 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `check.mjs` | the gate — 19 checks, and CI runs it |
 | `depth-check.mjs` | is this real code, or six shapes of stub |
 | `verify-claims.mjs` | does every citation in the card actually resolve |

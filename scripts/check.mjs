@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -462,17 +462,8 @@ try {
   soft('the reflection is stale', `${String(e.stderr ?? '').trim() || 'run node scripts/reflect.mjs'} — see skills/reflect`);
 }
 
-console.log('\n───────────────────────────────────────────────────────────');
-if (fail) {
-  console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
-  console.log('  A gate that fails is a refusal, not a note. Fix it before moving on.\n');
-  process.exit(1);
-}
-console.log(`  All checks pass${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
-if (warn && STRICT) { console.log('  --strict: warnings are failures here.\n'); process.exit(1); }
-console.log('\n  What this cannot check: whether the spec is good, whether the review was');
-console.log('  honest, or whether the guard that "failed" was the right guard. Those stay');
-console.log('  human. This only catches the mechanical skips.\n');// ── The product repo's engineering baseline ──────────────────────────────────
+
+// ── The product repo's engineering baseline ──────────────────────────────────
 //
 // A council put this workspace at "top 10%, not top 1%", and part of why was that it had
 // world-class controls against AGENT failure and none of the hygiene an ordinary engineering
@@ -506,4 +497,45 @@ console.log('  human. This only catches the mechanical skips.\n');// ── The 
   }
 }
 
+// ── Cards carry what their stage requires ────────────────────────────────────
+//
+// bad(), not soft(). A council rated this workspace 7.5 and would not go higher for one
+// reason it said four ways: "a warning that never becomes a refusal is visibility, not a
+// gate", and "a skill that only ASKS is not a gate that refuses, and this workspace's whole
+// claim is that it refuses."
+//
+// So discovery-first's five questions and operate-after-done's one are enforced here rather
+// than requested in prose. The check is deliberately dumb — it proves the answers EXIST and
+// are not placeholders, never that they are true. Nothing mechanical can do the second, and
+// the failure that actually happens is the first.
+{
+  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'card-gate.mjs'), '--json'],
+    { encoding: 'utf8' });
+  let out = { findings: [] };
+  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through to the raw status */ }
+  const n = (out.findings ?? []).length;
+  if (n) {
+    // The total is printed FIRST and always. Showing six of nine and saying nothing about the
+    // other three is how a bounded report reads as a complete one.
+    console.log(`  ⛔ card-gate: ${n} unanswered requirement${n === 1 ? '' : 's'} across ${new Set(out.findings.map((f) => f.card)).size} card${new Set(out.findings.map((f) => f.card)).size === 1 ? '' : 's'}`);
+    for (const f of out.findings.slice(0, 6)) {
+      bad(`${f.card} (${f.stage}) is missing: ${f.missing}`, f.hint);
+    }
+    if (n > 6) {
+      fail += n - 6;
+      console.log(`  ❌ …and ${n - 6} more — node scripts/card-gate.mjs`);
+    }
+  } else ok(`every card carries what its stage requires (${out.cards ?? 0} checked)`);
+}
 
+console.log('\n───────────────────────────────────────────────────────────');
+if (fail) {
+  console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
+  console.log('  A gate that fails is a refusal, not a note. Fix it before moving on.\n');
+  process.exit(1);
+}
+console.log(`  All checks pass${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
+if (warn && STRICT) { console.log('  --strict: warnings are failures here.\n'); process.exit(1); }
+console.log('\n  What this cannot check: whether the spec is good, whether the review was');
+console.log('  honest, or whether the guard that "failed" was the right guard. Those stay');
+console.log('  human. This only catches the mechanical skips.\n');

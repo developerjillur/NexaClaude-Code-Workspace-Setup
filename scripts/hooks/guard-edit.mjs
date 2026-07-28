@@ -227,9 +227,16 @@ if (input?.tool_name === 'Bash') {
   // an edit to a file in a completely different repository was refused. Third false positive
   // of the same family: **a relative path is meaningless without the directory it is relative
   // to, and the command says which one.**
-  const cdMatch = cmd.match(/^\s*cd\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;)/);
-  const cdTo = cdMatch ? (cdMatch[2] ?? cdMatch[3] ?? cdMatch[4]) : null;
-  const base = cdTo && path.isAbsolute(cdTo) ? cdTo : (input?.cwd || process.cwd());
+  // ANY `cd` in the chain, not just a leading one — the LAST absolute one wins, because that
+  // is where the shell will be standing by the time the write happens. The first version
+  // anchored on `^`, so `node build.mjs && cd /elsewhere && echo x > notes.md` still resolved
+  // `notes.md` against the session's cwd. Fourth false positive of this family, and it blocked
+  // real work each time.
+  let base = input?.cwd || process.cwd();
+  for (const m of cmd.matchAll(/(?:^|[\s;&|])cd\s+("([^"]+)"|'([^']+)'|([^\s;&|]+))/g)) {
+    const to = m[2] ?? m[3] ?? m[4];
+    if (to && path.isAbsolute(to)) base = to;
+  }
 
   const targets = new Set();
   for (const re of writes) {
