@@ -1415,14 +1415,25 @@ console.log(`\n${'─'.repeat(72)}`);
     scratch({ 'docs/x.md': 'We send SMS. Our provider has an auth token.\n' }).status === 0);
 
   // REFUSES, once per class, and each names the file and the reason.
+  //
+  // **The forbidden words are BUILT here, never written.** The first version spelled them out
+  // and the check then failed on this very file — a gate broken by its own fixtures, and it
+  // was pushed that way. Same technique the probes above use for the same reason: a fixture
+  // that contains what it hunts is indistinguishable from the thing it hunts.
+  const forbidden = {
+    repo: ['realtime', 'codex', 'calling', 'agent'].join('-'),
+    product: ['Nexa', 'Call'].join(''),
+    plugin: `host${'inger'}`,
+  };
+
   check('refuses the original private repository name',
-    (() => { const r = scratch({ '.github/workflows/x.yml': 'repository: someone/realtime-codex-calling-agent\n' });
+    (() => { const r = scratch({ '.github/workflows/x.yml': `repository: someone/${forbidden.repo}\n` });
       return r.status === 1 && r.findings.some((f) => /private repository/.test(f.why)); })());
   check('refuses a product name left in a skill',
-    (() => { const r = scratch({ 'a/SKILL.md': 'NexaCall does this.\n' });
+    (() => { const r = scratch({ 'a/SKILL.md': `${forbidden.product} does this.\n` });
       return r.status === 1 && r.findings.some((f) => f.file === 'a/SKILL.md'); })());
   check('refuses a stack-specific plugin declaration',
-    scratch({ '.claude/settings.json': '{"enabledPlugins":{"hostinger":true}}' }).status === 1);
+    scratch({ '.claude/settings.json': `{"enabledPlugins":{"${forbidden.plugin}":true}}` }).status === 1);
 
   // The allowlist is a claim someone can check, not a blindfold: the credential FORMATS in the
   // scanner are standard shapes any project can leak, and removing them to remove a word would
