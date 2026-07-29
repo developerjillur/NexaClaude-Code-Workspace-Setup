@@ -130,6 +130,23 @@ const KILLS = [
     fromRe: /return 'assertion is a constant[^\n]*/,
     to: 'return null;' },
 
+  // ── verify-claims: does a card's evidence resolve? ────────────────────────
+  //
+  // Added because the scope report printed at the end of a run named it as unaudited, and the
+  // write-up had already claimed "eight of fourteen controls" from memory. It was seven. **The
+  // denominator caught a wrong number the moment it was printed**, which is the entire argument
+  // for printing it.
+  //
+  // Written first as `if (!real) bad(` → `if (false) bad(`, which does not delete the rule —
+  // it falls into the `else` and reads a file that is null, so the control CRASHES. Node exits
+  // 1, and an exit-code assertion accepts a crash as a refusal. **The mutation looked caught
+  // for the same reason the fixture looked isolating: one bit cannot tell a refusal from a
+  // stack trace.** So the rule is skipped outright instead, leaving the control running.
+  { id: 'claims-proof', file: 'scripts/verify-claims.mjs',
+    what: 'verify-claims stops checking that the test named in "Proved by" actually exists',
+    from: '  if (!real) bad(',
+    to: '  if (!real) ok(' },
+
   // ── guard-coverage ─────────────────────────────────────────────────────────
   { id: 'coverage-silent', file: 'scripts/guard-coverage.mjs',
     what: 'guard-coverage stops requiring a SILENT case — the direction every defect came from',
@@ -137,17 +154,56 @@ const KILLS = [
     to: '  } else if (false) {' },
 ];
 
+// ── the seam that lets this file be audited itself ───────────────────────────
+//
+// Asked which of the unmutated controls most deserves coverage, a council answered: this one.
+//
+//   "It is now the thing trust routes through — every other control's watchedness is asserted
+//    by it, so a defect in it fails open at maximum blast radius, in the exact voice of success
+//    ('18 of 18 caught'). It mutates real control files on disk; its restore path is the one
+//    piece of code in the workspace that can leave the workspace disarmed."
+//
+// It cannot mutate itself — it would be running while being rewritten. So instead the mutation
+// list can be replaced by a JSON file, and the suite points it at a throwaway workspace holding
+// one fake control and one fake test. That makes every branch reachable in milliseconds:
+// caught, survived, and pattern-absent. `fromRe` is unavailable through JSON, deliberately —
+// fixtures need literals, and a regex arriving from a file is a second parser to get wrong.
+const KILLS_FILE = process.env.NEXA_KILLS_FILE;
+if (KILLS_FILE) {
+  KILLS.length = 0;
+  KILLS.push(...JSON.parse(fs.readFileSync(KILLS_FILE, 'utf8')));
+}
+
 const suites = fs.readdirSync(path.join(ROOT, 'tests'))
   .filter((f) => f.endsWith('.mjs') && !f.startsWith('._'));
 
-/** The real entry points, in the order a person meets them. */
+/**
+ * The real entry points, in the order a person meets them.
+ *
+ * **A timeout or a crash is not a catch.** `spawnSync` returns `status: null` when it kills a
+ * child on timeout, and `null !== 0` — so the first version scored a hung suite as "the
+ * mutation was caught", which is the most flattering possible reading of an infrastructure
+ * failure. A council named it before it had bitten:
+ *
+ *   "A timeout, unrelated flaky test, runtime crash, or collateral failure can kill a mutant.
+ *    spawnSync() returning status: null after its timeout would be counted as red rather than
+ *    as an invalid audit result."
+ *
+ * So there are three outcomes here, not two, and the third is the one that must never be
+ * confused with success: **inspection could not complete.**
+ */
 function runEverything() {
+  const one = (label, argv) => {
+    const r = spawnSync('node', argv, { cwd: ROOT, encoding: 'utf8', timeout: 900000 });
+    if (r.error?.code === 'ETIMEDOUT' || r.signal) return { broke: true, by: `${label} (${r.signal ?? 'timeout'})` };
+    if (r.status === null) return { broke: true, by: `${label} (no exit status)` };
+    return { red: r.status !== 0, by: label };
+  };
   for (const s of suites) {
-    const r = spawnSync('node', [path.join(ROOT, 'tests', s)], { cwd: ROOT, encoding: 'utf8', timeout: 900000 });
-    if (r.status !== 0) return { red: true, by: s };
+    const r = one(s, [path.join(ROOT, 'tests', s)]);
+    if (r.broke || r.red) return r;
   }
-  const g = spawnSync('node', [path.join(ROOT, 'scripts', 'check.mjs')], { cwd: ROOT, encoding: 'utf8', timeout: 900000 });
-  return g.status !== 0 ? { red: true, by: 'check.mjs' } : { red: false };
+  return one('check.mjs', [path.join(ROOT, 'scripts', 'check.mjs')]);
 }
 
 // Restore-on-exit, unconditionally. This file edits real controls.
@@ -166,7 +222,22 @@ say('═════════════════════════
 say('  KILL AUDIT — delete one real protection at a time');
 say('════════════════════════════════════════════════════════════════════════\n');
 
+// ── --only must name something ───────────────────────────────────────────────
+//
+// `--only=does-not-exist` printed "0 caught, 0 survived" and **exited 0**. An audit that
+// tested nothing, reporting success, in the file whose entire purpose is finding exactly that.
+// Predicted by two council members from the source and then confirmed by running it, which is
+// the only reason it is fixed rather than argued about.
+if (ONLY && !KILLS.some((k) => k.id === ONLY)) {
+  console.error(`  ! --only=${ONLY} matches no mutation.\n\n    known ids: ${KILLS.map((k) => k.id).join(' ')}\n`);
+  process.exit(2);
+}
+
 const base = runEverything();
+if (base.broke) {
+  say(`  ! ${base.by} did not complete. An audit cannot read a suite it could not run.\n`);
+  process.exit(2);
+}
 if (base.red) {
   say(`  ! the suite is already red (${base.by}). An audit against a red baseline says nothing.\n`);
   process.exit(1);
@@ -198,31 +269,80 @@ for (const k of KILLS) {
   try {
     // A mutation that breaks parsing is not a test of coverage; it is a test of node.
     const parses = spawnSync('node', ['--check', f], { encoding: 'utf8' }).status === 0;
-    res = parses ? runEverything() : { red: true, by: 'syntax — mutation invalid, result discarded', invalid: true };
+    res = parses ? runEverything() : { by: 'syntax — mutation invalid, result discarded', invalid: true };
   } finally {
     fs.writeFileSync(f, original);
     inFlight.delete(f);
   }
 
-  const status = res.invalid ? 'invalid' : (res.red ? 'caught' : 'SURVIVED');
+  const status = res.invalid ? 'invalid' : res.broke ? 'incomplete' : (res.red ? 'caught' : 'SURVIVED');
   results.push({ id: k.id, file: k.file, what: k.what, status, by: res.by ?? null });
-  const mark = status === 'caught' ? '✅ caught  ' : status === 'invalid' ? '·  invalid ' : '❌ SURVIVED';
+  const mark = { caught: '✅ caught  ', invalid: '⚠️  invalid ', incomplete: '⚠️  incomplete', SURVIVED: '❌ SURVIVED' }[status];
   say(`  ${mark} ${k.id.padEnd(18)} ${k.what}${res.by && status === 'caught' ? `\n${' '.repeat(33)}by ${res.by}` : ''}`);
 }
 
 const survived = results.filter((r) => r.status === 'SURVIVED');
 const caught = results.filter((r) => r.status === 'caught');
+// Anything that did not produce a verdict. **These used to be excluded from the numerator AND
+// the denominator**, so a mutation whose `from` string drifted as a control was edited simply
+// vanished from the report — and the audit converged, over time, on printing success while
+// testing less and less. Two council members read that off the source independently; the
+// second called it "a file whose stated purpose is hunting fail-open silence containing an
+// unguarded fail-open of its own shape."
+//
+// **A skip is now a failure of the audit, not an absence from it.**
+const unresolved = results.filter((r) => !['caught', 'SURVIVED'].includes(r.status));
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ caught: caught.length, survived: survived.length, results }, null, 2));
-  process.exit(survived.length ? 1 : 0);
+  console.log(JSON.stringify({
+    selected: KILLS.filter((k) => !ONLY || k.id === ONLY).length,
+    caught: caught.length, survived: survived.length, unresolved: unresolved.length, results,
+  }, null, 2));
+  process.exit(survived.length || unresolved.length ? 1 : 0);
 }
 
-console.log(`\n  ── ${caught.length} caught, ${survived.length} survived ──`);
+const selected = KILLS.filter((k) => !ONLY || k.id === ONLY).length;
+console.log(`\n  ── ${caught.length} caught, ${survived.length} survived, ${unresolved.length} unresolved, of ${selected} selected ──`);
+
 if (survived.length) {
   console.log('\n  Each survivor is a protection that could be deleted today with every test');
   console.log('  still green. That is not a gap in the control — it is a gap in what watches it.\n');
   for (const s of survived) console.log(`    ${s.id}: ${s.what}`);
+}
+if (unresolved.length) {
+  console.log('\n  These produced no verdict, which is a failure of the AUDIT rather than a');
+  console.log('  result about the control. A pattern that no longer matches means the control');
+  console.log('  was edited and this file was not.\n');
+  for (const u of unresolved) console.log(`    ${u.id}: ${u.status}${u.by ? ` — ${u.by}` : ''}`);
+}
+
+// ── the denominator, said out loud ───────────────────────────────────────────
+//
+// The workspace's own rule is: if a run bounds its coverage, say what it left out — silent
+// truncation reads as "covered everything" when it did not. This file broke that rule about
+// itself for two days, publishing "18 of 18 caught" against a denominator it chose and never
+// printed. A council put it plainly: report it as *"18 selected mutants killed; six refusing
+// controls remain unaudited"*, never as a percentage suggesting completeness.
+if (!ONLY) {
+  const covered = new Set(KILLS.map((k) => k.file));
+  const refusing = [];
+  for (const d of ['scripts', path.join('scripts', 'hooks')]) {
+    const abs = path.join(ROOT, d);
+    if (!fs.existsSync(abs)) continue;
+    for (const f of fs.readdirSync(abs)) {
+      if (!f.endsWith('.mjs') || f.startsWith('._')) continue;
+      const rel = path.join(d, f);
+      if (fs.lstatSync(path.join(ROOT, rel)).isSymbolicLink()) continue;
+      if (/process\.exit\((1|2|[a-z][^)]*\?[^)]*1)/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8'))) refusing.push(rel);
+    }
+  }
+  const unaudited = refusing.filter((r) => !covered.has(r));
+  console.log(`\n  Scope: ${covered.size} of ${refusing.length} refusing controls carry mutations.`);
+  if (unaudited.length) {
+    console.log('  No mutation exists for these, so this run says nothing about them:\n');
+    for (const u of unaudited) console.log(`    ${u}`);
+  }
   console.log('');
 }
-process.exit(survived.length ? 1 : 0);
+
+process.exit(survived.length || unresolved.length ? 1 : 0);

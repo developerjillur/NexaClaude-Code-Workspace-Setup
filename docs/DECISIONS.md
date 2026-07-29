@@ -214,3 +214,104 @@ Eighteen of eighteen caught is a statement about the eight that were measured.
 either the controls are genuinely watched, or **the mutations were written to match the tests.**
 The list is only honest while each entry is derived from the control's rules rather than from
 the suite's fixtures.
+
+
+## 2026-07-29 — The council audited the audit, and it was a survivor of its own test
+
+**A four-vendor council** (GPT-5.6 via Codex, Gemini 3.1 Pro, Fable 5, Sonnet 5 — Grok excluded
+for failing containment) was given the kill audit's findings. 4/4 answered; **reasoning overlap
+0.07** with the pack's own vocabulary removed, so the agreement below is not four models
+restating the brief. Verbosity correlation was 0.92 — length was doing work in the ranking, and
+the two top-ranked answers were also the two longest. Read the arguments, not the tally.
+
+### The finding, which was verified by running it rather than accepted
+
+Two members independently read the same fail-open off `kill-audit.mjs`:
+
+> *"A skipped mutation cannot fail the run. `pattern absent`, `not-applicable` and `no-op`
+> all fall through, and the exit code depends only on `survived.length`. **A file whose stated
+> purpose is hunting fail-open silence contains an unguarded fail-open of its own shape.**"*
+
+One of them made it its explicit falsifier, so it was **tested instead of argued about**:
+
+```
+$ node scripts/kill-audit.mjs --only=does-not-exist
+  ── 0 caught, 0 survived ──
+$ echo $?
+0
+```
+
+**An audit that tested nothing, reporting success, inside the file built to find exactly that.**
+
+### What changed — four fail-opens, all named by the council
+
+| | before | now |
+|---|---|---|
+| a mutation whose pattern drifted | vanished from numerator **and** denominator | `unresolved` — a failure of the audit, exit 1 |
+| `--only=<typo>` | 0 caught, 0 survived, **exit 0** | exit 2, with the list of real ids |
+| a suite that timed out | `status: null !== 0` → scored **"caught"** | `incomplete` — inspection could not complete |
+| the denominator | never printed | every run names the refusing controls with **no** mutation |
+
+That last one corrected a claim the same afternoon: the write-up said "eight of fourteen
+controls". It was seven — `verify-claims` had none. **The denominator caught a wrong number
+the moment it was printed**, which is the whole argument for printing it.
+
+`kill-audit` now has the harness the council asked for, since it cannot mutate itself: a
+`NEXA_KILLS_FILE` seam pointing at a throwaway workspace with one fake control whose two rules
+have deliberately asymmetric fixtures. That makes a **genuine survivor** reachable in
+milliseconds rather than twenty-five minutes — caught, survived, restored-byte-for-byte,
+drifted-pattern, unknown-id, red-baseline.
+
+### And adding `verify-claims` produced the sharpest lesson of the day
+
+Its failing fixture cited **both** a missing planned file and a missing proof, so deleting the
+proof rule left the other to refuse identically — the fifth instance of the same law. The
+replacement pair looked isolating and was not: the obvious mutation
+(`if (!real) bad(` → `if (false) bad(`) falls through to the `else` and reads a null path, so
+the control **crashes**. Node exits 1, and an `=== 1` assertion **accepted a stack trace as a
+refusal**.
+
+> **One bit cannot distinguish "refused" from "died".**
+
+That is the coarse-oracle problem underneath every survivor found today, and it landed on the
+person diagnosing it. The fixtures now assert the message and check explicitly that the
+refusal did not come from a `TypeError`.
+
+### Where the council split, which is the part worth keeping
+
+- **On what "19 of 19" means.** One member: *"18/18 is the guaranteed terminal state of any
+  repair loop, whatever the quality of the repairs. Read the first-run numbers as the
+  measurement and 18/18 as a regression baseline."* Another: report it as *"N selected mutants
+  killed; six refusing controls remain unaudited"*, **never as a percentage suggesting
+  completeness.** Both are now enforced by the scope line the run prints.
+- **On which uncovered control matters most, they disagreed and both were reasoned.**
+  `kill-audit` on epistemic grounds — trust routes through it, so a defect fails open at
+  maximum blast radius in the voice of success. `check.mjs` on operational grounds — it is the
+  deploy gate. A third argued `check.mjs` needs it *least* because its refusal only protects a
+  number in a doc header. **That disagreement is unresolved and is not being resolved by
+  assertion.**
+
+### What was NOT done, deliberately
+
+Both top-ranked members proposed the same deeper fix, independently: **every refusal carries a
+rule id, and fixtures assert the id rather than the exit code.** It would make an
+over-determined fixture fail immediately instead of silently proving nothing, and would have
+refused the `scan-secrets` prose-comment false positive outright — *"per-rule coverage"* rather
+than "the control's name appears near assertion text".
+
+**Five of the six findings today would have been impossible with it.** It is also a change to
+every control in the workspace, which is past what a freeze permits without the owner's
+decision. **Recorded as the recommended next step, not taken.**
+
+### Result
+
+```
+kill-audit    19 caught, 0 survived, 0 unresolved, of 19 selected
+scope         8 of 14 refusing controls carry mutations
+hooks.test    200 passed, 0 failed
+```
+
+**How we would know this was wrong.** The remaining six controls are unaudited, and one of them
+is the deploy gate. If the next audit round adds mutations for `check.mjs` and finds no
+survivors on the first run, that is either good news or evidence the mutations were written
+from the fixtures — the record above is the only thing that makes the difference checkable.

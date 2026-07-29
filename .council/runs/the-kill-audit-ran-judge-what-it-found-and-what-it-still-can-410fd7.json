@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "question": "# The kill audit ran. Judge what it found, and what it still cannot see.\n\nYou advised this workspace one round ago. Your words, which drove what follows:\n\n> \"Yes. This workspace is past the point where another control should be presumed to improve it.\"\n>\n> \"`guard-coverage` proves only that assertion TEXT exists on both sides. **Everything between\n> the text and the behaviour is invisible to it.** Two points do not prove the classifier, the\n> execution path, or deployment.\"\n>\n> \"These are open-world **denylist recognisers** — find a forbidden pattern, append a finding,\n> fail if the list is non-empty. In that architecture **every mistake rounds the same way**.\"\n>\n> \"'Remove something now' is the fashionable answer, but the data to pick the victim does not\n> exist. **Removing by intuition would repeat the exact error the record is full of.**\"\n>\n> \"Create one approved board card for an end-to-end control kill audit, and add no controls\n> while it runs.\"\n\n## What was done\n\nA freeze on new controls was recorded, and the audit was built and run.\n\n`scripts/kill-audit.mjs` — eighteen mutations across eight of the fourteen scripts that can\nrefuse. Each deletes **one real rule** and leaves the control otherwise fully alive: the `tee`\nwrite pattern, the TBD/n-a placeholder list, the git-history pass of the secret scanner, the\n\"assertion is a constant\" shape in the stub detector. It then runs every suite and the deploy\ngate, and restores the file in a `finally` and again on `exit`. A **survivor** is a protection\nthat could be deleted that morning with every test still green.\n\nIt refuses to run at all against an already-red baseline.\n\n## What it found — first run, 7 caught, 4 survived\n\n| survived | what could have been deleted in silence |\n|---|---|\n| `wakeup-admits` | the rule catching *\"nothing external to wait on\"* — written for a reported incident, matching its reason **verbatim** |\n| `card-placeholder` | the list rejecting TBD / n/a / ??? as answers |\n| `card-stop` | the requirement that a card name what would make us stop |\n| `coverage-silent` | the branch demanding a SILENT case — the direction all fifteen defects came from |\n\n**One diagnosis, four instances:** every survivor *had* a fixture, and every fixture was green.\nEach failing fixture differed from the passing one in **more than one way**, so a second rule\nproduced the same exit code and the assertion could not tell which rule fired.\n\n- the reported wakeup carries `delaySeconds: 300`, so the short-delay rule blocked it\n  identically — `=== 2` cannot distinguish the two\n- the TBD card also omitted three questions outright, so it was refused whether or not the\n  placeholder list worked\n- the coverage probe had *no* assertions, so it tripped `no-refusal-case` and never reached the\n  branch under test\n\nRepair, within the freeze: four isolating fixtures changing exactly one variable from a case\nalready known to pass, plus two assertions on **which** refusal came back rather than that one\ndid. 179 assertions green.\n\n## Then it was extended, and found a control that had never worked\n\nSeven more mutations, covering `scan-secrets` and `depth-check`. **All four scan-secrets\nmutations survived** — including the one that makes it find every secret in the tree and exit 0\nanyway. It had no test at all.\n\n`guard-coverage` was reporting it **✅ 1 refuse · 1 silent**, because the string \"scan-secrets\"\nappears in a **prose comment** inside the prompt scrubber's test block, and the collector\ncounted that block's assertions as its fixtures. **The metacontrol read a comment as coverage\nfor the gate that keeps credentials out of a public repo.**\n\nUnderneath that, a live defect:\n\n> The history pass hands **JavaScript regex source to `git grep -E`**. POSIX ERE has no `\\b`.\n> git rejected nine of the ten patterns, the `git()` helper swallowed the non-zero exit, and\n> the loop printed `history N commits scanned`. **Only `private key block` — the one pattern\n> with no `\\b` — was ever searched.** Since the day it was written.\n\n**Deleting the whole history pass changed nothing, because deleting something that does nothing\nis invisible by construction.** The bug was found by writing the fixture the mutation demanded,\nwhich then failed against the *unmutated* file.\n\nFixed with `-P` where git has PCRE, and dropping the `\\b` anchors where it does not — matching\nmore, never less. Both paths have fixtures; the fallback via a `NEXA_SCAN_NO_PCRE=1` seam.\n\n**Final: 18 of 18 caught, 190 assertions green, both gates green.** And writing the repair, one\nmore instance of the same law appeared: `export function load(id) { return null }` trips\n`unused-param` as well as `stub-return`, so the fixture proved neither — **the same mistake,\nmade while fixing it.**\n\n## What I am asking you\n\n1. **Is the audit itself honest, or does it flatter?** The mutation list is written by the same\n   person who wrote the controls, and it now reports 18 of 18 caught. What stops it from having\n   been written to match the tests? Name the specific tell you would look for in\n   `kill-audit.mjs` — and say whether \"18 of 18\" should be read as reassuring or as a warning\n   sign in its own right.\n\n2. **Six of fourteen refusing controls have no mutations at all** — `check.mjs`, `council-sync`,\n   `mutation-test`, `reflect`, `mutate-controls`, `kill-audit` itself. Which of those six most\n   deserves coverage, and which genuinely does not need it?\n\n3. **The survivors were all \"fixture differs in more than one way.\"** Is that a coincidence of\n   this codebase, or a general law about testing controls? If general, what is the cheapest\n   thing that would catch it *without* a twenty-minute audit?\n\n4. **You said the architecture is the real problem** — open-world denylists that round every\n   mistake the same way. The audit measures the tests, not the architecture. **Does running it\n   make the architectural fix less likely** by making the current design feel validated?\n\n5. **Now that data exists, is anything deletable?** You refused to name a victim without data.\n   There is now: which protections are watched, which were not, and what each costs. If the\n   answer is still \"not yet\", say what specific further observation would change that.\n\nBe adversarial. Where you think the work is self-congratulatory, say so plainly.",
+  "at": "2026-07-29T05:21:40.923Z",
+  "flags": {
+    "lenses": false,
+    "rubric": false,
+    "revise": false,
+    "stage1Only": false,
+    "timeoutMin": 15
+  },
+  "context": {
+    "files": [
+      "scripts/kill-audit.mjs",
+      "scripts/scan-secrets.mjs",
+      "scripts/guard-coverage.mjs"
+    ],
+    "refused": [],
+    "tokens": 9178,
+    "brief": "AGENTS.md",
+    "briefRefused": null,
+    "verifiedObedientTokens": 27000
+  },
+  "roster": {
+    "path": "/Users/developerjillur/.cache/nexaclaude/all-cli-council/scripts/members.json",
+    "local": false,
+    "localIgnored": false
+  },
+  "members": [
+    {
+      "id": "codex",
+      "label": "GPT-5.6 sol (Codex CLI)",
+      "family": "OpenAI",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini 3.1 Pro (Antigravity)",
+      "family": "Google",
+      "via": "argv",
+      "present": true
+    },
+    {
+      "id": "claude-fable",
+      "label": "Fable 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "claude-sonnet",
+      "label": "Sonnet 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    }
+  ],
+  "opinions": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 239656,
+      "chars": 10237,
+      "lens": null,
+      "confidence": 91,
+      "changeMind": "An independent review showed kill-audit hard-fails every skipped, invalid, no-op, timeout, or misattributed mutant and a repository replay showed a named control provides unique correct refusals—or none—after overlap, false-positive, runtime, and deployment-path costs are measured."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 24765,
+      "chars": 4538,
+      "lens": null,
+      "confidence": 90,
+      "changeMind": "A randomized AST/regex fuzzer generates 100 arbitrary rule deletions across the controls and kill-audit.mjs catches >95% of them without manual fixture tuning."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 159514,
+      "chars": 11418,
+      "lens": null,
+      "confidence": 72,
+      "changeMind": "Running kill-audit against itself — mutate its pattern-matching so every entry reports \"not-applicable\" and run the suite — comes back red; that would refute my central claim that the audit fails open on skips, and would raise both my confidence in the 18/18 figure and my ranking of the remaining five uncovered controls."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 141558,
+      "chars": 9257,
+      "lens": null,
+      "confidence": 62,
+      "changeMind": "reading kill-audit.mjs's runEverything() showed it actually inspects *which* assertion/line failed (not just process exit status) — that would remove my strongest specific criticism in §1 and raise confidence in \"18/18\" as a real signal rather than a coarse one. Similarly, seeing the actual source of council-sync and reflect (currently unread, flagged as missing) could reorder §2's priority away f"
+    }
+  ],
+  "revised": null,
+  "reviews": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 113320,
+      "parsed": [
+        "codex",
+        "claude-fable",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response C uniquely notes that spawnSync() timeouts or infrastructure failures can yield status: null and be falsely counted as caught mutants.",
+      "lost": "Response D states most clearly that realistic incident fixtures and single-variable isolation fixtures serve different purposes and naturally conflict."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 28574,
+      "parsed": [
+        "codex",
+        "claude-fable",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response B's proposal to plant permanent canary secrets (planted positives in git history) to continuously verify that secret scanning passes actually execute end-to-end rather than failing open silently.",
+      "lost": "Response C focuses heavily on formal harness mechanics and error classification, losing Response B's practical 4-to-8-week rule-ID telemetry plan for gathering empirical deletion data in production."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 119320,
+      "parsed": [
+        "codex",
+        "claude-fable",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response A's planted-positive canary — a committed-then-removed secret the history pass MUST find on every run — is the only proposal that tests the pipeline end-to-end rather than the pattern text, and it would have caught the never-worked history pass the day it was written.",
+      "lost": "D lacks A's synthesis that rule-id logging pays twice — it is simultaneously the cheapest fix for the masking law and the only data source that could ever justify a principled deletion — which turns two open questions into one piece of instrumentation."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 209264,
+      "parsed": [
+        "claude-fable",
+        "codex",
+        "claude-sonnet",
+        "gemini"
+      ],
+      "minority": "Response A's point that check.mjs is embedded inside kill-audit's own runEverything() (called at the end of both the baseline check and every post-mutation check) — so a silent defect there corrupts the trustworthiness of every other result the audit reports, not just a doc-header number.",
+      "lost": "D's framing is the sharpest but the least concrete — it downplays check.mjs without engaging A's baseline-dependency mechanism, and it lacks C's fully worked, reproducible exploit (--only=misspelled-id) and concrete contrast-pair code sample, which are what actually let someone go verify the claim rather than just accept the narrative."
+    }
+  ],
+  "tally": {
+    "scores": {
+      "codex": 2.5,
+      "gemini": 0,
+      "claude-fable": 2.5,
+      "claude-sonnet": 1
+    },
+    "ranked": {
+      "codex": 3,
+      "gemini": 3,
+      "claude-fable": 3,
+      "claude-sonnet": 3
+    },
+    "counted": 4,
+    "total": 4,
+    "degenerate": false,
+    "selfFirst": 1,
+    "selfN": 4,
+    "selfMean": 2.5,
+    "lengths": {
+      "codex": 10237,
+      "gemini": 4538,
+      "claude-fable": 11418,
+      "claude-sonnet": 9257
+    },
+    "lengthR": 0.922416349142125,
+    "families": {
+      "OpenAI": 1,
+      "Google": 1,
+      "Anthropic": 2
+    }
+  },
+  "overlap": {
+    "raw": 0.1860421581108702,
+    "distinctive": 0.07439056586581037,
+    "n": 4,
+    "pairs": 6,
+    "thin": false,
+    "excluded": [],
+    "usableN": 4
+  },
+  "rubric": null,
+  "rubricPerJudge": null
+}

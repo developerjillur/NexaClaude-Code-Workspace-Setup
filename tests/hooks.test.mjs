@@ -865,6 +865,34 @@ console.log(`\n${'─'.repeat(72)}`);
   check('verify-claims refuses a card citing a file that does not exist',
     fire(card('901-lying.md', LYING)) === 1);
 
+  // ── the pair above is confounded, and the audit said so ─────────────────────
+  //
+  // `901-lying.md` cites a missing planned file AND a missing proof, so deleting the
+  // "Proved by" check leaves the planned-file check to refuse it identically. `kill-audit`
+  // neutered that rule and nothing went red. **Fifth instance of the same law in one day:** a
+  // fixture that differs from the passing case in more than one way proves neither.
+  //
+  // Note the trailing period — verify-claims reads `**Proved by.**`, and the honest card above
+  // writes `**Proved by**`, so its citation was never parsed at all. It passed for a third
+  // reason again.
+  //
+  // And these assert the MESSAGE, not the exit code. Writing the mutation for this rule, the
+  // obvious edit (`if (!real) bad(` → `if (false) bad(`) fell through to the `else` and read a
+  // null path — so the control **crashed**, node exited 1, and an exit-code assertion accepted
+  // a stack trace as a refusal. One bit cannot distinguish "refused" from "died", which is the
+  // coarse-oracle problem underneath every survivor found today.
+  const PROOF = (test) => ['# 902 — one variable', '', `**Proved by.** \`${test}\``, ''].join('\n');
+  const run902 = (f) => spawnSync('node', [vc, f], { cwd: ROOT, encoding: 'utf8' });
+
+  const good = run902(card('902-real-proof.md', PROOF('tests/hooks.test.mjs')));
+  check('verify-claims allows a card whose "Proved by" names a suite that exists',
+    good.status === 0 && /exists with \d+ assertion/.test(good.stdout));
+
+  const bad_ = run902(card('903-fake-proof.md', PROOF('tests/no-such-suite.mjs')));
+  check('...and refuses the same card with only that one name changed',
+    bad_.status === 1 && /does not exist: tests\/no-such-suite\.mjs/.test(bad_.stdout));
+  check('...refusing it by that rule rather than by dying', !/TypeError|at Object\./.test(bad_.stderr));
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -1003,38 +1031,93 @@ console.log(`\n${'─'.repeat(72)}`);
   check('kill-audit exists and parses',
     spawnSync('node', ['--check', audit], { encoding: 'utf8' }).status === 0);
 
-  /** A workspace containing nothing but a suite that does what we say. */
-  const scratch = (suiteExit) => {
+  /**
+   * A throwaway workspace with ONE control and ONE suite, so every branch of the audit is
+   * reachable in milliseconds. The fake control refuses two inputs; the fake suite only ever
+   * checks the first. That asymmetry is the point — it makes a genuine survivor available
+   * without waiting twenty-five minutes for the real run.
+   */
+  const scratch = (kills, { suiteExit = null } = {}) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'killaudit-'));
     fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
-    fs.mkdirSync(path.join(d, 'scripts', 'hooks'), { recursive: true });
-    fs.writeFileSync(path.join(d, 'tests', 'only.mjs'), `process.exit(${suiteExit});\n`);
-    fs.writeFileSync(path.join(d, 'scripts', 'check.mjs'), 'process.exit(0);\n');
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
     fs.copyFileSync(audit, path.join(d, 'scripts', 'kill-audit.mjs'));
-    const r = spawnSync('node', [path.join(d, 'scripts', 'kill-audit.mjs')], { cwd: d, encoding: 'utf8', timeout: 120000 });
+    fs.writeFileSync(path.join(d, 'scripts', 'check.mjs'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d, 'scripts', 'fake-control.mjs'),
+      "const a = process.argv[2] ?? '';\n"
+      + "if (a === 'watched') process.exit(1);\n"
+      + "if (a === 'unwatched') process.exit(1);\n"
+      + 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d, 'tests', 'only.mjs'), suiteExit !== null
+      ? `process.exit(${suiteExit});\n`
+      : "import { spawnSync } from 'node:child_process';\n"
+        + "const f = (a) => spawnSync('node', ['scripts/fake-control.mjs', a]).status;\n"
+        + "if (f('watched') !== 1) process.exit(1);\n"   // the rule with a fixture
+        + "if (f('') !== 0) process.exit(1);\n"          // and its silent case
+        + 'process.exit(0);\n');
+    const kf = path.join(d, 'kills.json');
+    fs.writeFileSync(kf, JSON.stringify(kills));
+    const r = spawnSync('node', [path.join(d, 'scripts', 'kill-audit.mjs')],
+      { cwd: d, encoding: 'utf8', timeout: 180000, env: { ...process.env, NEXA_KILLS_FILE: kf } });
+    const control = fs.readFileSync(path.join(d, 'scripts', 'fake-control.mjs'), 'utf8');
     fs.rmSync(d, { recursive: true, force: true });
-    return r;
+    return { ...r, control };
   };
 
-  // REFUSES: a red baseline cannot tell you anything about coverage. Every mutation would be
-  // reported "caught" by a suite that was already failing for an unrelated reason — the most
-  // flattering possible wrong answer, which is why it must refuse rather than warn.
+  const K = (id, from, to = '') => ({ id, file: 'scripts/fake-control.mjs', what: id, from, to });
+  const WATCHED = "if (a === 'watched') process.exit(1);";
+  const UNWATCHED = "if (a === 'unwatched') process.exit(1);";
+
+  // SILENT: a mutation the suite notices. Nothing survives, nothing is unresolved, exit 0.
   {
-    const r = scratch(1);
-    check('it refuses to audit against an already-red suite',
+    const r = scratch([K('watched', WATCHED)]);
+    check('kill-audit is silent when the suite notices the deletion',
+      r.status === 0 && /caught/.test(r.stdout) && !/SURVIVED/.test(r.stdout));
+    check('...and puts the control back byte for byte', r.control.includes(WATCHED));
+  }
+
+  // REFUSES: a real survivor — a rule with no fixture. This is the whole product.
+  {
+    const r = scratch([K('unwatched', UNWATCHED)]);
+    check('kill-audit refuses when a protection can be deleted unnoticed',
+      r.status === 1 && /SURVIVED/.test(r.stdout));
+    check('...and still restores the control it broke', r.control.includes(UNWATCHED));
+  }
+
+  // REFUSES: the fail-open a council read off the source and a run then confirmed.
+  // `--only=does-not-exist` printed "0 caught, 0 survived" and exited 0 — an audit that tested
+  // nothing, reporting success, inside the file built to find exactly that.
+  {
+    const r = scratch([K('watched', WATCHED)]);
+    const one = spawnSync('node', [audit, '--only=no-such-mutation'], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
+    check('kill-audit refuses an --only that names no mutation, rather than testing nothing',
+      one.status === 2 && /matches no mutation/.test(one.stderr));
+    check('...and a valid selection is still accepted', r.status === 0);
+  }
+
+  // REFUSES: a pattern that no longer matches means the CONTROL was edited and the audit was
+  // not. It used to vanish from the report — excluded from numerator and denominator both —
+  // so the audit converged on printing success while testing less and less.
+  {
+    const r = scratch([K('drifted', 'a string that is not in the control')]);
+    check('kill-audit refuses a mutation whose pattern has drifted, instead of silently skipping it',
+      r.status === 1 && /unresolved/.test(r.stdout));
+  }
+
+  // REFUSES: a red baseline cannot tell you anything about coverage. Every mutation would read
+  // "caught" from a suite already failing for an unrelated reason — the most flattering
+  // possible wrong answer.
+  {
+    const r = scratch([K('watched', WATCHED)], { suiteExit: 1 });
+    check('kill-audit refuses to audit against an already-red suite',
       r.status !== 0 && /already red/.test(r.stdout));
   }
 
-  // SILENT: green baseline, no controls present to mutate. Absent must not read as SURVIVED —
-  // that would be this file committing the fail-open it was written to hunt.
-  {
-    const r = scratch(0);
-    check('a green baseline with no controls present is silent, not a false survivor',
-      r.status === 0 && /baseline: green/.test(r.stdout) && !/SURVIVED/.test(r.stdout));
-  }
+  // A timeout is not a catch. spawnSync returns status: null when it kills a child, and
+  // null !== 0 — so the first version scored an infrastructure failure as a successful catch.
+  check('a run that could not complete is separated from one that refused',
+    /no exit status|ETIMEDOUT/.test(fs.readFileSync(audit, 'utf8')));
 
-  // And it must never leave a control disarmed. Demonstrated rather than asserted about:
-  // mutate one file, SIGKILL mid-run, read the file back.
   check('it restores on exit, not only in a finally',
     /process\.on\('exit', restoreAll\)/.test(fs.readFileSync(audit, 'utf8')));
 }
