@@ -130,7 +130,7 @@ Then rewrite `AGENTS.md` §1 and §2. They ship as templates with the questions 
 
 **Nothing here needs a magic phrase.** Three mechanisms, all automatic:
 
-**1 · Hooks fire on events.** Wired in `.claude/settings.json` — **seven scripts across six
+**1 · Hooks fire on events.** Wired in `.claude/settings.json` — **8 scripts across six
 events** (`UserPromptSubmit` runs two):
 
 | Event | Script | What it does |
@@ -139,6 +139,7 @@ events** (`UserPromptSubmit` runs two):
 | `UserPromptSubmit` | `save-prompt.mjs` | archives every prompt you type, **with secrets scrubbed** |
 | `UserPromptSubmit` | `prompt-check.mjs` | one quiet line when the working state has drifted — silent when it has not |
 | `PreToolUse` | `guard-edit.mjs` | **the one that refuses.** No card in build → the edit is blocked |
+| `PreToolUse` | `guard-wakeup.mjs` | **refuses a wakeup whose own reason says there is nothing to wait for** — a timer is not a substitute for finishing |
 | `PostToolUse` | `after-edit.mjs` | notices what an edit implies you now owe |
 | `Stop` | `session-end.mjs` | the turn cannot end quietly with a gate unrun |
 | `PreCompact` | `pre-compact.mjs` | preserves the card, the files touched and the measurements **before** the window is squeezed |
@@ -154,7 +155,7 @@ refusal, not a note.
 
 ## What is in the box
 
-### 15 skills — `.agents/skills/`
+### 16 skills — `.agents/skills/`
 
 | Skill | When it fires |
 |---|---|
@@ -170,6 +171,7 @@ refusal, not a note.
 | `definition-of-done` | at `5-verify` — including *"has anyone watched the guard fail?"* |
 | `deploy-gate` | before every deployment, without exception |
 | `council` | a decision that is expensive to reverse |
+| `finish-dont-schedule` | a turn is about to end with work left, or /loop is about to be used — **is there anything real to wait for?** |
 | `reflect` | the records have gone stale; read them back and consolidate |
 
 ### 7 commands — `.claude/commands/`

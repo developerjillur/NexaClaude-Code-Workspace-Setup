@@ -1,10 +1,10 @@
 {
   "$comment": [
-    "Settings for the PRODUCT REPO \u2014 the tree that holds your code.",
+    "Settings for the PRODUCT REPO — the tree that holds your code.",
     "",
     "This is the second half of the workspace. The workspace repo has its own .claude/settings.json;",
     "this one exists so that an agent launched from INSIDE your code directory still gets the same",
-    "hooks, the same model tier and the same refusals. Two settings files, one behaviour \u2014 and",
+    "hooks, the same model tier and the same refusals. Two settings files, one behaviour — and",
     "scripts/check.mjs compares them and fails when they drift, because a hook that runs in one",
     "tree and not the other is worse than no hook: the gate appears to exist.",
     "",
@@ -12,10 +12,10 @@
     "If you cloned the workspace as a sibling directory named NexaClaude-Code-Workspace-Setup,",
     "that is `../NexaClaude-Code-Workspace-Setup`.",
     "",
-    "If your code lives INSIDE the workspace (in code/), you do not need this file at all \u2014 the",
+    "If your code lives INSIDE the workspace (in code/), you do not need this file at all — the",
     "workspace's own settings already cover it.",
     "",
-    "model + MAX_THINKING_TOKENS are pinned deliberately. See AGENTS.md \u2014 'the tier is not a",
+    "model + MAX_THINKING_TOKENS are pinned deliberately. See AGENTS.md — 'the tier is not a",
     "choice'. A cheaper model on the review path is how a review becomes a formality."
   ],
   "permissions": {
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/../WORKSPACE/scripts/hooks/session-start.mjs\" 2>/dev/null || echo '\u26a0 workspace not found beside this repo \u2014 board gates are OFF. See ../WORKSPACE/SETUP.md'"
+            "command": "node \"$CLAUDE_PROJECT_DIR/../WORKSPACE/scripts/hooks/session-start.mjs\" 2>/dev/null || echo '⚠ workspace not found beside this repo — board gates are OFF. See ../WORKSPACE/SETUP.md'"
           }
         ]
       }
@@ -63,6 +63,15 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/../WORKSPACE/scripts/hooks/guard-edit.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/guard-wakeup.mjs\""
           }
         ]
       }

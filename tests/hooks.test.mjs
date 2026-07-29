@@ -664,6 +664,40 @@ console.log(`\n${'─'.repeat(72)}`);
   once({ graph: 'none' }, 1, 'no graph at all, while the contract says to query one');
 }
 
+
+// ── guard-wakeup — a timer is not a substitute for finishing ─────────────────
+//
+// A real session scheduled a five-minute wakeup whose own reason began "Nothing external to
+// wait on". Eight items left, nothing to wait for, and a timer between each one. The silent
+// cases are written first, as always — a guard that refuses a legitimate wakeup gets switched
+// off, and then the one it exists for goes through.
+{
+  console.log('\n▸ guard-wakeup — waiting is for things outside this session');
+  const guard = path.join(HOOKS, 'guard-wakeup.mjs');
+  const fire = (tool_input, tool_name = 'ScheduleWakeup') =>
+    run(guard, { tool_name, tool_input }).code;
+
+  const SILENT = [
+    ['polling CI at its own pace', { delaySeconds: 480, reason: 'watching the CI run, about 8 minutes' }],
+    ['a short delay that names a deploy', { delaySeconds: 300, reason: 'the deploy pipeline goes green in five' }],
+    ['waiting on the council', { delaySeconds: 900, reason: 'the council takes 10-30 minutes' }],
+    ['a long fallback needs no justification', { delaySeconds: 1800, reason: 'idle tick' }],
+    ['stop: true, always', { stop: true }],
+    ['a rate-limit cooldown', { delaySeconds: 60, reason: 'waiting for the rate-limit cooldown' }],
+  ];
+  for (const [why, inp] of SILENT) check('allows ' + why, fire(inp) === 0);
+  check('ignores a different tool entirely', fire({ command: 'echo hi' }, 'Bash') === 0);
+
+  const REFUSED = [
+    ['the reported wakeup verbatim', { delaySeconds: 300, reason: 'Nothing external to wait on — next item is the Gas Safe finding, so a short tick so research starts with clean context rather than mid-turn.' }],
+    ['the same admission in other words', { delaySeconds: 300, reason: 'nothing to wait for, just pacing' }],
+    ['"purely a pacing tick"', { delaySeconds: 600, reason: 'no external signal; purely a pacing tick' }],
+    ['a short delay naming nothing outside', { delaySeconds: 180, reason: 'continuing the to-do list' }],
+    ['a short delay with no reason at all', { delaySeconds: 120, reason: '' }],
+  ];
+  for (const [why, inp] of REFUSED) check('refuses ' + why, fire(inp) === 2);
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

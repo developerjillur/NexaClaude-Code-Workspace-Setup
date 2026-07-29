@@ -5,12 +5,12 @@
     "",
     "guard-edit is the only one that BLOCKS (exit 2). It refuses a product-code edit when no",
     "card is in build, when WIP>1, or when the card has no reuse ladder recorded. It ignores",
-    "workspace/plan/doc edits deliberately \u2014 a guard that fires on everything gets switched",
+    "workspace/plan/doc edits deliberately — a guard that fires on everything gets switched",
     "off within a day, and a disabled guard is worse than none because people still trust it.",
     "",
     "Override for a genuine emergency: NEXA_NO_CARD=1. It logs rather than passing silently.",
     "",
-    "Stop hook added after reading Anthropic's large-codebase guidance: it asks the questions whose answers are lost when the window closes \u2014 decisions, contract gaps, unmeasured claims.",
+    "Stop hook added after reading Anthropic's large-codebase guidance: it asks the questions whose answers are lost when the window closes — decisions, contract gaps, unmeasured claims.",
     "",
     "enabledPlugins names what this workspace depends on rather than what happens to be installed.",
     "codex@openai-codex is load-bearing: it is how a plan gets reviewed by a model that does not",
@@ -67,6 +67,15 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/guard-edit.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/guard-wakeup.mjs\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -113,20 +122,20 @@
     "ponytail@ponytail": true
   },
   "$plugins": [
-    "Why each, since \u00a710 says this list names what we DEPEND on rather than what happens to be",
+    "Why each, since §10 says this list names what we DEPEND on rather than what happens to be",
     "installed. Added 2026-07-28 after auditing four proposed plugins and finding that the",
     "marketplace already enabled here carried better matches for this project's actual stack.",
     "",
-    "code-simplifier      \u2014 fills the ponytail gap. \u00a75 calls ponytail part of the contract and",
+    "code-simplifier      — fills the ponytail gap. §5 calls ponytail part of the contract and",
     "                       skills/reuse-first is derived from it, but it is not installed and",
     "                       check.mjs has been failing --strict locally because of it.",
-    "security-guidance    \u2014 warns at edit time. vibesec runs at deploy and finds 0; this catches",
+    "security-guidance    — warns at edit time. vibesec runs at deploy and finds 0; this catches",
     "                       the same class while it is being written. Complement, not replacement:",
     "                       skills/security-gate is still the thing that cannot be waived.",
-    "twilio-developer-kit \u2014 the product IS a Twilio calling agent, and Twilio specifics have",
+    "twilio-developer-kit — the product IS a Twilio calling agent, and Twilio specifics have",
     "                       already cost this project two sessions (the 21216 diagnosis, twice).",
-    "hostinger            \u2014 VPS deploy target, if you use one. Set your own host in .agents/skills/deploy-gate.",
-    "typescript-lsp       \u2014 Anthropic's large-codebase guidance, practice 4: LSP returns the",
+    "hostinger            — VPS deploy target, if you use one. Set your own host in .agents/skills/deploy-gate.",
+    "typescript-lsp       — Anthropic's large-codebase guidance, practice 4: LSP returns the",
     "                       references that point to the SAME symbol, so filtering happens before",
     "                       Claude reads anything. It serves JavaScript, which is all this repo is.",
     "                       Complements graphify rather than replacing it: the graph answers",
@@ -135,7 +144,7 @@
     "",
     "Declined the same day, with reasons in docs/DECISIONS.md: claude-mem and claude-obsidian.",
     "Both put the record somewhere a diff cannot reach it, which is the same test that declined",
-    "Hindsight an hour earlier. Consistency here is the point \u2014 the rule is not about any one",
+    "Hindsight an hour earlier. Consistency here is the point — the rule is not about any one",
     "tool, it is that memory this project relies on has to be reviewable."
   ],
   "extraKnownMarketplaces": {
