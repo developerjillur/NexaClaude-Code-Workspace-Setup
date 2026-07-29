@@ -20,7 +20,27 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HOOKS = path.join(ROOT, 'scripts', 'hooks');
-const PRODUCT = path.join(ROOT, 'code', 'src', 'anything.js');
+// ── the product path this suite pokes at ─────────────────────────────────────
+//
+// Read from `workspace.config.json`, exactly as the guard reads it. **It was hardcoded to
+// `code/src/anything.js`, and the moment somebody ran `./setup.sh --code ../their-repo` the
+// suite reported 26 failures** — every one of them the guard behaving correctly, because
+// `code/` was no longer product code and the fixture was no longer a product file.
+//
+// A new user's first experience was: install, then watch the test suite fail, and be told by
+// setup.sh that the workspace is "not ready". Found by actually doing the install into a
+// scratch project rather than by reading the script — the same way every other defect in this
+// repo was found.
+const PRODUCT = (() => {
+  let dirs = ['code'];
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8'));
+    if (Array.isArray(c.codeDirs) && c.codeDirs.length) dirs = c.codeDirs;
+  } catch { /* the guard falls back to code/ too, and so does this */ }
+  return path.join(path.resolve(ROOT, dirs[0]), 'src', 'anything.js');
+})();
+/** The same directory, spelled the way a shell command would write it. */
+const PRODUCT_REL = path.relative(ROOT, path.dirname(PRODUCT)).split(path.sep).join('/');
 
 // ── the board this suite assumes ─────────────────────────────────────────────
 //
@@ -170,31 +190,31 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
   const bash = (command) => run(g, { tool_name: 'Bash', tool_input: { command } });
 
   for (const [what, cmd] of [
-    ['redirect', 'echo x > code/src/backdoor.js'],
-    ['append', 'printf "x" >> code/src/auth.js'],
-    ['sed -i', 'sed -i "" "s/a/b/" code/src/tools.js'],
-    ['tee', 'cat foo | tee code/src/db.js'],
-    ['cp', 'cp /tmp/x code/src/y.js'],
+    ['redirect', `echo x > ${PRODUCT_REL}/backdoor.js`],
+    ['append', `printf "x" >> ${PRODUCT_REL}/auth.js`],
+    ['sed -i', `sed -i "" "s/a/b/" ${PRODUCT_REL}/tools.js`],
+    ['tee', `cat foo | tee ${PRODUCT_REL}/db.js`],
+    ['cp', `cp /tmp/x ${PRODUCT_REL}/y.js`],
   ]) check(`blocks a shell ${what} into product code`, bash(cmd).code === 2, cmd.slice(0, 40));
 
   // The allow path matters more here than anywhere else: a guard that blocks `grep` gets
   // switched off within an hour, and then nothing is guarded at all.
   for (const [what, cmd] of [
-    ['grep', 'grep -rn "policy" code/src/tools.js'],
-    ['cat', 'cat code/src/auth.js | head -20'],
+    ['grep', `grep -rn "policy" ${PRODUCT_REL}/tools.js`],
+    ['cat', `cat ${PRODUCT_REL}/auth.js | head -20`],
     ['running a test', 'node code/test/pricing.mjs'],
     ['npm', 'npm run test:offline'],
-    ['git diff', 'git diff code/src/db.js'],
+    ['git diff', `git diff ${PRODUCT_REL}/db.js`],
     ['writing outside product code', 'echo hi > /tmp/scratch.txt'],
     ['editing a workspace doc', 'sed -i "" "s/a/b/" docs/LEARNED.md'],
-    ['redirect to /dev/null', 'ls code/src/ > /dev/null'],
+    ['redirect to /dev/null', `ls ${PRODUCT_REL}/ > /dev/null`],
   ]) check(`allows ${what}`, bash(cmd).code === 0, cmd.slice(0, 38));
 
   // Honest limit, stated as a test so nobody mistakes it for coverage: a shell is a
   // programming language and a determined bypass is always available. This catches the
   // careless case, which is the one that happens.
   check('does NOT claim to stop a constructed path — known limit',
-    bash('P=code/src/x.js; echo hi > "$P"').code === 0, 'answered by review and git diff, not a matcher');
+    bash(`P=${PRODUCT_REL}/x.js; echo hi > "$P"`).code === 0, 'answered by review and git diff, not a matcher');
 
   // Scope: it must ignore everything that is not product code, or it gets switched off.
   check('ignores workspace edits',
@@ -483,7 +503,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const stray = fs.existsSync(build) ? fs.readdirSync(build).filter((f) => f.endsWith('.md')) : [];
   if (!stray.length) {
     check('with an empty 3-build, an edit to product code is REFUSED',
-      run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(ROOT, 'code', 'x.js') } }).code === 2);
+      run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(path.dirname(PRODUCT), 'x.js') } }).code === 2);
 
     // The same file, named through an UNRESOLVED symlink. On macOS /var is a link to
     // /private/var, so a shell hands over `/var/...` while ROOT is `/private/var/...`;
@@ -492,7 +512,7 @@ console.log(`\n${'─'.repeat(72)}`);
     const unresolved = ROOT.startsWith('/private/') ? ROOT.slice('/private'.length) : null;
     if (unresolved && fs.existsSync(unresolved)) {
       check('...and still refused when the path arrives unresolved (/var vs /private/var)',
-        run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(unresolved, 'code', 'x.js') } }).code === 2);
+        run(guard, { tool_name: 'Write', tool_input: { file_path: path.join(unresolved, path.relative(ROOT, path.dirname(PRODUCT)), 'x.js') } }).code === 2);
     }
   }
 }
@@ -558,7 +578,10 @@ console.log(`\n${'─'.repeat(72)}`);
 
   const q = String.fromCharCode(62);          // >   built, not typed
   const app = q + q;                          // >>
-  const code = ['code', 'src'].join('/');
+  // The configured product directory, not a hardcoded `code/src`. This block reported five
+  // failures the moment somebody ran `./setup.sh --code ../their-repo`, and every one of them
+  // was the guard behaving correctly on a path that was no longer product code.
+  const code = PRODUCT_REL;
 
   const SILENT = [
     ['prose in a heredoc', 'python3 - <<PY\\ns = "**Each fix broke it"\\nPY'],
@@ -589,7 +612,7 @@ console.log(`\n${'─'.repeat(72)}`);
       check('a leading cd means relative paths are relative to THERE',
         fire(`cd "${elsewhere}" && echo x ${String.fromCharCode(62)} notes.md`) === 0);
       check('...and a cd back INTO the guarded tree still refuses',
-        fire(`cd "${ROOT}" && echo x ${String.fromCharCode(62)} code/src/thing.js`) === 2);
+        fire(`cd "${ROOT}" && echo x ${String.fromCharCode(62)} ${PRODUCT_REL}/thing.js`) === 2);
     } finally { fs.rmSync(elsewhere, { recursive: true, force: true }); }
   }
 
@@ -727,8 +750,8 @@ console.log(`\n${'─'.repeat(72)}`);
       fire(`node x.mjs && cd "${away}" && echo x ${gt} notes.md`) === 0);
     check('a leading cd still does', fire(`cd "${away}" && echo x ${gt} notes.md`) === 0);
     check('a cd INTO the guarded tree still refuses',
-      fire(`node x.mjs && cd "${ROOT}" && echo x ${gt} code/src/a.js`) === 2);
-    check('no cd at all still refuses', fire(`echo x ${gt} code/src/a.js`) === 2);
+      fire(`node x.mjs && cd "${ROOT}" && echo x ${gt} ${PRODUCT_REL}/a.js`) === 2);
+    check('no cd at all still refuses', fire(`echo x ${gt} ${PRODUCT_REL}/a.js`) === 2);
 
   // A RELATIVE cd moves the base too. Counting only absolute ones was the sixth false positive
   // of this family: a file written inside a throwaway clone was judged against the product repo.
