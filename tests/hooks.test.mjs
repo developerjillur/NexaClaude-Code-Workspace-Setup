@@ -1725,6 +1725,26 @@ console.log(`\n${'─'.repeat(72)}`);
   check('setup.sh is executable in the git index, not merely on this machine',
     /^100755 /.test(idx.trim()));
 
+  // ── setup.sh judged suites by scraping their stdout ─────────────────────────
+  //
+  // It looked for `N passed, M failed` and ignored the exit code. `guard-paths-with-spaces.mjs`
+  // says `6/6 passed`, so **every install reported a green suite as a FAILURE** and told the
+  // user the workspace was not ready. The inverse was equally possible and worse: a suite that
+  // failed while printing the magic string would have been reported as fine.
+  //
+  // Same shape as the CI job that grepped a missing directory and read exit 2 as "no matches
+  // found". Read the thing you actually mean.
+  {
+    const setup = fs.readFileSync(path.join(ROOT, 'setup.sh'), 'utf8');
+    check('setup.sh decides a suite by its exit code, not by parsing its output',
+      /out="\$\(node "\$t" 2>&1\)"; rc=\$\?/.test(setup) && /if \[ "\$rc" -eq 0 \]/.test(setup));
+    check('...and every suite in tests/ exits 0 when it passes, whatever wording it uses',
+      fs.readdirSync(path.join(ROOT, 'tests'))
+        .filter((f) => f.endsWith('.mjs') && !f.startsWith('._') && f !== 'hooks.test.mjs')
+        .every((f) => spawnSync('node', [path.join(ROOT, 'tests', f)],
+          { cwd: ROOT, encoding: 'utf8', timeout: 600000 }).status === 0));
+  }
+
   // Every command the README tells a newcomer to run must at least resolve.
   const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
   const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};

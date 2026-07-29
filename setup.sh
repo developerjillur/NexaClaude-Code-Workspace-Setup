@@ -223,12 +223,22 @@ else
   fi
   rm -f /tmp/nc-check.$$
 
+  # A suite's verdict is its EXIT CODE. The summary line is for the human.
+  #
+  # This used to decide by scraping stdout for `N passed, M failed` and ignoring the exit code
+  # entirely. `guard-paths-with-spaces.mjs` says `6/6 passed`, so every install reported it as
+  # a FAILURE and told the user the workspace was "not ready" — while the suite was green. The
+  # inverse is worse and was equally possible: a suite that failed but printed the magic string
+  # would have been reported as fine.
+  #
+  # Same shape as the hygiene job that grepped a missing directory and read exit 2 as "no
+  # matches found". **Read the thing you actually mean.**
   for t in tests/*.mjs; do
     [ -e "$t" ] || continue
-    out="$(node "$t" 2>&1)"
-    line="$(printf '%s' "$out" | grep -oE '[0-9]+ passed, [0-9]+ failed' | tail -1)"
-    if [ $? -eq 0 ] && printf '%s' "$line" | grep -q ', 0 failed'; then ok "$t — $line"
-    else die "$t — ${line:-did not report}" "node $t"; fi
+    out="$(node "$t" 2>&1)"; rc=$?
+    line="$(printf '%s' "$out" | grep -oE '[0-9]+ passed, [0-9]+ failed|[0-9]+/[0-9]+ passed' | tail -1)"
+    if [ "$rc" -eq 0 ]; then ok "$t — ${line:-passed}"
+    else die "$t — ${line:-exit $rc}" "node $t"; fi
   done
 fi
 
