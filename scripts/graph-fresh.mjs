@@ -120,7 +120,11 @@ for (const rel of codeDirs()) {
       if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'graphify-out') continue;
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p, depth + 1);
-      else if (/\.(js|mjs|cjs)$/.test(e.name)) onDisk.push(path.relative(dir, p));
+      // Config files are not application source and no extractor indexes them. Counting
+      // them as "absent from the graph" put a permanent, unfixable line in the report.
+      else if (/\.(js|mjs|cjs)$/.test(e.name) && !/^(eslint|prettier|vite|rollup|webpack|babel|jest|vitest|tailwind|postcss)\.config\./.test(e.name)) {
+        onDisk.push(path.relative(dir, p));
+      }
     }
   };
   walk(dir);

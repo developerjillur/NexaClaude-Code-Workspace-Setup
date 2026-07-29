@@ -198,7 +198,7 @@ const agentsMd = fs.existsSync(path.join(ROOT, 'AGENTS.md'))
 const verifiedAt = agentsMd.match(/verified-at:\s*([0-9a-f]{7,40})/)?.[1];
 if (!verifiedAt) {
   soft(/verified-at:\s*INITIAL/.test(agentsMd)
-    ? 'AGENTS.md verified-at is still INITIAL — set it to a real commit once you have read the contract'
+    ? 'AGENTS.md verified-at is still INITIAL — expected on a fresh clone; set it once you have read the contract'
     : 'AGENTS.md has no `verified-at` in its contract-meta header',
     'nothing can tell whether the contract still describes the code');
 } else {
@@ -278,7 +278,7 @@ for (const [label, p] of sides) {
     // The product side is a symlink away; if the link is absent that is a setup state, not a
     // defect in this repo. Say which, rather than reporting a generic miss.
     if (label === 'product repo' && !fs.existsSync(path.join(ROOT, 'code'))) {
-      soft('product repo settings not checked', 'no code/ link here — see SETUP.md');
+      soft('product repo settings not checked', 'no code directory configured yet — expected before ./setup.sh --code');
     } else {
       bad(`${label} has no .claude/settings.json`, 'the hooks are not declared on that side, so they do not run there');
     }
@@ -487,7 +487,7 @@ try {
   try { dirs = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).codeDirs ?? dirs; } catch { /* default */ }
   const real = dirs.map((d) => path.resolve(ROOT, d)).filter((d) => fs.existsSync(d));
   if (!real.length) {
-    soft('product repo not present', 'no configured codeDirs exist yet — nothing to check');
+    soft('product repo not present', 'expected until ./setup.sh --code points it at your repo');
   } else {
     const pkgPath = real.map((d) => path.join(d, 'package.json')).find((p) => fs.existsSync(p));
     if (!pkgPath) {
@@ -575,7 +575,10 @@ try {
     for (const [label, actual, re] of counts) {
       if (!re) continue;
       const m = text.match(re);
-      if (!m) { soft(`README does not state its ${label} count`, 'a number nobody states is a number nobody checks'); continue; }
+      // Silent when the README simply has no such section. This exists to catch a STALE
+      // number, not to require a particular README shape — and firing on every project whose
+      // README is written differently is how a real drift warning gets skimmed past.
+      if (!m) continue;
       if (Number(m[1]) !== actual) { bad(`README says ${m[1]} ${label}; there are ${actual}`, 'a number in a README is a claim'); drift++; }
     }
     if (!drift) ok('the README\'s counts match the filesystem');
@@ -624,11 +627,20 @@ try {
     if (list.status !== 0) soft('could not ask claude which plugins are installed', 'declared-but-absent cannot be detected without it');
     else {
       const out = list.stdout ?? '';
-      const missing = declared.filter((p) => !out.includes(p));
-      const disabled = declared.filter((p) => {
-        const i = out.indexOf(p);
-        return i !== -1 && /disabled/.test(out.slice(i, i + 200));
-      });
+      // Parse the list into per-plugin BLOCKS. The first version read a 200-character window
+      // from each name, and a plugin's own block is only four lines — so the window ran into
+      // the NEXT entry and reported two enabled plugins as disabled, one of them the second
+      // model the whole review path stands on. **A window is not a record**, and this is the
+      // fifteenth control here to be wrong on its first version.
+      const blocks = new Map();
+      let current = null;
+      for (const line of out.split('\n')) {
+        const m = line.match(/^\s*❯\s*(\S+)/);
+        if (m) { current = m[1]; blocks.set(current, []); continue; }
+        if (current) blocks.get(current).push(line);
+      }
+      const missing = declared.filter((p) => !blocks.has(p));
+      const disabled = declared.filter((p) => /disabled/i.test((blocks.get(p) ?? []).join('\n')));
       if (missing.length) soft(`${missing.length} declared plugin${missing.length === 1 ? '' : 's'} not installed: ${missing.join(', ')}`, './setup.sh');
       if (disabled.length) soft(`${disabled.length} declared plugin${disabled.length === 1 ? '' : 's'} installed but DISABLED: ${disabled.join(', ')}`, './setup.sh');
       if (!missing.length && !disabled.length) ok(`all ${declared.length} declared plugins are installed and enabled`);
