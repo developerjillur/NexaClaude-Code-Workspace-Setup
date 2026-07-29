@@ -344,3 +344,54 @@ Still unaudited, and named on every run: `council-sync`, `kill-audit`, `mutate-c
 `mutation-test`, `reflect`. Two of those (`mutate-controls`, `mutation-test`) are candidates
 for **retirement rather than coverage**, if `kill-audit` is shown to subsume them — which is a
 measurement nobody has taken, and the reason they are still here.
+
+## 2026-07-29 — Rule ids, piloted on one control, and measured
+
+Two council members proposed the same repair independently, and it was the largest thing left
+undone: **every refusal carries a rule id, and fixtures assert the id rather than the exit
+code.** The argument was that an over-determined fixture then stops being silently worthless —
+delete rule A while rule B also fires, and the assertion "rule A fired" fails immediately.
+
+It touches every control, so it is **piloted on `guard-edit` alone** — four refusals
+(`discard-uncommitted`, `no-card-in-build`, `wip-limit`, `no-reuse-ladder`), each now printing
+`refused: <id>` on its own first line before the prose a human needs.
+
+### What was measured, and what it cost to get right
+
+The point of a pilot is a number, so a mutation was written whose only job is to test the claim:
+delete the WIP rule and see whether a fixture notices *for the right reason*.
+
+**The first attempt at that fixture was wrong, and the comment explaining it was confidently
+wrong in exactly the way the fixture was meant to illustrate.** It gave the second card a reuse
+ladder; `cards[0]` after sorting was that card; so deleting the WIP rule produced exit **0**
+and an ordinary exit-code assertion caught it perfectly well. The claim that it demonstrated
+anything about confounding was false, and was found by running it rather than by trusting it.
+
+The genuine case needs both cards without a ladder. Measured, same input:
+
+```
+WIP rule present  →  refused: wip-limit        exit 2
+WIP rule deleted  →  refused: no-reuse-ladder  exit 2
+```
+
+**Same bit, different rule.** `=== 2` passes either way; `/^refused: wip-limit$/` does not.
+That is the mechanism, demonstrated rather than argued, and it is the first direct evidence in
+this repo that the rule-id change does what the council said it would.
+
+### What is deliberately NOT done
+
+- The other thirteen controls still answer with one bit.
+- `guard-coverage` still attributes fixtures by **control name**, which is what let a prose
+  comment count as coverage for the secret scanner. Counting **rule ids** instead is the change
+  that would have refused that outright — and it is only worth doing once enough controls emit
+  ids for the count to mean anything.
+
+**How we would know this was wrong.** If ids drift out of sync with the code — an id kept while
+the rule beneath it changes meaning — the assertion becomes a spelling test and is worse than
+the exit code, because it looks specific. The guard against that is that every id is emitted
+from the same call that refuses, so deleting the refusal deletes the id.
+
+```
+kill-audit    23 caught, 0 survived, 0 unresolved, of 23 selected
+hooks.test    210 passed, 0 failed
+```

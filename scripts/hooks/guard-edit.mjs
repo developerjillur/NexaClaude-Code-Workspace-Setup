@@ -99,7 +99,32 @@ const read = () => new Promise((r) => {
 });
 
 const allow = () => process.exit(0);
-const block = (why) => { console.error(why); process.exit(2); };
+
+// ── why a refusal carries an id ──────────────────────────────────────────────
+//
+// Every control here answers with one bit — exit 2 — and one bit cannot say WHICH rule fired.
+// That is not a stylistic complaint; it is the cause of the six defects found in a single day
+// by `scripts/kill-audit.mjs`:
+//
+//   · the `/loop` wakeup fixture was blocked by the short-delay rule, so deleting the rule
+//     written for that exact incident changed nothing
+//   · the TBD card was refused for missing three other questions
+//   · the "lying card" cited a missing file AND a missing proof
+//   · `load(id) { return null }` tripped `unused-param` as well as `stub-return`
+//   · and one fixture accepted a CRASH as a refusal, because a stack trace also exits 1
+//
+// Two council members proposed the same repair independently:
+//
+//   "Make every refusal carry a rule id, and make fixtures assert the id, not the exit code.
+//    Then an over-determined fixture stops being silently worthless: delete rule A while rule
+//    B also fires, and the assertion 'rule A fired' fails immediately."
+//
+// This is the pilot on one control, not a workspace-wide change — the claim is testable and
+// `kill-audit` can test it, which is the only reason to believe it before doing the rest.
+//
+// The id goes on its own first line so it is trivially greppable, and the prose that a human
+// actually needs follows unchanged.
+const block = (id, why) => { console.error(`refused: ${id}\n${why}`); process.exit(2); };
 
 const input = JSON.parse((await read()) || '{}');
 let file = input?.tool_input?.file_path ?? '';
@@ -178,6 +203,7 @@ if (input?.tool_name === 'Bash') {
     const dirty = (probe.stdout || '').trim().split('\n').filter(Boolean);
     if (dirty.length) {
       block(
+'discard-uncommitted',
         `BLOCKED — this discards work nobody has committed.\n\n` +
         `  ${cmd.slice(0, 160)}\n\n` +
         `Uncommitted right now:\n${dirty.slice(0, 12).map((l) => `  ${l}`).join('\n')}` +
@@ -298,6 +324,7 @@ const cards = fs.existsSync(buildDir)
 
 if (cards.length === 0) {
   block(
+'no-card-in-build',
 `BLOCKED — nothing is in board/3-build, so this edit belongs to no card.
 
 Editing product code with no card in build is how work drifts from the plan: there is no
@@ -313,6 +340,7 @@ Editing: ${rel || file}`);
 
 if (cards.length > 1) {
   block(
+'wip-limit',
 `BLOCKED — ${cards.length} cards are in board/3-build. The WIP limit is 1.
 
   ${cards.join('\n  ')}
@@ -328,6 +356,7 @@ Finish or move one back, then edit.`);
 const body = fs.readFileSync(path.join(buildDir, cards[0]), 'utf8');
 if (!/graphify explain/.test(body)) {
   block(
+'no-reuse-ladder',
 `BLOCKED — ${cards[0]} has no reuse ladder recorded.
 
 Section "## 2 · Plan" must show the graphify explain that was run before writing. Without it

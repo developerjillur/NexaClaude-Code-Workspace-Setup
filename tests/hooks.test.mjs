@@ -124,6 +124,39 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
       const r = run(g, edit);
       check('blocks when two cards are in build (WIP=1)', r.code === 2, `exit ${r.code}`);
       check('...and lists both, so the human can pick', /999-test-fixture/.test(r.stderr) && /998-second/.test(r.stderr));
+      check('...and says WHICH rule refused, not only that something did',
+        /^refused: wip-limit$/m.test(r.stderr));
+    } finally { fs.rmSync(second, { force: true }); }
+  });
+
+  // ── the rule-id pilot, and the case that measures it ────────────────────────
+  //
+  // The fixture above is isolating by luck: both its cards carry a reuse ladder, so deleting
+  // the WIP rule lets the edit through and `=== 2` notices. **This one is genuinely
+  // over-determined** — neither card has a ladder, so with WIP enforced the WIP rule refuses,
+  // and with WIP deleted the reuse-ladder rule refuses the very same input. Identical exit
+  // code either way.
+  //
+  // Measured, not reasoned, on the same input:
+  //
+  //     WIP rule present  →  refused: wip-limit        exit 2
+  //     WIP rule deleted  →  refused: no-reuse-ladder  exit 2
+  //
+  // **The first version of this fixture gave the second card a ladder** and the comment claimed
+  // it demonstrated the point. It did not: `cards[0]` after sorting was `997`, which had the
+  // ladder, so deleting the WIP rule produced exit **0** and the exit code caught it after all.
+  // A confident claim about confounding, itself unconfounded, in the block written to explain
+  // confounding — found by running it instead of trusting it.
+  withCardInBuild('# 999\n\nNo ladder.\n', () => {
+    const second = path.join(ROOT, 'board', '3-build', '997-also.md');
+    fs.writeFileSync(second, '# 997\n\nNo ladder either.\n');
+    try {
+      const r = run(g, edit);
+      check('an over-determined case still refuses', r.code === 2);
+      check('...and names wip-limit specifically, which the exit code cannot',
+        /^refused: wip-limit$/m.test(r.stderr));
+      check('...and NOT the other rule that would also have fired',
+        !/^refused: no-reuse-ladder$/m.test(r.stderr));
     } finally { fs.rmSync(second, { force: true }); }
   });
 

@@ -64,6 +64,15 @@ const KILLS = [
     from: '    CODE_ABS.some((d) => c === d || c.startsWith(`${d}${path.sep}`)));',
     to: '    CODE_ABS.some((d) => c === d));' },
 
+  // The mutation that measures the rule-id pilot. Deleting the WIP rule leaves the
+  // reuse-ladder rule to refuse the over-determined fixture with an identical exit 2 — so an
+  // exit-code oracle reports SURVIVED and an id oracle reports caught. **Same fixture, same
+  // mutation, different oracle**, which is the whole claim, testable.
+  { id: 'wip-limit', file: 'scripts/hooks/guard-edit.mjs',
+    what: 'guard-edit stops enforcing WIP=1 — two cards in build, both half-finished',
+    from: 'if (cards.length > 1) {',
+    to: 'if (false) {' },
+
   // ── guard-wakeup ───────────────────────────────────────────────────────────
   { id: 'wakeup-admits', file: 'scripts/hooks/guard-wakeup.mjs',
     what: 'guard-wakeup no longer catches a reason that says there is nothing to wait for',
