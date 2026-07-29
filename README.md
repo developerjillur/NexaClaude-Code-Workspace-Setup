@@ -76,11 +76,21 @@ elsewhere, so the exact count moves by one — a number that drifts is worth say
 than rounding into a claim.)
 
 ```bash
-node tests/hooks.test.mjs      # 128 passed
-node tests/council.test.mjs    # 510 passed
-node tests/survives-session-death.mjs   # 10 passed — launches a council,
-                                       # SIGKILLs the session, checks the run lived
+# a bare clone can run these two
+node tests/hooks.test.mjs             # the hooks, the gates, the controls
+node tests/guard-paths-with-spaces.mjs
+
+# these arrive with ./setup.sh — the council is FETCHED, not vendored
+node tests/council.test.mjs           # containment, ranking, aggregation
+node tests/survives-session-death.mjs # launches a council, SIGKILLs the
+                                      # session, checks the run lived
 ```
+
+**The split matters.** The first two are in this repo. The second two come from the council,
+which is cloned at setup rather than copied in — so on a fresh clone they do not exist yet, and
+a instruction that cannot be followed is a broken instruction. Counts are deliberately not
+quoted here: a number in a README is a claim, and this one drifted three times before a check
+started counting the files instead.
 
 ---
 

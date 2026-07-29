@@ -1687,6 +1687,40 @@ console.log(`\n${'─'.repeat(72)}`);
       scratch([{ ...KILL[0], from: 'a line that is not there' }]).stdout));
 }
 
+// ── the first command in the README has to work ──────────────────────────────
+//
+// `setup.sh` was committed mode 100644. A fresh clone therefore answered the very first line
+// of the install instructions with `permission denied` — **the package's opening move, broken,
+// in a repo full of controls about things being broken.** Nothing here tested the one thing
+// every new user does first.
+//
+// Checked against git's index, not the working tree: a local `chmod +x` fixes your copy and
+// changes nothing for anybody cloning, which is exactly how this survived.
+{
+  console.log('\n▸ the install path a stranger actually takes');
+  const idx = spawnSync('git', ['ls-files', '-s', 'setup.sh'], { cwd: ROOT, encoding: 'utf8' }).stdout ?? '';
+  check('setup.sh is executable in the git index, not merely on this machine',
+    /^100755 /.test(idx.trim()));
+
+  // Every command the README tells a newcomer to run must at least resolve.
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const scripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const cited = [...readme.matchAll(/^\s*(?:\$ )?npm run ([\w:-]+)/gm)].map((m) => m[1]);
+  const missing = [...new Set(cited)].filter((s) => !(s in scripts));
+  check('every `npm run` the README instructs is a real script',
+    missing.length === 0, missing.join(', '));
+
+  // Paths the council provides are gitignored and legitimately absent before `./setup.sh`.
+  // They are not broken instructions — but a reader has to be told which is which, so the
+  // README marks them and this only demands the ones a bare clone is supposed to have.
+  const files = [...readme.matchAll(/^\s*(?:\$ )?node (scripts\/[\w./-]+\.mjs|tests\/[\w./-]+\.mjs)/gm)].map((m) => m[1]);
+  const fetched = (f) => spawnSync('git', ['check-ignore', '-q', f], { cwd: ROOT }).status === 0;
+  const gone = [...new Set(files)].filter((f) => !fs.existsSync(path.join(ROOT, f)) && !fetched(f));
+  check('every `node <script>` the README instructs exists in a bare clone', gone.length === 0, gone.join(', '));
+  check('...and the ones that do not are the fetched ones, which the README says so about',
+    [...new Set(files)].filter((f) => fetched(f)).every(() => /FETCHED, not vendored/.test(readme)));
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

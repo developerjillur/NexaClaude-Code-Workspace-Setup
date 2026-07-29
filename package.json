@@ -1,6 +1,6 @@
 {
   "name": "nexaclaude-code-workspace",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "A complete, opinionated Claude Code workspace — blocking hooks, a WIP=1 pipeline, auto-loading skills, and a multi-vendor council.",
@@ -38,5 +38,9 @@
     "council:check": "node scripts/council-sync.mjs --check",
     "leakage": "node scripts/no-product-leakage.mjs",
     "audit": "node scripts/kill-audit.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git"
   }
 }
