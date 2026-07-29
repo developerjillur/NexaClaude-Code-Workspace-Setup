@@ -242,8 +242,16 @@ console.log('\n\u25b8 prompt-check \u2014 silence in the normal case IS the feat
 
   // Prime the memory, then confirm the same state says nothing. WAS THE RISK: reporting an
   // absolute count fired on every prompt, because 45 uncommitted files is a standing state.
+  // STABLE, not empty. The first version asserted an empty output, which held only in a
+  // workspace with nothing in flight — and prompt-check reports standing facts (a stale
+  // reflection, a graph behind the tree) that no amount of priming clears. **The design
+  // guarantees it speaks about CHANGES, so what must hold is that the same state twice says
+  // the same thing**, not that it says nothing.
   run(pc, {});
-  check('says nothing when the state has not changed', run(pc, {}).stdout.trim() === '');
+  const first = run(pc, {}).stdout.trim();
+  check('says the same thing when the state has not changed', run(pc, {}).stdout.trim() === first);
+  check('...and does not repeat the drift line it already reported',
+    (first.match(/uncommitted/g) ?? []).length <= 1);
 
   // WATCHED SPEAKING: WIP over the limit.
   const dir = path.join(ROOT, 'board', '3-build');
@@ -267,7 +275,7 @@ console.log('\n\u25b8 prompt-check \u2014 silence in the normal case IS the feat
   const t0 = Date.now(); run(pc, {}); const ms = Date.now() - t0;
   check('costs under 600ms', ms < 600, `${ms}ms`);
 
-  check('back to silent once the state is clean', run(pc, {}).stdout.trim() === '');
+  check('back to its baseline once the state is clean', run(pc, {}).stdout.trim() === first);
   if (saved === null) fs.rmSync(state, { force: true }); else fs.writeFileSync(state, saved);
 }
 
@@ -720,6 +728,124 @@ console.log(`\n${'─'.repeat(72)}`);
     ['a short delay with no reason at all', { delaySeconds: 120, reason: '' }],
   ];
   for (const [why, inp] of REFUSED) check('refuses ' + why, fire(inp) === 2);
+}
+
+
+// ── the four controls that had no fixtures at all ────────────────────────────
+//
+// Found by scripts/guard-coverage.mjs on its first run — including itself, which is the
+// correct answer and slightly embarrassing. Silent case first for each, because fifteen
+// controls here were wrong on their first version and not one was found the other way.
+{
+  console.log('\n▸ depth-check — real code, or six shapes of stub');
+  const depth = path.join(ROOT, 'scripts', 'depth-check.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'depth-'));
+  const write = (name, body) => { const f = path.join(tmp, name); fs.writeFileSync(f, body); return f; };
+  const fire = (f) => spawnSync('node', [depth, f], { cwd: ROOT, encoding: 'utf8' }).status;
+
+  const REAL = [
+    'export function price(usage, rates) {',
+    '  const input = usage.inputTokens ?? 0;',
+    '  const cached = Math.min(usage.cachedTokens ?? 0, input);',
+    '  return ((input - cached) * rates.in + cached * rates.cached) / 1e6;',
+    '}',
+  ].join('\n');
+  check('depth-check allows real code with branches and arithmetic', fire(write('real.mjs', REAL)) === 0);
+  check('depth-check allows a short but genuine function',
+    fire(write('short.mjs', 'export const add = (a, b) => a + b;\n')) === 0);
+
+  check('depth-check refuses a body that only throws not-implemented',
+    fire(write('stub.mjs', 'export function go() {\n  throw new Error("not implemented");\n}\n')) === 1);
+  check('depth-check refuses an empty catch',
+    fire(write('swallow.mjs', 'export async function go(f) {\n  try { await f(); } catch (e) {\n  }\n}\n')) === 1);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  console.log('\n▸ verify-claims — does a card cite things that exist');
+  const vc = path.join(ROOT, 'scripts', 'verify-claims.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'claims-'));
+  fs.mkdirSync(path.join(tmp, 'board', '5-verify'), { recursive: true });
+  const card = (name, body) => {
+    const f = path.join(tmp, 'board', '5-verify', name);
+    fs.writeFileSync(f, body);
+    return f;
+  };
+  const fire = (f) => spawnSync('node', [vc, f], { cwd: ROOT, encoding: 'utf8' }).status;
+
+  // Cites only things that are true of THIS repo, so it must stay quiet.
+  const HONEST = [
+    '# 900 — an honest card', '',
+    '**Proved by** \`scripts/check.mjs\`, which exists.', '',
+    'Run \`npm run check\` — it is a real script in package.json.', '',
+    '\`\`\`', '  ✅ everything green', '\`\`\`', '',
+  ].join('\n');
+  check('verify-claims allows a card whose citations resolve', fire(card('900-honest.md', HONEST)) === 0);
+
+  const LYING = [
+    // The FIRST version put the citation in free prose, and verify-claims said "all claims
+    // resolve" — because it reads the STRUCTURED sections (§2's file table, §1's "Proved
+    // by"), not every backtick in the document. The control was right; the fixture missed the
+    // path. **A fixture that misses the path is indistinguishable from a control that does.**
+    '# 901 — a card citing what is not there', '',
+    '## 2 · Plan', '',
+    '| File | Change |', '|---|---|', '| \`scripts/does-not-exist.mjs\` | invented |', '',
+    '**Proved by.** \`tests/no-such-suite.mjs\`', '',
+  ].join('\n');
+  check('verify-claims refuses a card citing a file that does not exist',
+    fire(card('901-lying.md', LYING)) === 1);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  console.log('\n▸ council-sync --check — is the council there, and current');
+  const sync = path.join(ROOT, 'scripts', 'council-sync.mjs');
+  const r = spawnSync('node', [sync, '--check'], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+  // Either answer is legitimate; what must hold is that it SAYS which, and never crashes.
+  check('council-sync --check reports rather than crashing', r.status === 0 || r.status === 1);
+  check('...and names the council in what it says', /council/i.test(r.stdout + r.stderr));
+  // Run in a throwaway root rather than by unlinking the live .council-src. Touching the
+  // real one to test it is how a test breaks the thing it is testing.
+  check('council-sync --check refuses when the council is absent', (() => {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'nocouncil-'));
+    fs.mkdirSync(path.join(t, 'scripts'), { recursive: true });
+    fs.copyFileSync(sync, path.join(t, 'scripts', 'council-sync.mjs'));
+    try {
+      return spawnSync('node', [path.join(t, 'scripts', 'council-sync.mjs'), '--check'],
+        { cwd: t, encoding: 'utf8' }).status === 1;
+    } finally { fs.rmSync(t, { recursive: true, force: true }); }
+  })());
+}
+
+{
+  console.log('\n▸ guard-coverage — the gate that found the four above, tested by its own rule');
+  const gc = path.join(ROOT, 'scripts', 'guard-coverage.mjs');
+  const r = spawnSync('node', [gc, '--json'], { cwd: ROOT, encoding: 'utf8' });
+  let out = { controls: [], findings: [] };
+  try { out = JSON.parse(r.stdout); } catch { /* leave empty, the checks below will say */ }
+
+  check('guard-coverage allows a control with both directions covered',
+    (out.controls ?? []).some((c) => c.name === 'guard-edit' && c.refuses > 0 && c.silent > 0));
+  check('...and finds guard-edit specifically, rather than nothing at all',
+    (out.controls ?? []).some((c) => c.name === 'guard-edit'));
+  check('guard-coverage refuses a control with no fixtures, and names it',
+    (() => {
+      // A control with no assertions anywhere must be reported. Simulated rather than
+      // asserted: a throwaway script that can exit 1, and no test mentioning it.
+      // The name is BUILT at run time. Writing it as a literal put it in this suite's own
+      // source, so guard-coverage found "assertions" for it — this very block — and reported
+      // it as covered. **A probe whose name appears in the thing it probes measures nothing.**
+      const probeName = ['zz', String(process.pid), 'probe'].join('-') + '.mjs';
+      const probe = path.join(ROOT, 'scripts', probeName);
+      fs.writeFileSync(probe, '#!/usr/bin/env node\nprocess.exit(1);\n');
+      try {
+        const x = spawnSync('node', [gc, '--json'], { cwd: ROOT, encoding: 'utf8' });
+        const j = JSON.parse(x.stdout || '{}');
+        return x.status === 1 && (j.findings ?? []).some((f) => f.name === probeName.replace(/\.mjs$/, ''));
+      } catch { return false; } finally { fs.rmSync(probe, { force: true }); }
+    })());
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);

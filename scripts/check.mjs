@@ -663,6 +663,27 @@ try {
   else soft(line.trim() || 'the council is not fetched', 'npm run council:sync');
 }
 
+// ── every control tested in both directions ──────────────────────────────────
+//
+// bad(), not soft(). Sixteen controls have been added to this workspace and every one was
+// wrong on its first version — thirteen of them failing OPEN, which is indistinguishable from
+// working. **Not one was found by the case it was built to catch.** Every single one was found
+// by running the case it was supposed to stay silent on.
+//
+// That lesson is in docs/LEARNED.md three times and kept happening anyway, including twice in
+// one afternoon while fixing a council's criticism that the controls here only advise. So it
+// is a gate now.
+{
+  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'guard-coverage.mjs'), '--json'], { encoding: 'utf8' });
+  let out = { controls: [], findings: [] };
+  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through */ }
+  const n = (out.findings ?? []).length;
+  if (!n) ok(`all ${(out.controls ?? []).length} controls have a refusal case AND a silent case`);
+  else for (const f of out.findings) {
+    bad(`${f.name}: ${f.detail}`, 'write the case it must IGNORE before the case it must catch');
+  }
+}
+
 console.log('\n───────────────────────────────────────────────────────────');
 if (fail) {
   console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
