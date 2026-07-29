@@ -601,6 +601,20 @@ console.log(`\n${'─'.repeat(72)}`);
   check('card-gate refuses 6-done with nowhere named for errors',
     fire(mk('6-done', 'g.md', ANSWERED.replace(/\*\*Where errors surface.*/, ''))) === 1);
 
+  // ── the two above refuse for the wrong reason, and did so silently ──────────
+  //
+  // `kill-audit` neutered `EMPTY` — the list that rejects TBD / n/a / ??? — and the suite
+  // stayed green. Card `e.md` is refused whether or not that list works, because it also omits
+  // three questions outright. Same for the kill condition: nothing here answers four and drops
+  // only the fifth.
+  //
+  // **A fixture that differs from the passing one in more than one way proves neither.** The
+  // repair is to change exactly one thing, from a card already known to pass.
+  check('card-gate refuses a placeholder where a real answer would pass — one word changed',
+    fire(mk('1-spec', 'h.md', ANSWERED.replace(/(\*\*What number moves\?\*\*).*/, '$1 TBD'))) === 1);
+  check('card-gate refuses a card missing only the kill condition',
+    fire(mk('1-spec', 'i.md', ANSWERED.replace(/\*\*What would make us stop\?\*\*.*\n?/, ''))) === 1);
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -756,6 +770,33 @@ console.log(`\n${'─'.repeat(72)}`);
     ['a short delay with no reason at all', { delaySeconds: 120, reason: '' }],
   ];
   for (const [why, inp] of REFUSED) check('refuses ' + why, fire(inp) === 2);
+
+  // ── the five above prove an exit code, not a rule ───────────────────────────
+  //
+  // `scripts/kill-audit.mjs` deleted the "nothing to wait on" pattern — the one written for
+  // the reported incident, matching its reason verbatim — and **every assertion above stayed
+  // green.** The reason carries `delaySeconds: 300`, so the SHORT-DELAY rule blocked it just
+  // the same, and `=== 2` cannot tell the two apart.
+  //
+  // **The fixture that must fail differed from the passing one in more than one way**, so it
+  // proved neither. The same defect turned up in three other places in this suite on the same
+  // run. Two fixes, and both are about isolating the variable:
+  //
+  //   · a case only rule 1 can catch — a LONG delay, where the short-delay rule cannot fire
+  //   · assert on WHICH refusal came back, not merely that one did
+  {
+    const long = fire({ delaySeconds: 3600, reason: 'Nothing external to wait on — picking the rest up next tick.' });
+    check('refuses an admission of nothing pending even at a long delay, where only that rule can fire',
+      long === 2);
+
+    const verbatim = run(guard, { tool_name: 'ScheduleWakeup', tool_input: REFUSED[0][1] });
+    check('...and the verbatim incident is refused BY that rule, not by the delay rule',
+      /in its own reason/.test(verbatim.stderr));
+
+    const short = run(guard, { tool_name: 'ScheduleWakeup', tool_input: REFUSED[3][1] });
+    check('...and the short-delay refusal is still attributed to the delay rule',
+      /does not name what it is waiting for/.test(short.stderr));
+  }
 }
 
 
@@ -874,6 +915,42 @@ console.log(`\n${'─'.repeat(72)}`);
         return x.status === 1 && (j.findings ?? []).some((f) => f.name === probeName.replace(/\.mjs$/, ''));
       } catch { return false; } finally { fs.rmSync(probe, { force: true }); }
     })());
+
+  // ── the probe above has NO assertions, so it can only prove one branch ──────
+  //
+  // `kill-audit` deleted the `no-silent-case` branch entirely and this block stayed green: a
+  // control with nothing written about it trips `no-refusal-case` first and never reaches it.
+  // **So the branch aimed at the direction all fifteen defects came from was itself untested.**
+  //
+  // This probe carries a refusal assertion and no silent one — one variable changed from the
+  // case above — which is the only shape that reaches the second branch.
+  check('guard-coverage refuses a control watched refusing but never staying silent',
+    (() => {
+      const name = ['zz', String(process.pid), 'halfprobe'].join('-');
+      const probe = path.join(ROOT, 'scripts', `${name}.mjs`);
+      const spec = path.join(ROOT, 'tests', `${name}.test.mjs`);
+      // Built at run time for the same reason as above: a literal here would put the name in
+      // this file, and guard-coverage would read this comment as the fixture.
+      // Wording matters — it must trip REFUSES and must not trip SILENT, or the probe tests
+      // the classifier's vocabulary instead of the branch.
+      //
+      // The name goes on a line ABOVE the assertion, the way every real block here is written.
+      // Putting it inside the assertion string does not work: guard-coverage slices from where
+      // the name first appears, so a `check(` earlier on the SAME line falls outside the slice
+      // and the assertion is not counted. A real limitation, found by this fixture — and not
+      // one worth another control, because every suite here already writes the banner first.
+      fs.writeFileSync(probe, '#!/usr/bin/env node\nprocess.exit(1);\n');
+      fs.writeFileSync(spec, `// ${name}\ncheck('blocks a bad input', fire() === 2);\n`);
+      try {
+        const x = spawnSync('node', [gc, '--json'], { cwd: ROOT, encoding: 'utf8' });
+        const j = JSON.parse(x.stdout || '{}');
+        const f = (j.findings ?? []).find((k) => k.name === name);
+        return x.status === 1 && f?.kind === 'no-silent-case';
+      } catch { return false; } finally {
+        fs.rmSync(probe, { force: true });
+        fs.rmSync(spec, { force: true });
+      }
+    })());
 }
 
 
@@ -902,6 +979,178 @@ console.log(`\n${'─'.repeat(72)}`);
     /fileURLToPath\(import\.meta\.url\)/.test(src) && !/\/Volumes\//.test(src));
   check('it refuses to run at all on an already-red suite, rather than reporting nonsense',
     /already red/.test(src));
+}
+
+// ── kill-audit — is each PROTECTION watched, or only each control? ────────────
+//
+// `mutate-controls` turns a control's `exit(2)` into `exit(0)`: is this control watched at
+// all? Answered — five of five. A council put the harder question after it:
+//
+//   "guard-coverage proves only that assertion TEXT exists on both sides. Everything between
+//    the text and the behaviour is invisible to it."
+//
+// So kill-audit deletes ONE REAL RULE at a time — the `tee` pattern, the placeholder list, the
+// uncommitted-work check — leaving the control otherwise fully alive. A control can be watched
+// and still have nine of its ten rules unwatched.
+//
+// **These two assertions RUN it**, in a scratch workspace, rather than reading its source —
+// because reading the source is the exact weakness being answered. Grepping a file that greps
+// files proves nothing twice.
+{
+  console.log('\n▸ kill-audit — a protection that could be deleted in silence');
+  const audit = path.join(ROOT, 'scripts', 'kill-audit.mjs');
+
+  check('kill-audit exists and parses',
+    spawnSync('node', ['--check', audit], { encoding: 'utf8' }).status === 0);
+
+  /** A workspace containing nothing but a suite that does what we say. */
+  const scratch = (suiteExit) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'killaudit-'));
+    fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
+    fs.mkdirSync(path.join(d, 'scripts', 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'tests', 'only.mjs'), `process.exit(${suiteExit});\n`);
+    fs.writeFileSync(path.join(d, 'scripts', 'check.mjs'), 'process.exit(0);\n');
+    fs.copyFileSync(audit, path.join(d, 'scripts', 'kill-audit.mjs'));
+    const r = spawnSync('node', [path.join(d, 'scripts', 'kill-audit.mjs')], { cwd: d, encoding: 'utf8', timeout: 120000 });
+    fs.rmSync(d, { recursive: true, force: true });
+    return r;
+  };
+
+  // REFUSES: a red baseline cannot tell you anything about coverage. Every mutation would be
+  // reported "caught" by a suite that was already failing for an unrelated reason — the most
+  // flattering possible wrong answer, which is why it must refuse rather than warn.
+  {
+    const r = scratch(1);
+    check('it refuses to audit against an already-red suite',
+      r.status !== 0 && /already red/.test(r.stdout));
+  }
+
+  // SILENT: green baseline, no controls present to mutate. Absent must not read as SURVIVED —
+  // that would be this file committing the fail-open it was written to hunt.
+  {
+    const r = scratch(0);
+    check('a green baseline with no controls present is silent, not a false survivor',
+      r.status === 0 && /baseline: green/.test(r.stdout) && !/SURVIVED/.test(r.stdout));
+  }
+
+  // And it must never leave a control disarmed. Demonstrated rather than asserted about:
+  // mutate one file, SIGKILL mid-run, read the file back.
+  check('it restores on exit, not only in a finally',
+    /process\.on\('exit', restoreAll\)/.test(fs.readFileSync(audit, 'utf8')));
+}
+
+// ── scan-secrets — the credential gate, which had no test at all ─────────────
+//
+// `kill-audit` deleted four of its rules in turn — the AWS pattern, the `password = "…"`
+// pattern, the entire git-history pass, and finally its exit code, so that it could find every
+// secret in the tree and **report success** — and all four survived. Every suite stayed green.
+//
+// The cause is worse than a missing test. `guard-coverage` reported it **✅ 1 refuse · 1
+// silent**, because the string "scan-secrets" appears in a PROSE COMMENT inside the prompt
+// scrubber's block, and the collector counted that block's assertions as its fixtures.
+//
+// **So the metacontrol read a comment as coverage for the deploy gate that keeps credentials
+// out of a public repo.** That is the council's criticism at full strength — "everything
+// between the text and the behaviour is invisible to it" — and here even the text was not a
+// fixture.
+//
+// These run the scanner for real, in a throwaway git repo, because that is the only way to
+// separate the tree pass from the history pass. Values are synthetic: `AKIA` + sixteen A-Z0-9
+// is the shape, not a key.
+{
+  console.log('\n▸ scan-secrets — a real repo, a real secret, a real refusal');
+  const src = path.join(ROOT, 'scripts', 'scan-secrets.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-'));
+
+  /** A git repo with `files`, then optionally a second commit applying `then`. */
+  const repo = (files, then) => {
+    const d = fs.mkdtempSync(path.join(tmp, 'r-'));
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    fs.copyFileSync(src, path.join(d, 'scripts', 'scan-secrets.mjs'));
+    const g = (c) => spawnSync('sh', ['-c', c], { cwd: d, encoding: 'utf8' });
+    g('git init -q . && git config user.email t@t && git config user.name t');
+    for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b);
+    g('git add -A && git commit -qm one');
+    if (then) { then(d); g('git add -A && git commit -qm two'); }
+    return d;
+  };
+  const fire = (d, ...args) => {
+    const env = args.includes('--no-pcre') ? { NEXA_SCAN_NO_PCRE: '1' } : {};
+    const r = spawnSync('node', [path.join(d, 'scripts', 'scan-secrets.mjs'), ...args.filter((a) => a !== '--no-pcre')],
+      { cwd: d, encoding: 'utf8', timeout: 120000, env: { ...process.env, ...env } });
+    return { code: r.status, out: r.stdout ?? '' };
+  };
+
+  // SILENT first — the direction every defect here came from. A scanner that refuses
+  // everything is not a scanner, and this is the case that says it does not.
+  {
+    const d = repo({ 'a.js': 'export const greet = (n) => `hello ${n}`;\n', 'README.md': '# clean\n' });
+    check('scan-secrets is silent on a repo with no secrets', fire(d).code === 0);
+  }
+
+  // Each of the next three changes exactly ONE thing from that clean repo — the lesson the
+  // first audit taught, applied here from the start rather than after.
+  {
+    const d = repo({ 'a.js': 'const id = "AKIAEXAMPLE123456ABC";\n' });
+    const r = fire(d);
+    check('scan-secrets refuses an AWS key id in the tree', r.code === 1);
+    check('...and names which pattern matched, rather than only failing', /aws key id/.test(r.out));
+  }
+  {
+    const d = repo({ 'a.js': 'const cfg = { password: "hunter2hunter2hunter2" };\n' });
+    check('scan-secrets refuses an assigned password — its broadest rule',
+      fire(d).code === 1 && /assigned secret/.test(fire(d).out));
+  }
+
+  // The history pass, isolated. The secret is committed and then REMOVED, so the working tree
+  // is clean and only a history scan can find it. This is the case that matters in practice:
+  // a key that was rotated is still in every clone anyone made.
+  {
+    const d = repo({ 'a.js': 'const id = "AKIAEXAMPLE123456ABC";\n' },
+      (dir) => fs.writeFileSync(path.join(dir, 'a.js'), '// removed\n'));
+    check('scan-secrets refuses a secret that survives only in git history', fire(d).code === 1);
+    check('...and --tree is silent on the same repo, which is what makes that a history finding',
+      fire(d, '--tree').code === 0);
+
+    // The no-PCRE fallback, which otherwise only runs on machines nobody here owns — the
+    // condition under which the `-E` path stayed broken from the day it was written.
+    check('...and finds it too where git has no PCRE, via the widened fallback',
+      fire(d, '--no-pcre').code === 1);
+  }
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+
+// ── depth-check — the two shapes with no fixture ─────────────────────────────
+//
+// Six rules, four fixtures. `kill-audit` neutered `stub-return` and `always-true-test` and
+// nothing went red. The second is the one that matters most here: an assertion that cannot
+// fail is how a suite becomes worthless while its count goes up, which is the failure this
+// entire workspace is arranged against.
+{
+  console.log('\n▸ depth-check — the stub shapes nothing was watching');
+  const depth = path.join(ROOT, 'scripts', 'depth-check.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'depth2-'));
+  const w = (n, b) => { const f = path.join(tmp, n); fs.writeFileSync(f, b); return f; };
+  const fire = (f) => spawnSync('node', [depth, f], { cwd: ROOT, encoding: 'utf8' }).status;
+
+  // No parameter, deliberately. Written first as `load(id)`, which trips `unused-param` as
+  // well — so `kill-audit` neutered `stub-return` and the fixture still refused, via the other
+  // rule. **Third time in one afternoon that a fixture tripping two rules proved neither**, and
+  // the third time it was found by mutation rather than by reading. It is not a quirk of this
+  // codebase; it is what testing a control that has more than one rule costs.
+  check('depth-check refuses a function whose whole body is `return null`',
+    fire(w('stub.mjs', 'export function load() {\n  return null;\n}\n')) === 1);
+  check('...and allows a one-line getter returning a real field, which is the same shape',
+    fire(w('getter.mjs', 'export function id(row) {\n  return row.id;\n}\n')) === 0);
+
+  check('depth-check refuses an assertion that cannot fail',
+    fire(w('fake.mjs', "check('it works', true);\n")) === 1);
+  check('...and allows one that compares something',
+    fire(w('realtest.mjs', "check('it works', total === 42);\n")) === 0);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);

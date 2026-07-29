@@ -184,7 +184,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 26 scripts — `scripts/`
+### 27 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -192,6 +192,7 @@ before any code exists)
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `mutate-controls.mjs` | **break each control on purpose and see whether the suite notices.** guard-coverage proves the assertions exist; this proves they bite |
+| `kill-audit.mjs` | **delete one real protection at a time and see whether anything notices.** `mutate-controls` asks *is this control watched?*; this asks *is each of its rules watched?* — a control can be watched and still have nine of its ten rules unwatched |
 | `guard-coverage.mjs` | **every control that refuses must be tested in BOTH directions** — sixteen were wrong on their first version, and not one was found by the case it was built to catch |
 | `check.mjs` | the gate — 19 checks, and CI runs it |
 | `depth-check.mjs` | is this real code, or six shapes of stub |

@@ -80,11 +80,42 @@ for (const f of tracked) {
 console.log(`  tree     ${tracked.length} tracked files scanned`);
 
 // ── history ──────────────────────────────────────────────────────────────────
+//
+// **This pass scanned nothing for nine of the ten patterns, and said so in the voice of
+// success.** The patterns above are JavaScript regexes and their `.source` was handed to
+// `git grep -E`, which is POSIX ERE — and **POSIX ERE has no `\b`.** git's matcher rejected
+// every pattern containing one, `git()` swallowed the non-zero exit, and the loop then printed
+// `history N commits scanned`. Only `private key block`, the single pattern with no `\b`, was
+// ever really searched.
+//
+// The whole reason this pass exists is the rotated key that still sits in every clone anyone
+// made. It had been off since it was written, on macOS git 2.50.
+//
+// Found by `scripts/kill-audit.mjs`: deleting the history pass outright changed nothing, so a
+// fixture was written that commits a secret and then removes it — and that fixture failed
+// against the UNMUTATED file. **The mutation did not break the pass; it was already broken,
+// and deleting a thing that does nothing is invisible by construction.**
+//
+// `-P` (PCRE) understands `\b` and is what the tree scan means. Where git was built without
+// PCRE, the fallback drops the `\b` anchors instead: that matches MORE, never less, which is
+// the only safe direction to be wrong in for a secret scanner.
+// Probed rather than assumed: a build without PCRE prints "cannot use Perl-compatible regexes"
+// on stderr and exits non-zero, which is indistinguishable from "no match" by exit code alone.
+//
+// `NEXA_SCAN_NO_PCRE=1` forces the fallback. Not a feature — a seam, because a fallback that
+// only runs on machines we do not own is a fallback nobody has ever seen work, and this file
+// was broken for exactly that length of time.
+const PCRE = process.env.NEXA_SCAN_NO_PCRE === '1' ? false : !/Perl-compatible|not support/i.test(
+  execSync('git grep -P -q -e "x" -- . 2>&1; true', { cwd: ROOT, encoding: 'utf8' }),
+);
+
 if (!treeOnly) {
   const commits = git('git rev-list --all').split('\n').filter(Boolean);
   for (const [what, re] of PATTERNS) {
+    const flag = PCRE ? '-P' : '-E';
+    const pattern = PCRE ? re.source : re.source.replace(/\\b/g, '');
     // -I skips binaries. One pass per pattern over every blob in every commit.
-    const out = git(`git grep -I -n -E ${JSON.stringify(re.source)} ${commits.join(' ')} -- 2>/dev/null`);
+    const out = git(`git grep -I -n ${flag} ${JSON.stringify(pattern)} ${commits.join(' ')} -- 2>/dev/null`);
     for (const line of out.split('\n').filter(Boolean)) {
       const m = /^([0-9a-f]{7,40}):([^:]+):/.exec(line);
       if (!m) continue;

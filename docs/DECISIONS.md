@@ -130,3 +130,87 @@ than a feeling.**
 **How we would know this was wrong.** If the freeze holds for a month and nothing is deleted
 and nothing is measured, the freeze became procrastination with a rationale. The audit is a
 card or it is not happening.
+
+
+## 2026-07-29 — The kill audit ran, and the secret scanner had never worked
+
+**The freeze recorded yesterday said: no new control until an end-to-end kill audit has run.**
+It has run. `scripts/kill-audit.mjs` — eighteen mutations across eight of the fourteen scripts
+that can refuse. Each deletes **one real rule** and leaves the control otherwise fully alive:
+the `tee` write pattern, the TBD placeholder list, the git-history pass of the secret scanner,
+the "assertion is a constant" shape in the stub detector. It runs every suite and the deploy
+gate per mutation, restores the file in a `finally` and again on `exit`, and refuses to run at
+all against an already-red baseline.
+
+**A survivor is a protection that could be deleted that morning with every test still green.**
+
+| run | mutations | caught | survived |
+|---|---|---|---|
+| first | 11 | 7 | **4** |
+| extended to scan-secrets, depth-check | 18 | 12 | **6** |
+| after repairs | 18 | **17** | 1 |
+
+### The finding that matters: a control that had never worked
+
+`scan-secrets` is the deploy gate that keeps credentials out of a public repo. **All four of
+its mutations survived**, including the one that makes it find every secret in the tree and
+exit 0 anyway. It had no test at all.
+
+Worse, `guard-coverage` was reporting it **✅ 1 refuse · 1 silent** — because the string
+"scan-secrets" appears in a **prose comment** inside the prompt scrubber's block, and the
+collector counted that block's assertions as its fixtures. **The metacontrol read a comment as
+coverage.**
+
+And underneath that, a live defect nobody had seen:
+
+> The history pass hands **JavaScript regex source to `git grep -E`**. POSIX ERE has no
+> `\b`. git rejected nine of the ten patterns, the `git()` helper swallowed the non-zero
+> exit, and the loop printed `history N commits scanned`. **Only `private key block` — the one
+> pattern without a `\b` — was ever searched.** On macOS git 2.50, since the day it was
+> written.
+
+**How it surfaced is the part worth keeping.** Deleting the entire history pass changed
+nothing, because *deleting something that does nothing is invisible by construction*. So the
+fixture that pass should satisfy was written — commit a secret, remove it, scan — and **it
+failed against the unmutated file.** The mutation did not find the bug; the fixture the
+mutation demanded did.
+
+Fixed with `-P` where git has PCRE, and dropping the `\b` anchors where it does not — which
+matches MORE, never less, the only safe direction for a scanner to be wrong in. Both paths have
+fixtures; the fallback via a `NEXA_SCAN_NO_PCRE=1` seam, because **a fallback that only runs on
+machines nobody here owns is a fallback nobody has watched work** — which is precisely how long
+this one was broken.
+
+### One law, found three times in an afternoon
+
+Every survivor in the first run *had* a fixture, and every fixture was green.
+
+> **A fixture that differs from the passing case in more than one way proves neither.**
+
+- the reported wakeup carries `delaySeconds: 300`, so the SHORT-DELAY rule blocked it
+  identically — `=== 2` cannot tell the two rules apart
+- the TBD card also omitted three questions outright, so it was refused whether or not the
+  placeholder list worked
+- the coverage probe had *no* assertions, so it tripped `no-refusal-case` and never reached the
+  branch under test
+- and then, writing the repair, `export function load(id) { return null }` tripped
+  `unused-param` as well as `stub-return` — **the same mistake, made while fixing it**
+
+The repair is never another control. It is a fixture that changes **exactly one variable** from
+a case already known to pass, plus assertions on *which* refusal came back rather than that one
+did.
+
+### What this cost, and what it does not prove
+
+The audit takes about twenty-five minutes, because it runs every suite once per mutation. It is
+not a per-commit check — it is what you run after touching a control, and the freeze is what
+makes that affordable.
+
+**Six of the fourteen refusing controls still have no mutations**: `check.mjs`,
+`council-sync`, `mutation-test`, `reflect`, `mutate-controls`, and `kill-audit` itself.
+Eighteen of eighteen caught is a statement about the eight that were measured.
+
+**How we would know this was wrong.** If a later audit finds zero survivors on its first run,
+either the controls are genuinely watched, or **the mutations were written to match the tests.**
+The list is only honest while each entry is derived from the control's rules rather than from
+the suite's fixtures.
