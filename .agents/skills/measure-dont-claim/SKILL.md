@@ -79,3 +79,31 @@ downstream reasoning, and nobody builds a quarter of a product on top of it beli
 a fact.
 
 **An unmarked one becomes the 78th.**
+
+
+## The third kind of claim: the one you cannot observe
+
+Until now this skill had two categories — **measured**, and **assumption, marked as one**.
+[headroom](https://github.com/headroomlabs-ai/headroom) named a third, and its own README is
+the clearest statement of it:
+
+> *"Output savings are **counterfactual** — we never see what the model *would* have written —
+> so we report an honest **estimate with a confidence range**, never a made-up number."*
+
+**Some claims are unobservable in principle, not merely unmeasured.** *"This saved us a week."*
+*"Without the guard we would have shipped a bug."* *"The refactor prevented an outage."* There
+is no experiment; the alternative branch does not exist.
+
+The failure is treating them like the other two. Marked as an assumption they look soft when
+they may be well-founded; stated as a measurement they are simply false.
+
+**The honest form has three parts, and dropping any of them makes it a guess again:**
+
+1. **Say it is counterfactual.** The word does the work — a reader stops looking for a harness.
+2. **Give a range, never a point.** A point estimate for an unobservable quantity is a claim
+   about a world nobody visited.
+3. **Show the derivation.** *"Between two and six hours, from the three times this failed
+   before the check existed"* is arguable. *"Roughly a day"* is not.
+
+**And the test that keeps it honest: could the range be wrong in a way somebody could point
+at?** If not, it is a feeling with a number attached.

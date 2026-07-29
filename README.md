@@ -180,10 +180,11 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 22 scripts — `scripts/`
+### 23 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `check.mjs` | the gate — 19 checks, and CI runs it |
 | `depth-check.mjs` | is this real code, or six shapes of stub |
@@ -290,6 +291,26 @@ review path does not produce a cheaper review — it produces a formality.
 Self-review finds typos and misses intent, which is the one thing review is for.
 
 ---
+
+
+---
+
+## Skip this workspace if you…
+
+Taken as a form from [headroom](https://github.com/headroomlabs-ai/headroom), whose README says
+plainly who should not install it. **A tool that cannot describe who it is wrong for is a tool
+that has not been used enough to know.**
+
+- **You are exploring, not building.** Every control here assumes a card, a spec and a reason.
+  A spike does not have those and should not be forced to invent them — work outside the
+  workspace and bring back what survives.
+- **You are the only reader and the project is small.** The pipeline exists because context is
+  lost between sessions and between models. If nothing is ever forgotten, it is overhead.
+- **You cannot run local processes.** Everything here is hooks and Node scripts on your machine.
+- **You want the agent to move faster than you can review.** This is built to slow the exact
+  moment where speed produces work nobody checked. It will feel like friction, because it is.
+- **You will not fix a red gate.** A refusal that gets bypassed twice is worse than no refusal,
+  because everyone still believes in it.
 
 ## Requirements
 

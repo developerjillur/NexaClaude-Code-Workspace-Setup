@@ -562,6 +562,27 @@ try {
   }
 }
 
+// ── the graph the contract sends every agent to ─────────────────────────────
+//
+// §5 tells agents to query the graph before reading files. That instruction is only safe
+// while the graph is true, and nothing was checking. Measured 2026-07-29: built at HEAD,
+// all 61 source files indexed — and 32 of them changed since, uncommitted. A graph is built
+// from COMMITS, and this project's work lives uncommitted.
+//
+// Warned rather than failed: a stale graph is a reason to distrust an answer, not to stop
+// work, and a gate that fires on every session with a dirty tree gets switched off by
+// lunchtime. It states the number every time, though.
+{
+  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'graph-fresh.mjs'), '--json'], { encoding: 'utf8' });
+  let out = { findings: [] };
+  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through */ }
+  const n = (out.findings ?? []).length;
+  if (!n) ok('the code graph describes the code that is there');
+  else for (const f of out.findings.slice(0, 3)) {
+    soft(`graph: ${f.dir} — ${f.detail}`, 'rebuild before trusting graphify explain — a stale graph does not error, it answers');
+  }
+}
+
 console.log('\n───────────────────────────────────────────────────────────');
 if (fail) {
   console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);

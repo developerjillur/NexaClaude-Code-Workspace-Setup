@@ -620,6 +620,50 @@ console.log(`\n${'─'.repeat(72)}`);
   } finally { fs.rmSync(away, { recursive: true, force: true }); }
 }
 
+
+// ── graph-fresh — a stale graph does not error, it answers ───────────────────
+//
+// The silent case first, as always. Twelve controls here were wrong on their first version
+// and every one was caught by the case it should ignore.
+{
+  console.log('\n▸ graph-fresh — is the graph describing code that still exists');
+  const script = path.join(ROOT, 'scripts', 'graph-fresh.mjs');
+  const mk = ({ graph = 'fresh', dirty = false, extra = false } = {}) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-'));
+    fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    fs.copyFileSync(script, path.join(root, 'scripts', 'graph-fresh.mjs'));
+    fs.writeFileSync(path.join(root, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    const code = path.join(root, 'code');
+    fs.mkdirSync(path.join(code, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(code, 'src', 'a.js'), 'export const a = 1;\n');
+    const g = (...a) => spawnSync('git', a, { cwd: code, encoding: 'utf8' });
+    g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+    g('add', '-A'); g('commit', '-qm', 'base');
+    if (graph !== 'none') {
+      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: code, encoding: 'utf8' }).stdout.trim();
+      fs.mkdirSync(path.join(code, 'graphify-out'), { recursive: true });
+      fs.writeFileSync(path.join(code, 'graphify-out', 'graph.json'), JSON.stringify({
+        nodes: [{ source_file: 'src/a.js' }], links: [{ source: 'a', target: 'a' }],
+        built_at_commit: graph === 'dangling' ? '0'.repeat(40) : head,
+      }));
+      g('add', '-A'); g('commit', '-qm', 'graph');
+    }
+    if (dirty) fs.writeFileSync(path.join(code, 'src', 'a.js'), 'export const a = 2; // uncommitted\n');
+    if (extra) fs.writeFileSync(path.join(code, 'src', 'b.js'), 'export const b = 2;\n');
+    return root;
+  };
+  const fire = (root) => spawnSync('node', [path.join(root, 'scripts', 'graph-fresh.mjs')], { cwd: root, encoding: 'utf8' }).status;
+  const once = (opts, want, why) => {
+    const r = mk(opts);
+    try { check(why, fire(r) === want); } finally { fs.rmSync(r, { recursive: true, force: true }); }
+  };
+  once({}, 0, 'a current graph on a clean tree says nothing');
+  once({ dirty: true }, 1, 'uncommitted source the graph cannot know about is refused');
+  once({ extra: true }, 1, 'a source file never indexed is refused');
+  once({ graph: 'dangling' }, 1, 'a built_at_commit that does not resolve is refused');
+  once({ graph: 'none' }, 1, 'no graph at all, while the contract says to query one');
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');
