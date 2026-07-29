@@ -1,0 +1,49 @@
+[
+  {
+    "$comment": [
+      "Copy this to `mutations.json` at the workspace root and replace every entry.",
+      "",
+      "One entry per security decision your project has ACTUALLY MADE. Each should map to a",
+      "line in docs/DECISIONS.md or to a commit that fixed something real. Synthetic mutations",
+      "measure nothing — the question each one answers is:",
+      "",
+      "    if somebody quietly reverted this decision, would anything go red?",
+      "",
+      "The first run of this on the project this workspace came from answered NO for a",
+      "path-traversal guard, while 427 assertions stayed green. That guard existed because the",
+      "exploit had been demonstrated against a live instance. Four hundred tests had never",
+      "touched it.",
+      "",
+      "`file` is relative to codeDirs[0] in workspace.config.json.",
+      "`from` must appear EXACTLY ONCE in that file — if it drifts, the run says so loudly",
+      "rather than skipping, because a mutation that silently stops applying is a test that",
+      "stopped testing.",
+      "",
+      "Delete this $comment entry; it is not a mutation."
+    ]
+  },
+  {
+    "id": 1,
+    "file": "src/auth.js",
+    "what": "fail-closed policy becomes fail-open",
+    "why": "a typo in a policy name must DENY, not grant — the unguarded state should never be the default",
+    "from": "if (policy === 'full') return everything;",
+    "to": "if (policy !== 'readonly') return everything;"
+  },
+  {
+    "id": 2,
+    "file": "src/routes.js",
+    "what": "the id validator stops validating",
+    "why": "`id=../config` was a real exploit: a file-existence oracle and then a config dump",
+    "from": "const ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;",
+    "to": "const ID_RE = /.*/;"
+  },
+  {
+    "id": 3,
+    "file": "src/redact.js",
+    "what": "secret scrubbing disabled",
+    "why": "everything the model returns passes through this before it becomes a log or a reply",
+    "from": "return scrub(text);",
+    "to": "return text;"
+  }
+]

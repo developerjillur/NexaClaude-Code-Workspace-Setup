@@ -34,6 +34,7 @@ const JSON_OUT = process.argv.includes('--json');
 
 // Names belonging to the project this was extracted from. Each is a word that should never
 // appear in a package meant for anyone else's codebase.
+// @rules forbidden-word
 const FORBIDDEN = [
   [/\bnexacall\b/i, 'the original product'],
   [/\bnexaconnect\b/i, 'the original deploy host'],
@@ -87,7 +88,7 @@ for (const f of files) {
     const m = re.exec(body);
     if (!m) continue;
     const line = body.slice(0, m.index).split('\n').length;
-    findings.push({ file: rel, line, match: m[0], why });
+    findings.push({ file: rel, line, rule: 'forbidden-word', match: m[0], why });
   }
 }
 

@@ -39,9 +39,17 @@ const bad = (m, d) => { fail++; console.log(`  ❌ ${m}\n       ${d}`); };
 const soft = (m, d) => { warn++; console.log(`  ⚠️  ${m}\n       ${d}`); };
 const ok = (m) => console.log(`  ✅ ${m}`);
 
-/** Resolve a repo-ish path the way a reader would: as given, or under code/. */
+/** Where the product code lives — read from config, never assumed to be `code/`. */
+const codeDirs = (() => {
+  try {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8'));
+    return Array.isArray(c.codeDirs) && c.codeDirs.length ? c.codeDirs : ['code'];
+  } catch { return ['code']; }
+})();
+
+/** Resolve a repo-ish path the way a reader would: as given, or under a code dir. */
 const resolve = (p) => {
-  for (const c of [path.join(ROOT, p), path.join(ROOT, 'code', p), path.resolve(p)]) {
+  for (const c of [path.join(ROOT, p), ...codeDirs.map((d) => path.join(ROOT, d, p)), path.resolve(p)]) {
     if (fs.existsSync(c)) return c;
   }
   return null;
@@ -112,12 +120,31 @@ if (!ticked.length) {
       if (+ln > count) bad(`${file}:${ln} — file has only ${count} lines`, line.trim().slice(0, 70));
     }
 
-    // `npm run x` — must be a real script.
+    // `npm run x` — must be a real script, in EITHER package.json.
+    //
+    // The first version consulted only the workspace's, and refused a card that cited its own
+    // product's test command — `npm run test:offline`, which exists in `code/package.json` and
+    // nowhere else. **A card documenting the exact command somebody ran was called a false
+    // claim.** That is the false-positive direction, the one that gets a guard switched off
+    // within a week, and it shipped.
+    //
+    // A workspace and the code it guards are two npm projects. Either may own the script, and
+    // the refusal now says which files were actually consulted, so a genuine miss is
+    // debuggable instead of mysterious.
     for (const [, script] of line.matchAll(/`npm run ([\w:-]+)`/g)) {
       checked++;
-      const pkgPath = resolve('package.json');
-      const scripts = pkgPath ? (JSON.parse(fs.readFileSync(pkgPath, 'utf8')).scripts ?? {}) : {};
-      if (!(script in scripts)) bad(`cited script does not exist: npm run ${script}`, line.trim().slice(0, 70));
+      const seen = [];
+      const known = new Set();
+      for (const cand of [path.join(ROOT, 'package.json'), ...codeDirs.map((d) => path.join(ROOT, d, 'package.json'))]) {
+        if (!fs.existsSync(cand)) continue;
+        seen.push(path.relative(ROOT, cand));
+        try { Object.keys(JSON.parse(fs.readFileSync(cand, 'utf8')).scripts ?? {}).forEach((k) => known.add(k)); }
+        catch { /* an unparseable package.json is not this check's business */ }
+      }
+      if (!known.has(script)) {
+        bad(`cited script does not exist: npm run ${script}`,
+          `${line.trim().slice(0, 70)}\n       looked in: ${seen.join(', ') || 'no package.json found'}`);
+      }
     }
 
     // `node path/to.mjs` — must be a real file.

@@ -44,20 +44,25 @@ const JSON_OUT = process.argv.includes('--json');
 const ORDER = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build',
   '4-review', '5-verify', '6-done', '7-operate'];
 
+// @rules who-asked, todays-workaround, cost-of-status-quo, the-number-that-moves, kill-condition, where-errors-surface
+//
+// Six requirements, one exit code. The fixture proving TBD is rejected also omitted three
+// questions outright, so it refused whether or not the placeholder list worked — and deleting
+// that list changed nothing. Each requirement carries an id now, printed with the finding.
 const REQUIRED = {
   // discovery-first's five questions. A card may sit in 0-discovery without them — that is
   // what the stage is FOR — but it may not leave.
   '1-spec': [
-    ['who asked', /who asked/i, 'name a person, role or recorded interaction — not "users"'],
-    ['what they do today', /(do today|today instead|workaround)/i, 'the workaround, in enough detail that you could do it yourself'],
-    ['what breaks without it', /(breaks|cost of the status quo|if (this|it) never exists)/i, 'the cost of the status quo, in their units'],
-    ['the number that moves', /(number (that )?moves?|success metric|metric)/i, 'one metric, its value now, and the value that counts as success'],
-    ['what would make us stop', /(make us stop|kill condition|would stop)/i, 'the observation that says this was wrong'],
+    ['who-asked', 'who asked', /who asked/i, 'name a person, role or recorded interaction — not "users"'],
+    ['todays-workaround', 'what they do today', /(do today|today instead|workaround)/i, 'the workaround, in enough detail that you could do it yourself'],
+    ['cost-of-status-quo', 'what breaks without it', /(breaks|cost of the status quo|if (this|it) never exists)/i, 'the cost of the status quo, in their units'],
+    ['the-number-that-moves', 'the number that moves', /(number (that )?moves?|success metric|metric)/i, 'one metric, its value now, and the value that counts as success'],
+    ['kill-condition', 'what would make us stop', /(make us stop|kill condition|would stop)/i, 'the observation that says this was wrong'],
   ],
   // operate-after-done: a card cannot be called finished without naming where its failures
   // will surface. This is the one automatable piece the skill itself identified.
   '6-done': [
-    ['where errors surface', /(errors? surface|error (goes|reaches)|alert|on-call|surfaces? to)/i,
+    ['where-errors-surface', 'where errors surface', /(errors? surface|error (goes|reaches)|alert|on-call|surfaces? to)/i,
       'name where a failure in this code reaches a human — a log nobody reads is not monitoring'],
   ],
 };
@@ -161,10 +166,10 @@ for (const c of cards) {
   const body = fs.readFileSync(c, 'utf8');
   const kind = (body.match(KIND)?.[1] ?? 'feature').toLowerCase();
   const waived = WAIVED_BY[kind] ?? [];
-  for (const [owed, label, re, hint] of requirementsFor(stage)) {
+  for (const [owed, id, label, re, hint] of requirementsFor(stage)) {
     if (waived.includes(label)) continue;
     if (!answered(body, re)) {
-      findings.push({ card: path.relative(ROOT, c), stage, owed, missing: label, hint, kind });
+      findings.push({ card: path.relative(ROOT, c), stage, owed, rule: id, missing: label, hint, kind });
     }
   }
 }
@@ -192,7 +197,7 @@ const byCard = new Map();
 for (const f of findings) (byCard.get(f.card) ?? byCard.set(f.card, []).get(f.card)).push(f);
 for (const [card, fs_] of byCard) {
   console.log(`  ❌ ${card}   (${fs_[0].stage})`);
-  for (const f of fs_) console.log(`       missing: ${f.missing}\n         → ${f.hint}\n           owed since ${f.owed}`);
+  for (const f of fs_) console.log(`       missing: [${f.rule}] ${f.missing}\n         → ${f.hint}\n           owed since ${f.owed}`);
   console.log('');
 }
 console.log(`  ${findings.length} unanswered across ${byCard.size} card${byCard.size === 1 ? '' : 's'}.`);

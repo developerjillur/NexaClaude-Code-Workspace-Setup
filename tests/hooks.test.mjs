@@ -646,10 +646,30 @@ console.log(`\n${'─'.repeat(72)}`);
   //
   // **A fixture that differs from the passing one in more than one way proves neither.** The
   // repair is to change exactly one thing, from a card already known to pass.
+  //
+  // And they assert the RULE, from --json, not the exit code — six requirements share one
+  // exit code, so `=== 1` is satisfied by any of them.
+  const rulesOf = (f) => {
+    const r = spawnSync('node', [gate, f, '--json'], { encoding: 'utf8' });
+    try { return (JSON.parse(r.stdout || '{}').findings ?? []).map((x) => x.rule); } catch { return []; }
+  };
   check('card-gate refuses a placeholder where a real answer would pass — one word changed',
-    fire(mk('1-spec', 'h.md', ANSWERED.replace(/(\*\*What number moves\?\*\*).*/, '$1 TBD'))) === 1);
+    rulesOf(mk('1-spec', 'h.md', ANSWERED.replace(/(\*\*What number moves\?\*\*).*/, '$1 TBD')))
+      .join() === 'the-number-that-moves');
   check('card-gate refuses a card missing only the kill condition',
-    fire(mk('1-spec', 'i.md', ANSWERED.replace(/\*\*What would make us stop\?\*\*.*\n?/, ''))) === 1);
+    rulesOf(mk('1-spec', 'i.md', ANSWERED.replace(/\*\*What would make us stop\?\*\*.*\n?/, '')))
+      .join() === 'kill-condition');
+  check('card-gate names who-asked when only that is missing',
+    rulesOf(mk('1-spec', 'j.md', ANSWERED.replace(/\*\*Who asked\?\*\*.*\n?/, ''))).join() === 'who-asked');
+  check('card-gate names todays-workaround when only that is missing',
+    rulesOf(mk('1-spec', 'k.md', ANSWERED.replace(/\*\*What they do today instead\?\*\*.*\n?/, '')))
+      .join() === 'todays-workaround');
+  check('card-gate names cost-of-status-quo when only that is missing',
+    rulesOf(mk('1-spec', 'l.md', ANSWERED.replace(/\*\*What breaks for them if this never exists\?\*\*.*\n?/, '')))
+      .join() === 'cost-of-status-quo');
+  check('card-gate names where-errors-surface at 6-done',
+    rulesOf(mk('6-done', 'm.md', ANSWERED.replace(/\*\*Where errors surface.*\n?/, '')))
+      .join() === 'where-errors-surface');
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -933,6 +953,22 @@ console.log(`\n${'─'.repeat(72)}`);
     bad_.status === 1 && /does not exist: tests\/no-such-suite\.mjs/.test(bad_.stdout));
   check('...refusing it by that rule rather than by dying', !/TypeError|at Object\./.test(bad_.stderr));
 
+  // ── the false positive that shipped ─────────────────────────────────────────
+  //
+  // A card citing `npm run test:offline` — its own product's test command, run and pasted —
+  // was refused, because this consulted only the WORKSPACE's package.json. **A card
+  // documenting the exact command somebody ran was called a false claim.** That is the
+  // false-positive direction, the one that gets a guard switched off within a week.
+  //
+  // A workspace and the code it guards are two npm projects; either may own the script.
+  check('verify-claims allows a card citing a script from the workspace package.json',
+    fire(card('904-ws-script.md', '# 904\n\n- [x] `npm run check` green\n')) === 0);
+  check('...and still refuses one citing a script that exists in neither',
+    fire(card('905-no-script.md', '# 905\n\n- [x] `npm run no-such-script-anywhere` green\n')) === 1);
+  check('...and names where it looked, so a genuine miss is debuggable',
+    /looked in: /.test(spawnSync('node', [vc, card('906-where.md', '# 906\n\n- [x] `npm run also-not-real` green\n')],
+      { cwd: ROOT, encoding: 'utf8' }).stdout));
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -1022,37 +1058,16 @@ console.log(`\n${'─'.repeat(72)}`);
 }
 
 
-// ── mutate-controls — would the suite notice a control being switched off? ────
-//
-// guard-coverage proves the assertions EXIST. This asks the harder question: break each
-// control the way thirteen of sixteen actually broke — turn its refusal into a pass — and see
-// whether anything goes red. A mutation that SURVIVES is a control nothing is really watching.
-//
-// It is not run inside this suite, because it runs this suite. Asserted here on its shape and
-// its refusal instead: it must report per-control, and it must exit non-zero when a mutation
-// survives.
-{
-  console.log('\n▸ mutate-controls — a control that can be silently disabled');
-  const mut = path.join(ROOT, 'scripts', 'mutate-controls.mjs');
-
-  check('mutate-controls exists and parses',
-    spawnSync('node', ['--check', mut], { encoding: 'utf8' }).status === 0);
-
-  const src = fs.readFileSync(mut, 'utf8');
-  check('it restores every file it mutates, in a finally', /finally\s*\{[^}]*writeFileSync/.test(src));
-  check('it refuses — exits non-zero — when a mutation survives', /process\.exit\(survived \? 1 : 0\)/.test(src));
-  check('it stays silent when every mutation is caught',
-    /survived \? 1 : 0/.test(src) && !/process\.exit\(1\);\s*$/.test(src.trim()));
-  check('it resolves its own root rather than naming a machine',
-    /fileURLToPath\(import\.meta\.url\)/.test(src) && !/\/Volumes\//.test(src));
-  check('it refuses to run at all on an already-red suite, rather than reporting nonsense',
-    /already red/.test(src));
-}
-
 // ── kill-audit — is each PROTECTION watched, or only each control? ────────────
 //
-// `mutate-controls` turns a control's `exit(2)` into `exit(0)`: is this control watched at
-// all? Answered — five of five. A council put the harder question after it:
+// There used to be a second tool here that flipped a control's `exit(2)` to `exit(0)` and
+// asked "is this control watched at all?". **It was retired on measurement, not taste:** it
+// listed five controls against this file's nine, every one of them a subset, and by the end it
+// was silently SKIPPING two of its five because their code had moved and its patterns had not
+// — reporting "5 caught, 0 survived" having tested three. Same skip fail-open this file had,
+// still open, in a tool nothing needed.
+//
+// A council put the harder question that produced this one:
 //
 //   "guard-coverage proves only that assertion TEXT exists on both sides. Everything between
 //    the text and the behaviour is invisible to it."
@@ -1443,7 +1458,7 @@ console.log(`\n${'─'.repeat(72)}`);
   // REFUSES: configured and absent. Two ways to configure it, both must refuse.
   check('ci-code-paths refuses when CODE_REPO is set and the checkout brought nothing',
     (() => { const r = scratch({ codeDirs: ['code'] }, {}, { CODE_REPO: 'someone/thing' });
-      return r.status === 1 && /configured but not present/.test(r.stderr); })());
+      return r.status === 1 && /^refused: configured-but-absent$/m.test(r.stderr); })());
   check('...and when workspace.config.json names directories this checkout does not have',
     (() => { const r = scratch({ codeDirs: ['src', 'lib'] });
       return r.status === 1 && /configured but not present/.test(r.stderr); })());
@@ -1504,7 +1519,7 @@ console.log(`\n${'─'.repeat(72)}`);
 
   check('refuses the original private repository name',
     (() => { const r = scratch({ '.github/workflows/x.yml': `repository: someone/${forbidden.repo}\n` });
-      return r.status === 1 && r.findings.some((f) => /private repository/.test(f.why)); })());
+      return r.status === 1 && r.findings.every((f) => f.rule === 'forbidden-word'); })());
   check('refuses a product name left in a skill',
     (() => { const r = scratch({ 'a/SKILL.md': `${forbidden.product} does this.\n` });
       return r.status === 1 && r.findings.some((f) => f.file === 'a/SKILL.md'); })());
@@ -1519,6 +1534,81 @@ console.log(`\n${'─'.repeat(72)}`);
   check('...and it reports what it scanned, so an empty run cannot read as a clean one',
     scratch({ 'README.md': '# x\n' }).status === 0
       && /scanned/.test(spawnSync('node', [leak, '--json'], { cwd: ROOT, encoding: 'utf8' }).stdout));
+}
+
+// ── mutation-test — YOUR invariants, where kill-audit does the workspace's ────
+//
+// It shipped with four mutations against `src/agent-config.js` and `src/redact.js` — files
+// that exist only in the project this was extracted from. For anyone else they resolved to
+// nothing, printed "skipping", and it **reported success having tested zero invariants**.
+// It also had no fixtures at all, so nothing noticed.
+//
+// Mutations are data now. These run the real script against a scratch project whose "suite"
+// is one file checking one invariant, which makes every branch reachable in milliseconds.
+{
+  console.log('\n▸ mutation-test — break the product on purpose');
+  const mt = path.join(ROOT, 'scripts', 'mutation-test.mjs');
+
+  const scratch = (mutations, { guardHolds = true } = {}) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'muttest-'));
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(d, 'code'), { recursive: true });
+    fs.copyFileSync(mt, path.join(d, 'scripts', 'mutation-test.mjs'));
+    fs.writeFileSync(path.join(d, 'workspace.config.json'),
+      JSON.stringify({ codeDirs: ['code'], mutationTestCommand: 'node ./suite.mjs' }));
+    fs.writeFileSync(path.join(d, 'code', 'guard.js'), 'const ID_RE = /^[a-z]+$/;\nexport default ID_RE;\n');
+    // A suite that watches the invariant, or one that does not — which is what makes a
+    // survivor available without waiting for a real project.
+    fs.writeFileSync(path.join(d, 'code', 'suite.mjs'), guardHolds
+      ? "import fs from 'node:fs';\nprocess.exit(fs.readFileSync(new URL('./guard.js', import.meta.url), 'utf8').includes('/^[a-z]+$/') ? 0 : 1);\n"
+      : 'process.exit(0);\n');
+    if (mutations !== null) {
+      fs.writeFileSync(path.join(d, 'mutations.json'),
+        typeof mutations === 'string' ? mutations : JSON.stringify(mutations));
+    }
+    const r = spawnSync('node', [path.join(d, 'scripts', 'mutation-test.mjs')],
+      { cwd: d, encoding: 'utf8', timeout: 120000 });
+    const guard = fs.readFileSync(path.join(d, 'code', 'guard.js'), 'utf8');
+    fs.rmSync(d, { recursive: true, force: true });
+    return { ...r, guard };
+  };
+
+  const KILL = [{ id: 1, file: 'guard.js', what: 'id validator stops validating', why: 'traversal',
+    from: 'const ID_RE = /^[a-z]+$/;', to: 'const ID_RE = /.*/;' }];
+
+  // SILENT: the suite notices, so nothing survived.
+  {
+    const r = scratch(KILL);
+    check('mutation-test is silent when the suite catches the mutation',
+      r.status === 0 && /1\/1 caught/.test(r.stdout));
+    check('...and restores the file it broke, byte for byte',
+      r.guard.includes('const ID_RE = /^[a-z]+$/;'));
+  }
+
+  // REFUSES: an invariant nothing watches. This is the entire product of the tool.
+  {
+    const r = scratch(KILL, { guardHolds: false });
+    check('mutation-test refuses when an invariant can be deleted unnoticed',
+      r.status === 1 && /SURVIVED/.test(r.stdout));
+    check('...and still restores the file', r.guard.includes('const ID_RE = /^[a-z]+$/;'));
+  }
+
+  // REFUSES: a broken config. Running zero mutations and calling it a pass is the failure
+  // this whole workspace catalogues, and it was living inside the tool built to catch it.
+  check('mutation-test refuses a mutations.json it cannot parse',
+    (() => { const r = scratch('{ not json'); return r.status === 2 && /not valid JSON/.test(r.stderr); })());
+
+  // No mutations is not a pass, and says so rather than printing a tick.
+  {
+    const r = scratch(null);
+    check('with no mutations defined it says nothing was tested, rather than reporting success',
+      r.status === 0 && /not a pass/.test(r.stdout) && !/caught/.test(r.stdout));
+  }
+
+  // A `from` that no longer matches means the CODE moved and the mutation did not.
+  check('mutation-test says loudly when a mutation no longer applies',
+    /REWRITE THE MUTATION/.test(
+      scratch([{ ...KILL[0], from: 'a line that is not there' }]).stdout));
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);

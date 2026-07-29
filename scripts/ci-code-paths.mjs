@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const GITHUB = process.argv.includes('--github');
 
+// @rules configured-but-absent
 const cfg = (() => {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8')); }
   catch { return {}; }
@@ -57,6 +58,7 @@ const rel = (p) => path.relative(ROOT, p) || '.';
 
 if (!present.length) {
   if (configured) {
+    console.error('refused: configured-but-absent');
     console.error('::error::product code is configured but not present.');
     console.error(`  codeDirs: ${dirs.join(', ')}`);
     console.error(process.env.CODE_REPO

@@ -395,3 +395,72 @@ from the same call that refuses, so deleting the refusal deletes the id.
 kill-audit    23 caught, 0 survived, 0 unresolved, of 23 selected
 hooks.test    210 passed, 0 failed
 ```
+
+## 2026-07-29 — A control was deleted, and the data to justify it finally existed
+
+A council refused to name a deletion candidate one round ago, and was right to:
+
+> *"'Remove something now' is the fashionable answer, but the data to pick the victim does not
+> exist. **Removing by intuition would repeat the exact error the record is full of.**"*
+
+It named the measurement that would change that: whether `kill-audit` subsumes the tools that
+came before it. **That was measured today rather than reasoned about.**
+
+### `mutate-controls` — retired
+
+It flipped each control's `exit(2)` to `exit(0)` and asked *"is this control watched at all?"*
+Run against the current workspace:
+
+```
+·  scripts/hooks/guard-edit.mjs     pattern not present — skipped
+·  scripts/hooks/guard-wakeup.mjs   pattern not present — skipped
+✅ CAUGHT  scripts/card-gate.mjs
+✅ CAUGHT  scripts/guard-coverage.mjs
+✅ CAUGHT  scripts/graph-fresh.mjs
+
+── 5 caught, 0 survived ──
+```
+
+**Read that carefully. It printed "5 caught" having tested three.** Both hooks were skipped
+because their `block()` signature changed when rule ids went in, and its patterns did not
+follow. Then it exited 0 — the **same skip fail-open** `kill-audit` had and closed, still open
+here, in a tool that had already been superseded.
+
+Coverage, compared by file:
+
+| | files | depth |
+|---|---|---|
+| `mutate-controls` | 5, of which 2 now silently skipped | one exit-code flip per control |
+| `kill-audit` | **9** — a strict superset of those five | 23 mutations, one real rule each |
+
+Every file it touched, `kill-audit` touches, at rule depth instead of exit-code depth. It
+contributed nothing, and carried a known way of lying about it.
+
+**Deleted.** Not because the workspace felt crowded — because two tools measured the same thing
+and one of them was measured to be worse.
+
+### `mutation-test` — kept, and the reason is the opposite one
+
+It looked like the same kind of duplicate and is not. **`kill-audit` mutates the WORKSPACE's
+controls; `mutation-test` mutates YOUR PRODUCT's invariants.** Neither subsumes the other, and
+the argument for keeping it is a measurement it produced on the project this was extracted
+from: a path-traversal guard could be deleted entirely while **427 assertions stayed green** —
+a guard that existed because the exploit had been demonstrated against a live instance.
+
+It did, however, need repair on a different axis: it shipped four mutations against
+`src/agent-config.js` and `src/redact.js`, files that exist only in that one product. For
+anybody else they resolved to nothing, it printed "skipping", and it **reported success having
+tested zero invariants.**
+
+`no-product-leakage` did not catch that, and had stated in advance that it would not: it
+matches words, and a **leaked assumption about directory layout carries none.** That is the
+ceiling of a denylist, demonstrated on this repo instead of argued about.
+
+Mutations are data now — `mutations.json`, with `templates/mutations.example.json` as a worked
+example — and an empty run says *"nothing was tested"* rather than printing a tick. Six
+fixtures, which it had never had at all.
+
+**How we would know this was wrong.** If a future defect is found in a control that
+`mutate-controls` would have caught and `kill-audit` does not, the deletion was premature and
+the answer is a mutation in `kill-audit`, not a resurrection. The coverage table above is what
+makes that checkable.
