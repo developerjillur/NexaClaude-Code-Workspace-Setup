@@ -22,6 +22,34 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HOOKS = path.join(ROOT, 'scripts', 'hooks');
 const PRODUCT = path.join(ROOT, 'code', 'src', 'anything.js');
 
+// ── the board this suite assumes ─────────────────────────────────────────────
+//
+// Most assertions below expect an EMPTY 3-build, because that is the state in which the guard
+// refuses. A workspace with work in flight has a card there, and every one of those
+// assertions then reports a hole in the guard that is the guard working correctly — 23 of
+// them, in the workspace that had a card, while the one that did not showed 169 green.
+//
+// **Third time today a test measured its environment instead of its subject.** So the suite
+// owns the state it depends on: park anything real, restore it on the way out, and park it
+// BESIDE itself because os.tmpdir() is often another volume and rename across volumes throws.
+// A `.bak` suffix, because the guard counts `.md` and a parked card must not be one.
+const BUILD_DIR = path.join(ROOT, 'board', '3-build');
+const parkedCards = [];
+if (fs.existsSync(BUILD_DIR)) {
+  for (const f of fs.readdirSync(BUILD_DIR)) {
+    if (!f.endsWith('.md') || f.startsWith('._')) continue;
+    const from = path.join(BUILD_DIR, f), to = path.join(BUILD_DIR, `.parked-${f}.bak`);
+    fs.renameSync(from, to);
+    parkedCards.push([to, from]);
+  }
+}
+const restoreCards = () => {
+  for (const [from, to] of parkedCards) { try { fs.renameSync(from, to); } catch { /* already back */ } }
+  parkedCards.length = 0;
+};
+process.on('exit', restoreCards);
+process.on('SIGINT', () => { restoreCards(); process.exit(130); });
+
 let pass = 0;
 let fail = 0;
 
@@ -846,6 +874,34 @@ console.log(`\n${'─'.repeat(72)}`);
         return x.status === 1 && (j.findings ?? []).some((f) => f.name === probeName.replace(/\.mjs$/, ''));
       } catch { return false; } finally { fs.rmSync(probe, { force: true }); }
     })());
+}
+
+
+// ── mutate-controls — would the suite notice a control being switched off? ────
+//
+// guard-coverage proves the assertions EXIST. This asks the harder question: break each
+// control the way thirteen of sixteen actually broke — turn its refusal into a pass — and see
+// whether anything goes red. A mutation that SURVIVES is a control nothing is really watching.
+//
+// It is not run inside this suite, because it runs this suite. Asserted here on its shape and
+// its refusal instead: it must report per-control, and it must exit non-zero when a mutation
+// survives.
+{
+  console.log('\n▸ mutate-controls — a control that can be silently disabled');
+  const mut = path.join(ROOT, 'scripts', 'mutate-controls.mjs');
+
+  check('mutate-controls exists and parses',
+    spawnSync('node', ['--check', mut], { encoding: 'utf8' }).status === 0);
+
+  const src = fs.readFileSync(mut, 'utf8');
+  check('it restores every file it mutates, in a finally', /finally\s*\{[^}]*writeFileSync/.test(src));
+  check('it refuses — exits non-zero — when a mutation survives', /process\.exit\(survived \? 1 : 0\)/.test(src));
+  check('it stays silent when every mutation is caught',
+    /survived \? 1 : 0/.test(src) && !/process\.exit\(1\);\s*$/.test(src.trim()));
+  check('it resolves its own root rather than naming a machine',
+    /fileURLToPath\(import\.meta\.url\)/.test(src) && !/\/Volumes\//.test(src));
+  check('it refuses to run at all on an already-red suite, rather than reporting nonsense',
+    /already red/.test(src));
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);

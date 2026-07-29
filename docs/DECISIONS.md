@@ -78,3 +78,55 @@ is turnkey.
 rather than review throughput — i.e. if sessions start dying on window size rather than on
 work finished — the proxy is worth re-testing, against a diff of two identical runs with and
 without it, byte for byte, on our own material rather than on GSM8K.
+
+
+## 2026-07-29 — A freeze on new controls, and a kill audit before any deletion
+
+**Context.** Sixteen controls, sixteen wrong on their first version, thirteen failing open. A
+meta-gate was built to force both directions to be tested. A council was then asked what that
+meta-gate cannot see, and whether the workspace is past the point where another control helps.
+
+**Its answer to the second question was one word:**
+
+> *"Yes. This workspace is past the point where another control should be presumed to improve
+> it."*
+
+**And on the first:**
+
+> *"`guard-coverage` proves only that assertion TEXT exists on both sides. **Everything between
+> the text and the behaviour is invisible to it.** Two points do not prove the classifier, the
+> execution path, or deployment."*
+
+The sharpest instance is self-referential: **the metacontrol cannot discover a control that
+uses `process.exitCode`, throws, or is a symlink** — it recognises only literal
+`process.exit(1|2)` in two directories.
+
+**Why they fail open, and it is structural rather than local:**
+
+> *"These are open-world **denylist recognisers**: find a forbidden pattern, append a finding,
+> fail if the list is non-empty. In that architecture **every mistake rounds the same way** —
+> an unexpected input falls through the guard clause and passes."*
+
+The remedy is in how they are written, not how they are tested: **parse into a structure
+rather than matching substrings, and model what is ALLOWED rather than listing what is not.**
+
+**Options.** Add control #18 · delete the meta-gate and collapse the board now · freeze and
+measure first.
+
+**Decision: freeze, then measure.** No new control until an end-to-end kill audit has run:
+break each control's real invariant in a disposable checkout, invoke the **actual top-level
+entry point**, and record whether anything notices. A control nothing notices is a candidate
+for deletion.
+
+**Why not delete now**, which was the other recommendation on the table:
+
+> *"'Remove something now' is the fashionable answer, but the data to pick the victim does not
+> exist. **Removing by intuition would repeat the exact error** the record is full of."*
+
+**And a live-catch ledger alongside it:** every control, on refusal, appends one line — when,
+which, what it refused, and whether the input was real. **Deletion follows that data rather
+than a feeling.**
+
+**How we would know this was wrong.** If the freeze holds for a month and nothing is deleted
+and nothing is measured, the freeze became procrastination with a rationale. The audit is a
+card or it is not happening.
