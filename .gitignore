@@ -24,3 +24,11 @@ docs/compactions/
 
 # per-prompt check state — a remembered count, not a record
 docs/.prompt-check-state.json
+
+# The council is fetched from GitHub at setup, never vendored — see
+# scripts/council-sync.mjs for why a copy is a dependency with a timer on it.
+.council-src
+/scripts/council
+/tests/council.test.mjs
+/tests/survives-session-death.mjs
+/commands

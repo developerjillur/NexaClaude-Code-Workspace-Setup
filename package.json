@@ -21,9 +21,9 @@
   ],
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node tests/council.test.mjs && node tests/hooks.test.mjs && node tests/survives-session-death.mjs",
+    "test": "node tests/hooks.test.mjs",
     "test:hooks": "node tests/hooks.test.mjs",
-    "test:council": "node tests/council.test.mjs",
+    "test:council": "node .council-src/tests/council.test.mjs",
     "council": "node scripts/council/council.mjs",
     "council:preflight": "node scripts/council/council.mjs x --preflight",
     "council:containment": "node scripts/council/verify-containment.mjs",
@@ -34,6 +34,7 @@
     "secrets": "node scripts/scan-secrets.mjs",
     "reflect": "node scripts/reflect.mjs",
     "gate": "npm run secrets && npm run check && npm test",
-    "test:survives-session-death": "node tests/survives-session-death.mjs"
+    "council:sync": "node scripts/council-sync.mjs",
+    "council:check": "node scripts/council-sync.mjs --check"
   }
 }

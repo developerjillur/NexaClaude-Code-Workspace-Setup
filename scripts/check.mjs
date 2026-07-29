@@ -616,6 +616,21 @@ try {
   }
 }
 
+// ── the council is fetched, not vendored ─────────────────────────────────────
+//
+// It used to be copied in, and twice in a week the copy went stale — the second time with a
+// silent UTF-8 corruption bug that every review in this repo had gone through. So it is a
+// clone now, linked into place, and this checks it is actually there and reasonably current.
+//
+// soft(), because a missing council removes a capability rather than corrupting anything —
+// but it does not stop mentioning it, and `./setup.sh` or `npm run council:sync` fixes it.
+{
+  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'council-sync.mjs'), '--check'], { encoding: 'utf8' });
+  const line = (r.stdout ?? '').trim().split('\n').pop() ?? '';
+  if (r.status === 0) ok(line.trim() || 'the council is present and current');
+  else soft(line.trim() || 'the council is not fetched', 'npm run council:sync');
+}
+
 console.log('\n───────────────────────────────────────────────────────────');
 if (fail) {
   console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);

@@ -1,0 +1,232 @@
+{
+  "schema": 1,
+  "question": "You rated this Claude Code workspace 7.5/10 — top 10 percent, not top 1 — against its owner's standard: enterprise-grade code, idea to a production app with real paying users, a full professional team lineup. Your criticism was that its new stages were documents rather than gates: 'a warning that never becomes a refusal is visibility, not a gate.' Since then, four things. (1) card-gate.mjs enforces the discovery questions and the errors-surface question, and check.mjs FAILS on a finding — proven by planting an empty card and watching the exit code go 0 to 1 and back. It grants declared exemptions for bugs, controls and learning cards, and a control still owes its kill condition. (2) graph-fresh.mjs, which came from reading a compression tool and asking the same question about our own cached knowledge: the code graph was built at HEAD with all 61 source files indexed, and 32 of them had changed since, uncommitted. A graph is built from commits; the work lives uncommitted. The contract sends every agent to that graph FIRST, and a stale graph does not error — it answers. Seven fixtures, silent cases written first. (3) setup.sh: one command from a fresh clone that installs the tools, registers the marketplaces and plugins the settings declare, writes the config, symlinks the contract into the code repo, and then RUNS THE GATE AND ALL THREE SUITES rather than announcing success. Running it found something the gate could not: four of eight DECLARED plugins were not installed at all, because check.mjs was reading the config's claim about the world instead of the world. It now asks, and immediately found two more installed-but-disabled, one of them the second model the review path is built on. (4) An engineering baseline shipped as templates — eslint, prettier, editorconfig, checkJs, dependabot — because the workspace had world-class controls against agent failure and none of the hygiene an ordinary org takes for granted, and no package.json at all, so every npm run in its own docs failed. Answer three things, hard. (1) Is the gap between 'top 10 percent' and 'top 1 percent' now closed, narrowed, or unchanged — and name what specifically still separates them. (2) You said infrastructure-as-code with real environment promotion mattered most for 'can it carry an idea to a production app'. Is that still the single biggest thing missing, or has something else overtaken it now that discovery and operate exist? (3) Rate it out of 10 as a workspace for producing production software, and name precisely what moves it to 9.",
+  "at": "2026-07-29T01:36:33.207Z",
+  "flags": {
+    "lenses": false,
+    "rubric": false,
+    "revise": true,
+    "stage1Only": false,
+    "timeoutMin": 15
+  },
+  "context": {
+    "files": [
+      "README.md",
+      "setup.sh",
+      "scripts/card-gate.mjs"
+    ],
+    "refused": [],
+    "tokens": 12533,
+    "brief": "AGENTS.md",
+    "briefRefused": null,
+    "verifiedObedientTokens": 27000
+  },
+  "roster": {
+    "path": "/Volumes/T7 Shield/NexaLance-All-Projects-Portable/NexaClaude-Code-Workspace-Setup/scripts/council/members.json",
+    "local": false,
+    "localIgnored": false
+  },
+  "members": [
+    {
+      "id": "codex",
+      "label": "GPT-5.6 sol (Codex CLI)",
+      "family": "OpenAI",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini 3.1 Pro (Antigravity)",
+      "family": "Google",
+      "via": "argv",
+      "present": true
+    },
+    {
+      "id": "claude-fable",
+      "label": "Fable 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    },
+    {
+      "id": "claude-sonnet",
+      "label": "Sonnet 5",
+      "family": "Anthropic",
+      "via": "stdin",
+      "present": true
+    }
+  ],
+  "opinions": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 63094,
+      "chars": 4754,
+      "lens": null,
+      "confidence": 89,
+      "changeMind": "A committed clean-clone CI record for a representative application proves same-artifact staging-to-production promotion, deliberate deployment failure and rollback, migration recovery, backup restoration, and alert delivery to a named human."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 25137,
+      "chars": 4326,
+      "lens": null,
+      "confidence": 92,
+      "changeMind": "A test suite proves that card-gate.mjs accepts a fake monitoring claim (e.g. \"errors go to stdout\") on a production-bound card without failing, or if an automated terraform/canary deploy pipeline script already exists unreferenced in scripts/."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 83760,
+      "chars": 6579,
+      "lens": null,
+      "confidence": 65,
+      "changeMind": "Reading graph-fresh.mjs, check.mjs, and skills/deploy-gate from the repo showed the deploy gate already runs against a deployed environment and can refuse promotion — that flips question 2 and moves the score to ~8.5; conversely, running setup.sh from a clean clone and finding the suites or the 0→1→0 card-gate demonstration don't reproduce would drop it below 7.5."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 96301,
+      "chars": 6042,
+      "lens": null,
+      "confidence": 60,
+      "changeMind": "I could see the actual .github/workflows/*.yml (or equivalent) invoking check.mjs/the test suites — if it exists and runs on every PR, the CI-artifact gap I flagged collapses and the rating moves toward 8.5 on its own; conversely, if setup.sh's full source (only its first ~150 lines were quoted) shows a step that copies the engineering baseline into the target repo, item 2 above is already done an"
+    }
+  ],
+  "revised": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 151646,
+      "chars": 6333,
+      "revisionFailed": false,
+      "confidence": 87,
+      "changeMind": "A clean-clone run at the current commit already proves enforced product checks, same-artifact staging-to-production promotion, deliberate deployment failure and rollback, migration recovery, and synthetic alert delivery to a named human; that would move the rating to at least 9 and mean production delivery is no longer the biggest gap."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 25267,
+      "chars": 5845,
+      "revisionFailed": false,
+      "confidence": 90,
+      "changeMind": "Reading scripts/check.mjs or skills/deploy-gate directly in the repository reveals that deploy-gate already executes against a deployed staging/production environment and refuses deployment on failed HTTP smoke checks or missing product lint/test scripts."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 69546,
+      "chars": 6901,
+      "revisionFailed": false,
+      "confidence": 70,
+      "changeMind": "Reading the actual repo showed either (a) a committed CI workflow plus a deploy-gate that runs against a deployed environment and can refuse promotion — that flips question 2 and moves the score to ~8.5; or (b) that setup.sh's later sections or check.mjs already install/enforce the engineering baseline — which would retract my point 2 and C's; or conversely (c) running setup.sh from a clean clone "
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 112573,
+      "chars": 5372,
+      "revisionFailed": false,
+      "confidence": 65,
+      "changeMind": "I saw whether review-gate, security-gate, and deploy-gate are still skill-only or have been graduated to exit-code scripts like card-gate.mjs — that single fact would move the rating up if graduated, or sharpen the \"2 of 9 stages\" critique into the report's headline finding if not. A committed CI workflow invoking check.mjs on every PR would also move this, independent of that."
+    }
+  ],
+  "reviews": [
+    {
+      "id": "codex",
+      "ok": true,
+      "ms": 189464,
+      "parsed": [
+        "codex",
+        "claude-sonnet",
+        "gemini",
+        "claude-fable"
+      ],
+      "minority": "Response A’s point that IaC is only one component of the missing executable delivery-and-recovery control plane.",
+      "lost": "Response C’s exact source-level inventory of what card-gate.mjs itself enforces, despite C extrapolating too far from it."
+    },
+    {
+      "id": "gemini",
+      "ok": true,
+      "ms": 26708,
+      "parsed": [
+        "gemini",
+        "claude-sonnet",
+        "codex",
+        "claude-fable"
+      ],
+      "minority": "Response C's code-level proof that card-gate.mjs's REQUIRED object contains only '1-spec' and '6-done', demonstrating mechanically that 7 of the 9 pipeline stages still lack hard exit-code gates.",
+      "lost": "Response B's broader architectural insight that IaC alone is insufficient without a full executable delivery control plane that exercises failure recovery and proves alert delivery to a named human."
+    },
+    {
+      "id": "claude-fable",
+      "ok": true,
+      "ms": 116099,
+      "parsed": [
+        "claude-sonnet",
+        "codex",
+        "claude-fable",
+        "gemini"
+      ],
+      "minority": "B's point that verify-containment.mjs already embodied the check-the-world-not-the-config pattern — setup.sh extended an existing discipline rather than inventing it, which matters when crediting the improvement round.",
+      "lost": "C's \"graduate deploy-gate to a script\" is thinner than A's full delivery-and-recovery control plane — same-artifact promotion, migration safety, rollback and alert paths exercised under deliberate failure — which is the more complete answer to what actually separates 8 from 9."
+    },
+    {
+      "id": "claude-sonnet",
+      "ok": true,
+      "ms": 127529,
+      "parsed": [
+        "claude-sonnet",
+        "codex",
+        "claude-fable",
+        "gemini"
+      ],
+      "minority": "Response B's verified fact that card-gate.mjs's REQUIRED object mechanically covers only 1-spec and 6-done — a concrete, checkable limit on how much of the nine-stage pipeline is actually gated, made by no one else.",
+      "lost": "D's disambiguation between the operate error-surface check and a control card's kill condition, and its reframing of the missing capability as an \"executable delivery and recovery control plane\" rather than narrowly \"IaC\" — a more precise target for what a 9/10 workspace would actually need to build."
+    }
+  ],
+  "tally": {
+    "scores": {
+      "codex": 2,
+      "gemini": 0.5,
+      "claude-fable": 0.5,
+      "claude-sonnet": 3
+    },
+    "ranked": {
+      "codex": 3,
+      "gemini": 3,
+      "claude-fable": 3,
+      "claude-sonnet": 3
+    },
+    "counted": 4,
+    "total": 4,
+    "degenerate": false,
+    "selfFirst": 3,
+    "selfN": 4,
+    "selfMean": 1.5,
+    "lengths": {
+      "codex": 6333,
+      "gemini": 5845,
+      "claude-fable": 6901,
+      "claude-sonnet": 5372
+    },
+    "lengthR": -0.6314354731773236,
+    "families": {
+      "OpenAI": 1,
+      "Google": 1,
+      "Anthropic": 2
+    }
+  },
+  "overlap": {
+    "raw": 0.17743020790825512,
+    "distinctive": 0.06691897217476646,
+    "n": 4,
+    "pairs": 6,
+    "thin": false,
+    "excluded": [],
+    "usableN": 4
+  },
+  "rubric": null,
+  "rubricPerJudge": null
+}

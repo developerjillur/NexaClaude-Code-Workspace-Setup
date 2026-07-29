@@ -155,6 +155,22 @@ else
   done <<< "$PLUGINS"
 fi
 
+# ── 3b · the council, fetched from GitHub rather than vendored ──────────────
+head_ "The council"
+
+if ! command -v git >/dev/null 2>&1; then
+  skip "council" "git is required to fetch it"
+elif ! would "council (fetch from GitHub)" "node scripts/council-sync.mjs"; then :
+elif node scripts/council-sync.mjs >/tmp/nc-council.$ 2>&1; then
+  ok "council $(grep -oE 'council [0-9a-f]{7,}' /tmp/nc-council.$ | head -1 | awk '{print $2}') — latest from GitHub"
+  grep -oE 'its own [a-z.-]+: [0-9]+ passed, [0-9]+ failed' /tmp/nc-council.$ | sed 's/^/        /'
+  rm -f /tmp/nc-council.$
+else
+  die "the council could not be fetched" "node scripts/council-sync.mjs"
+  tail -3 /tmp/nc-council.$ 2>/dev/null | sed 's/^/        /'
+  rm -f /tmp/nc-council.$
+fi
+
 # ── 4 · where your code lives ───────────────────────────────────────────────
 head_ "Your code"
 

@@ -182,10 +182,11 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 23 scripts — `scripts/`
+### 24 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `council-sync.mjs` | **fetches the council from GitHub** and links it into place — never vendored, because a copy is a dependency with a timer on it |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `check.mjs` | the gate — 19 checks, and CI runs it |
