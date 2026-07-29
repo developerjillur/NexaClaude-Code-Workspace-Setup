@@ -45,6 +45,7 @@ const ONLY = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
  * `to` is chosen so the control still runs and still refuses other things — the point is a
  * control that looks alive and has quietly stopped covering one case.
  */
+// @rules SURVIVED, unresolved, red-baseline, unknown-only, incomplete
 const KILLS = [
   // ── guard-edit: the shell write-detector ───────────────────────────────────
   { id: 'tee', file: 'scripts/hooks/guard-edit.mjs',
@@ -262,17 +263,17 @@ say('═════════════════════════
 // Predicted by two council members from the source and then confirmed by running it, which is
 // the only reason it is fixed rather than argued about.
 if (ONLY && !KILLS.some((k) => k.id === ONLY)) {
-  console.error(`  ! --only=${ONLY} matches no mutation.\n\n    known ids: ${KILLS.map((k) => k.id).join(' ')}\n`);
+  console.error(`  ! [unknown-only] --only=${ONLY} matches no mutation.\n\n    known ids: ${KILLS.map((k) => k.id).join(' ')}\n`);
   process.exit(2);
 }
 
 const base = runEverything();
 if (base.broke) {
-  say(`  ! ${base.by} did not complete. An audit cannot read a suite it could not run.\n`);
+  say(`  ! [incomplete] ${base.by} did not complete. An audit cannot read a suite it could not run.\n`);
   process.exit(2);
 }
 if (base.red) {
-  say(`  ! the suite is already red (${base.by}). An audit against a red baseline says nothing.\n`);
+  say(`  ! [red-baseline] the suite is already red (${base.by}). An audit against a red baseline says nothing.\n`);
   process.exit(1);
 }
 say('  baseline: green\n');

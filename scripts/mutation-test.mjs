@@ -53,6 +53,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 //
 // `codeDirs[0]` from workspace.config.json is the root those paths are relative to, and
 // `testCommand` (default `npm run test:offline`) is what must go red.
+// @rules invariant-survived, mutations-unparseable, mutation-drifted
 const cfg = (() => {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8')); }
   catch { return {}; }
@@ -67,7 +68,7 @@ const MUTATIONS = (() => {
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
     return Array.isArray(j) ? j : (j.mutations ?? []);
   } catch (e) {
-    console.error(`\n  mutations.json is not valid JSON — ${e.message}`);
+    console.error(`\n  [mutations-unparseable] mutations.json is not valid JSON — ${e.message}`);
     console.error('  Refusing rather than running zero mutations and calling it a pass.\n');
     process.exit(2);
   }
@@ -102,7 +103,7 @@ const resolved = MUTATIONS.filter((m) => {
   const f = path.join(CODE, m.file);
   if (!fs.existsSync(f)) { console.log(`  ·  skipping ${m.id}: ${m.file} not found`); return false; }
   if (!fs.readFileSync(f, 'utf8').includes(m.from)) {
-    console.log(`  ⚠️  skipping ${m.id}: the line it mutates has changed — REWRITE THE MUTATION`);
+    console.log(`  ⚠️  [mutation-drifted] skipping ${m.id}: the line it mutates has changed — REWRITE THE MUTATION`);
     console.log(`       expected: ${m.from.trim()}`);
     return false;
   }
@@ -149,7 +150,7 @@ console.log(`\n${'─'.repeat(70)}`);
 console.log(`  ${results.length - survived.length}/${results.length} caught.\n`);
 
 if (survived.length) {
-  console.log('  SURVIVED — these invariants can be deleted and the suite stays green:\n');
+  console.log('  [invariant-survived] these can be deleted and the suite stays green:\n');
   for (const s of survived) {
     console.log(`    ${s.file} — ${s.what}`);
     console.log(`      ${s.why}\n`);

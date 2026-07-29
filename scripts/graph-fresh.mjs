@@ -34,6 +34,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// @rules absent, unreadable, no-commit-marker, dangling-commit, behind-head, uncommitted, not-indexed
+//
+// Declared from what the code emits, not from what seemed likely — the first attempt invented
+// three ids that appear nowhere, and guard-coverage refused them as declared-but-not-emitted.
+// A rule declared and never emitted is a coverage requirement satisfied by a fixture that can
+// never fire, which is worse than no declaration at all.
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const JSON_OUT = process.argv.includes('--json');
 
@@ -169,7 +175,7 @@ if (!report.findings.length) {
 }
 
 for (const f of report.findings) {
-  console.log(`  ❌ ${f.dir} — ${f.detail}`);
+  console.log(`  ❌ [${f.kind}] ${f.dir} — ${f.detail}`);
   if (f.files?.length) console.log(`       ${f.files.join('\n       ')}`);
   console.log('');
 }

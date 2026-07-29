@@ -758,7 +758,7 @@ console.log(`\n${'─'.repeat(72)}`);
 {
   console.log('\n▸ graph-fresh — is the graph describing code that still exists');
   const script = path.join(ROOT, 'scripts', 'graph-fresh.mjs');
-  const mk = ({ graph = 'fresh', dirty = false, extra = false } = {}) => {
+  const mk = ({ graph = 'fresh', dirty = false, extra = false, behind = false } = {}) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-'));
     fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
     fs.copyFileSync(script, path.join(root, 'scripts', 'graph-fresh.mjs'));
@@ -772,14 +772,22 @@ console.log(`\n${'─'.repeat(72)}`);
     if (graph !== 'none') {
       const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: code, encoding: 'utf8' }).stdout.trim();
       fs.mkdirSync(path.join(code, 'graphify-out'), { recursive: true });
-      fs.writeFileSync(path.join(code, 'graphify-out', 'graph.json'), JSON.stringify({
-        nodes: [{ source_file: 'src/a.js' }], links: [{ source: 'a', target: 'a' }],
-        built_at_commit: graph === 'dangling' ? '0'.repeat(40) : head,
-      }));
+      const body = graph === 'unreadable'
+        ? '{ this is not json'
+        : JSON.stringify({
+          nodes: [{ source_file: 'src/a.js' }], links: [{ source: 'a', target: 'a' }],
+          ...(graph === 'no-marker' ? {} : { built_at_commit: graph === 'dangling' ? '0'.repeat(40) : head }),
+        });
+      fs.writeFileSync(path.join(code, 'graphify-out', 'graph.json'), body);
       g('add', '-A'); g('commit', '-qm', 'graph');
     }
     if (dirty) fs.writeFileSync(path.join(code, 'src', 'a.js'), 'export const a = 2; // uncommitted\n');
     if (extra) fs.writeFileSync(path.join(code, 'src', 'b.js'), 'export const b = 2;\n');
+    // A source commit AFTER the graph was built: the graph is valid, resolvable, and stale.
+    if (behind) {
+      fs.writeFileSync(path.join(code, 'src', 'a.js'), 'export const a = 3; // moved on\n');
+      g('add', '-A'); g('commit', '-qm', 'later');
+    }
     return root;
   };
   const fire = (root) => spawnSync('node', [path.join(root, 'scripts', 'graph-fresh.mjs')], { cwd: root, encoding: 'utf8' }).status;
@@ -788,10 +796,31 @@ console.log(`\n${'─'.repeat(72)}`);
     try { check(why, fire(r) === want); } finally { fs.rmSync(r, { recursive: true, force: true }); }
   };
   once({}, 0, 'a current graph on a clean tree says nothing');
-  once({ dirty: true }, 1, 'uncommitted source the graph cannot know about is refused');
-  once({ extra: true }, 1, 'a source file never indexed is refused');
-  once({ graph: 'dangling' }, 1, 'a built_at_commit that does not resolve is refused');
-  once({ graph: 'none' }, 1, 'no graph at all, while the contract says to query one');
+
+  // ── each kind named, because seven of them share one exit code ──────────────
+  //
+  // The five below were all tested, and every assertion said only `=== 1`. Any one of the
+  // seven rules could have been deleted and a sibling would have produced the same exit,
+  // which is the confounding law this workspace has now met six times.
+  const kindsOf = (opts) => {
+    const r = mk(opts);
+    try {
+      const out = spawnSync('node', [path.join(r, 'scripts', 'graph-fresh.mjs')], { cwd: r, encoding: 'utf8' });
+      return { status: out.status, kinds: [...(out.stdout ?? '').matchAll(/\[([a-z-]+)\]/g)].map((m) => m[1]) };
+    } finally { fs.rmSync(r, { recursive: true, force: true }); }
+  };
+  const refusesWith = (opts, kind, why) => {
+    const r = kindsOf(opts);
+    check(why, r.status === 1 && r.kinds.includes(kind));
+  };
+
+  refusesWith({ dirty: true }, 'uncommitted', 'graph-fresh names uncommitted — source the graph cannot know about');
+  refusesWith({ extra: true }, 'not-indexed', 'graph-fresh names not-indexed — a source file the graph never saw');
+  refusesWith({ graph: 'dangling' }, 'dangling-commit', 'graph-fresh names dangling-commit — a built_at_commit that does not resolve');
+  refusesWith({ graph: 'none' }, 'absent', 'graph-fresh names absent — no graph, while the contract says to query one');
+  refusesWith({ graph: 'unreadable' }, 'unreadable', 'graph-fresh names unreadable — a graph.json that is not JSON');
+  refusesWith({ graph: 'no-marker' }, 'no-commit-marker', 'graph-fresh names no-commit-marker — a graph whose age cannot be judged');
+  refusesWith({ behind: true }, 'behind-head', 'graph-fresh names behind-head — source committed after the graph was built');
 }
 
 
@@ -1055,6 +1084,53 @@ console.log(`\n${'─'.repeat(72)}`);
         fs.rmSync(spec, { force: true });
       }
     })());
+
+  // ── the per-RULE branches, which are the newest and least watched ───────────
+  //
+  // `rule-untested` and `rule-declared-not-emitted` are the two checks that upgrade this file
+  // from "the control's NAME appears near assertion text" to per-rule coverage. They had no
+  // fixtures — the branch that catches unwatched rules was itself an unwatched rule.
+  const perRule = (declared, emitted) => {
+    const name = ['zz', String(process.pid), declared.replace(/[^a-z]/g, '')].join('-');
+    const probe = path.join(ROOT, 'scripts', `${name}.mjs`);
+    const spec = path.join(ROOT, 'tests', `${name}.test.mjs`);
+    // The control declares `declared` and emits `emitted` — pass them equal for a rule that
+    // exists but nothing tests, unequal for one declared and never emitted.
+    fs.writeFileSync(probe, `#!/usr/bin/env node\n// @rules ${declared}\nconsole.log('${emitted}');\nprocess.exit(1);\n`);
+    fs.writeFileSync(spec, `// ${name}\ncheck('blocks a bad input', fire() === 2);\ncheck('allows a good one', fire() === 0);\n`);
+    try {
+      const r = spawnSync('node', [gc, '--json'], { cwd: ROOT, encoding: 'utf8' });
+      const j = JSON.parse(r.stdout || '{}');
+      return (j.findings ?? []).filter((f) => f.name === name).map((f) => f.kind);
+    } catch { return []; } finally {
+      fs.rmSync(probe, { force: true });
+      fs.rmSync(spec, { force: true });
+    }
+  };
+
+  // The ids are BUILT, not written — spelling one out here puts it in tests/, which is
+  // exactly where guard-coverage looks, so the probe would report itself as covered. Third
+  // time this trap has been walked into in this file; the two probes above dodge it the same
+  // way, and this one did not until it failed.
+  const rid = (w) => ['zz', w, 'rule'].join('-');
+  check('guard-coverage refuses rule-untested — a rule the control emits and no fixture names',
+    perRule(rid('lonely'), rid('lonely')).includes('rule-untested'));
+  check('guard-coverage refuses rule-declared-not-emitted — a rule that can never fire',
+    perRule(rid('ghost'), 'a-different-string').includes('rule-declared-not-emitted'));
+  check('...and a control whose declared rule is emitted AND named is not flagged for either',
+    (() => {
+      const name = ['zz', String(process.pid), 'bothok'].join('-');
+      const probe = path.join(ROOT, 'scripts', `${name}.mjs`);
+      const spec = path.join(ROOT, 'tests', `${name}.test.mjs`);
+      fs.writeFileSync(probe, `#!/usr/bin/env node\n// @rules happy-rule\nconsole.log('happy-rule');\nprocess.exit(1);\n`);
+      fs.writeFileSync(spec, `// ${name}\ncheck('blocks on happy-rule', fire() === 2);\ncheck('allows otherwise', fire() === 0);\n`);
+      try {
+        const j = JSON.parse(spawnSync('node', [gc, '--json'], { cwd: ROOT, encoding: 'utf8' }).stdout || '{}');
+        return !(j.findings ?? []).some((f) => f.name === name);
+      } catch { return false; } finally {
+        fs.rmSync(probe, { force: true }); fs.rmSync(spec, { force: true });
+      }
+    })());
 }
 
 
@@ -1145,7 +1221,7 @@ console.log(`\n${'─'.repeat(72)}`);
   {
     const r = scratch([K('watched', WATCHED)]);
     const one = spawnSync('node', [audit, '--only=no-such-mutation'], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
-    check('kill-audit refuses an --only that names no mutation, rather than testing nothing',
+    check('kill-audit refuses unknown-only — an --only naming no mutation, rather than testing nothing',
       one.status === 2 && /matches no mutation/.test(one.stderr));
     check('...and a valid selection is still accepted', r.status === 0);
   }
@@ -1164,13 +1240,13 @@ console.log(`\n${'─'.repeat(72)}`);
   // possible wrong answer.
   {
     const r = scratch([K('watched', WATCHED)], { suiteExit: 1 });
-    check('kill-audit refuses to audit against an already-red suite',
+    check('kill-audit refuses a red-baseline — auditing against an already-red suite',
       r.status !== 0 && /already red/.test(r.stdout));
   }
 
   // A timeout is not a catch. spawnSync returns status: null when it kills a child, and
   // null !== 0 — so the first version scored an infrastructure failure as a successful catch.
-  check('a run that could not complete is separated from one that refused',
+  check('a run marked incomplete is separated from one that refused',
     /no exit status|ETIMEDOUT/.test(fs.readFileSync(audit, 'utf8')));
 
   check('it restores on exit, not only in a finally',
@@ -1588,14 +1664,14 @@ console.log(`\n${'─'.repeat(72)}`);
   // REFUSES: an invariant nothing watches. This is the entire product of the tool.
   {
     const r = scratch(KILL, { guardHolds: false });
-    check('mutation-test refuses when an invariant can be deleted unnoticed',
+    check('mutation-test refuses invariant-survived — an invariant deletable unnoticed',
       r.status === 1 && /SURVIVED/.test(r.stdout));
     check('...and still restores the file', r.guard.includes('const ID_RE = /^[a-z]+$/;'));
   }
 
   // REFUSES: a broken config. Running zero mutations and calling it a pass is the failure
   // this whole workspace catalogues, and it was living inside the tool built to catch it.
-  check('mutation-test refuses a mutations.json it cannot parse',
+  check('mutation-test refuses mutations-unparseable — a mutations.json it cannot read',
     (() => { const r = scratch('{ not json'); return r.status === 2 && /not valid JSON/.test(r.stderr); })());
 
   // No mutations is not a pass, and says so rather than printing a tick.
@@ -1606,7 +1682,7 @@ console.log(`\n${'─'.repeat(72)}`);
   }
 
   // A `from` that no longer matches means the CODE moved and the mutation did not.
-  check('mutation-test says loudly when a mutation no longer applies',
+  check('mutation-test reports mutation-drifted when a mutation no longer applies',
     /REWRITE THE MUTATION/.test(
       scratch([{ ...KILL[0], from: 'a line that is not there' }]).stdout));
 }

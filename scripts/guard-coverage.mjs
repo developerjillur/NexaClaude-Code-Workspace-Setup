@@ -66,6 +66,13 @@ const JSON_OUT = process.argv.includes('--json');
 //   · every declared id appears in some assertion in tests/
 //   · every declared id appears in the control's OWN source — a rule declared and never
 //     emitted is a coverage requirement satisfied by a fixture that can never fire
+// @rules untested, no-refusal, no-silent-case, rule-untested, rule-declared-not-emitted
+//
+// Declared late, and by hand, because the batch that declared the others skipped this file:
+// it tested for `@rules` anywhere in the body and found the EXAMPLE in the comment above.
+// A detector that cannot tell a declaration from a description of one — which is the same
+// mistake, one level up, as counting a prose comment as coverage. The regex below anchors to
+// the start of a line for exactly that reason, so the indented example never matched.
 const declaredRules = (body) => {
   const m = /^\s*\/\/\s*@rules\s+(.+)$/m.exec(body);
   return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [];
