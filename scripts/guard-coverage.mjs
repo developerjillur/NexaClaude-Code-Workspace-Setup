@@ -40,6 +40,37 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const JSON_OUT = process.argv.includes('--json');
 
+// ── per-RULE coverage, for controls that declare their rules ─────────────────
+//
+// Counting by control NAME is what let a **prose comment** stand in as coverage for the secret
+// scanner: the string "scan-secrets" appeared in a comment inside another control's block, and
+// this file counted that block's assertions as its fixtures. It reported ✅ 1 refuse · 1 silent
+// for a control with no test at all, whose entire git-history pass had never worked.
+//
+// A council named the repair, twice, independently:
+//
+//   "Make every refusal carry a rule id, and make fixtures assert the id, not the exit code.
+//    It upgrades this from 'the control's NAME appears near assertion text' to 'every rule id
+//    appears in at least one assertion', which is per-rule coverage."
+//
+// So a control opts in by declaring its rules on one line:
+//
+//   // @rules wip-limit, no-card-in-build, no-reuse-ladder, discard-uncommitted
+//
+// **Opt-in on purpose.** A control that has not declared rules still gets the old name-based
+// check, so nothing fails open while this rolls out — and every control that DOES declare
+// immediately owes a fixture naming each id. Undeclared is visible in the report rather than
+// silently equivalent.
+//
+// Two things are checked, and the second catches the drift the first cannot:
+//   · every declared id appears in some assertion in tests/
+//   · every declared id appears in the control's OWN source — a rule declared and never
+//     emitted is a coverage requirement satisfied by a fixture that can never fire
+const declaredRules = (body) => {
+  const m = /^\s*\/\/\s*@rules\s+(.+)$/m.exec(body);
+  return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [];
+};
+
 // ── which scripts are controls ───────────────────────────────────────────────
 //
 // A control is something that can REFUSE: exit 1 from a gate, exit 2 from a hook. Anything
@@ -56,7 +87,7 @@ function controls() {
       if (fs.lstatSync(p).isSymbolicLink()) continue;      // fetched code is tested upstream
       const body = fs.readFileSync(p, 'utf8');
       if (!/process\.exit\((?:1|2)\)/.test(body)) continue;
-      out.push({ name: f.replace(/\.mjs$/, ''), file: path.join(dir, f) });
+      out.push({ name: f.replace(/\.mjs$/, ''), file: path.join(dir, f), rules: declaredRules(body) });
     }
   }
   return out;
@@ -141,6 +172,28 @@ for (const c of controls()) {
     report.findings.push({ name: c.name, kind: 'no-silent-case',
       detail: `${refuses} refusal assertions, none showing it stay SILENT — this is the direction all fifteen defects came from` });
   }
+
+  // ── and then, per rule, for controls that have opted in ────────────────────
+  //
+  // Everything above is about the CONTROL. This is about each rule inside it — the level at
+  // which the confounding actually happens, where a fixture tripping two rules proves neither
+  // and either can be deleted in silence.
+  const allTests = suites.map((s) => s.body).join('\n');
+  for (const id of c.rules) {
+    // Searched as a whole word so `wip-limit` is not satisfied by `wip-limits`, and outside
+    // the control's own file so a control cannot cover itself.
+    const word = new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+    if (!word.test(allTests)) {
+      report.findings.push({ name: c.name, rule: id, kind: 'rule-untested',
+        detail: `rule "${id}" is declared but no assertion in tests/ names it — the exit code cannot tell it from its siblings` });
+    }
+    // A rule declared and never emitted is worse than an undeclared one: the coverage
+    // requirement is satisfied by a fixture that can never fire.
+    if (!word.test(fs.readFileSync(path.join(ROOT, c.file), 'utf8').replace(/^\s*\/\/\s*@rules.+$/m, ''))) {
+      report.findings.push({ name: c.name, rule: id, kind: 'rule-declared-not-emitted',
+        detail: `rule "${id}" is declared in @rules but never appears in the control itself` });
+    }
+  }
 }
 
 if (JSON_OUT) {
@@ -152,10 +205,18 @@ console.log('══════════════════════�
 console.log('  GUARD COVERAGE — both directions, for everything that refuses');
 console.log('════════════════════════════════════════════════════════════════════════\n');
 
+const declaredCount = report.controls.filter((c) => c.rules.length).length;
 for (const c of report.controls) {
   const flag = report.findings.find((f) => f.name === c.name);
-  console.log(`  ${flag ? '❌' : '✅'} ${c.name.padEnd(18)} ${String(c.refuses).padStart(3)} refuse · ${String(c.silent).padStart(3)} silent`);
+  const rules = c.rules.length
+    ? `· ${c.rules.length} rule${c.rules.length === 1 ? '' : 's'} named`
+    : '·  by name only';
+  console.log(`  ${flag ? '❌' : '✅'} ${c.name.padEnd(18)} ${String(c.refuses).padStart(3)} refuse · ${String(c.silent).padStart(3)} silent ${rules}`);
 }
+console.log(`\n  ${declaredCount} of ${report.controls.length} controls declare their rules (// @rules …).`);
+console.log('  The rest are checked by NAME, which is the check that once read a prose comment');
+console.log('  as coverage for the secret scanner. Declaring is how a control opts into being');
+console.log('  measured per rule instead of per file.');
 
 if (!report.findings.length) {
   console.log('\n  Every control has been watched refusing AND watched staying quiet.\n');

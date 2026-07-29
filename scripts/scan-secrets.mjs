@@ -27,17 +27,23 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const treeOnly = process.argv.includes('--tree');
 
+// @rules openai-key, anthropic-key, twilio-sid, twilio-api-key, github-token, aws-key-id, private-key-block, jwt, oauth-code, assigned-secret, tree-pass, history-pass
+//
+// Twelve rules and one exit code. This control had NO test at all while guard-coverage rated
+// it covered, because its name appeared in a prose comment inside another block — and its
+// entire history pass had never worked. Every rule is named now, and an unnamed one is a
+// refusal rather than a thing only a careful reader would notice.
 const PATTERNS = [
-  ['openai key', /\bsk-[A-Za-z0-9_-]{20,}/],
-  ['anthropic key', /\bsk-ant-[A-Za-z0-9_-]{20,}/],
-  ['twilio sid', /\bAC[0-9a-fA-F]{32}\b/],
-  ['twilio api key', /\bSK[0-9a-fA-F]{32}\b/],
-  ['github token', /\bgh[pousr]_[A-Za-z0-9]{20,}/],
-  ['aws key id', /\bAKIA[0-9A-Z]{16}\b/],
-  ['private key block', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ['openai-key', /\bsk-[A-Za-z0-9_-]{20,}/],
+  ['anthropic-key', /\bsk-ant-[A-Za-z0-9_-]{20,}/],
+  ['twilio-sid', /\bAC[0-9a-fA-F]{32}\b/],
+  ['twilio-api-key', /\bSK[0-9a-fA-F]{32}\b/],
+  ['github-token', /\bgh[pousr]_[A-Za-z0-9]{20,}/],
+  ['aws-key-id', /\bAKIA[0-9A-Z]{16}\b/],
+  ['private-key-block', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['jwt', /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\./],
-  ['oauth code', /\bcode=ac_[A-Za-z0-9._-]{20,}/],
-  ['assigned secret', /\b(?:password|passwd|auth[_-]?token|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{12,}["']/i],
+  ['oauth-code', /\bcode=ac_[A-Za-z0-9._-]{20,}/],
+  ['assigned-secret', /\b(?:password|passwd|auth[_-]?token|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{12,}["']/i],
 ];
 
 // Known-benign, each with the reason it is benign. A line here is a claim someone can check —
@@ -79,7 +85,7 @@ for (const f of tracked) {
     scan('tree', f, fs.readFileSync(full, 'utf8'));
   } catch { /* binary or gone */ }
 }
-console.log(`  tree     ${tracked.length} tracked files scanned`);
+console.log(`  [tree-pass]     ${tracked.length} tracked files scanned`);
 
 // ── history ──────────────────────────────────────────────────────────────────
 //
@@ -111,6 +117,8 @@ const PCRE = process.env.NEXA_SCAN_NO_PCRE === '1' ? false : !/Perl-compatible|n
   execSync('git grep -P -q -e "x" -- . 2>&1; true', { cwd: ROOT, encoding: 'utf8' }),
 );
 
+const flagUsed = PCRE ? '-P' : '-E (no PCRE — \\b anchors dropped, so this matches MORE)';
+
 if (!treeOnly) {
   const commits = git('git rev-list --all').split('\n').filter(Boolean);
   for (const [what, re] of PATTERNS) {
@@ -127,7 +135,7 @@ if (!treeOnly) {
       findings.push({ where: `history ${sha.slice(0, 7)}`, file, what, sample: '' });
     }
   }
-  console.log(`  history  ${commits.length} commits scanned`);
+  console.log(`  [history-pass]  ${commits.length} commits scanned, via git grep ${flagUsed}`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

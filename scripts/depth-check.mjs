@@ -29,6 +29,11 @@ const targets = args.filter((a) => !a.startsWith('--'));
 // ── the shapes ───────────────────────────────────────────────────────────────
 //
 // `test` gets (line, allLines, index) and returns a reason string, or null.
+// @rules stub-return, empty-catch, not-implemented, placeholder-value, always-true-test, unused-param
+//
+// Six rules, one exit code. Two of them had no fixture at all until a kill audit deleted them
+// and nothing went red — so each finding now prints the rule that produced it, and
+// guard-coverage refuses a declared rule that no assertion names.
 const RULES = [
   {
     id: 'stub-return',
@@ -184,7 +189,7 @@ if (!findings.length) {
 const byRule = {};
 for (const f of findings) (byRule[f.rule] ??= []).push(f);
 for (const [rule, list] of Object.entries(byRule)) {
-  console.log(`  ${list[0].what}  (${list.length})`);
+  console.log(`  [${list[0].rule}] ${list[0].what}  (${list.length})`);
   for (const f of list) console.log(`    ${f.file}:${f.line}  ${f.why}\n        ${f.text}`);
   console.log('');
 }

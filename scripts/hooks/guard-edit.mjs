@@ -98,6 +98,7 @@ const read = () => new Promise((r) => {
   process.stdin.on('end', () => r(s));
 });
 
+// @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder
 const allow = () => process.exit(0);
 
 // ── why a refusal carries an id ──────────────────────────────────────────────

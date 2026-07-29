@@ -52,8 +52,13 @@ const read = () => new Promise((r) => {
   process.stdin.on('end', () => r(s));
 });
 
+// @rules admits-nothing-pending, short-delay-unexplained
+//
+// The two rules below both refuse the reported incident, and for a day the fixture asserting
+// `=== 2` could not tell them apart — so deleting the rule written FOR that incident, matching
+// its reason verbatim, changed nothing. That is why each refusal names itself.
 const allow = () => process.exit(0);
-const block = (why) => { console.error(why); process.exit(2); };
+const block = (id, why) => { console.error(`refused: ${id}\n${why}`); process.exit(2); };
 
 const input = JSON.parse((await read()) || '{}');
 if (input?.tool_name !== 'ScheduleWakeup') allow();
@@ -91,6 +96,7 @@ const ADMITS_NOTHING_PENDING = [
 const admits = ADMITS_NOTHING_PENDING.find((re) => re.test(hay));
 if (admits) {
   block(
+    'admits-nothing-pending',
     `BLOCKED — this wakeup says, in its own reason, that there is nothing to wait for.\n\n` +
     `  delaySeconds: ${delay}\n` +
     `  reason: ${reason.slice(0, 200)}\n\n` +
@@ -118,6 +124,7 @@ const NAMES_SOMETHING_EXTERNAL =
 
 if (delay > 0 && delay < 1200 && !NAMES_SOMETHING_EXTERNAL.test(hay)) {
   block(
+    'short-delay-unexplained',
     `BLOCKED — a ${delay}s wakeup that does not name what it is waiting for.\n\n` +
     `  reason: ${reason.slice(0, 200) || '(none given)'}\n\n` +
     `Under twenty minutes is the POLLING band, and polling needs something to poll. The rule:\n\n` +

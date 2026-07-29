@@ -99,6 +99,7 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
   check('blocks when board/3-build is empty', none.code === 2, `exit ${none.code}`);
   check('...and says why, on stderr where the model reads it',
     /BLOCKED/.test(none.stderr) && /3-build/.test(none.stderr));
+  check('...naming the rule: no-card-in-build', /^refused: no-card-in-build$/m.test(none.stderr));
 
   // The escape hatch has to work, or people delete the guard instead of using it.
   check('NEXA_NO_CARD=1 allows, and is not silent',
@@ -420,6 +421,8 @@ console.log(`\n${'─'.repeat(72)}`);
   // through. Sixth control in this workspace wrong on its first version; all six failed OPEN.
   check('and the block names what would be lost',
     /pricing\.js/.test(fire('git checkout src/pricing.js').stderr));
+  check('...naming the rule: discard-uncommitted',
+    /^refused: discard-uncommitted$/m.test(fire('git checkout src/pricing.js').stderr));
 
   // Silent: nothing here loses work, and a guard that fires on these gets switched off.
   for (const cmd of [
@@ -822,13 +825,17 @@ console.log(`\n${'─'.repeat(72)}`);
     check('refuses an admission of nothing pending even at a long delay, where only that rule can fire',
       long === 2);
 
+    // These assert the rule ID, which is the form that cannot be satisfied by a sibling rule
+    // producing the same exit code. Prose was the first fix and it worked; an id is the same
+    // idea in a shape `guard-coverage` can also count, so a rule with no fixture naming it is
+    // now a refusal rather than something only a careful reader would notice.
     const verbatim = run(guard, { tool_name: 'ScheduleWakeup', tool_input: REFUSED[0][1] });
-    check('...and the verbatim incident is refused BY that rule, not by the delay rule',
-      /in its own reason/.test(verbatim.stderr));
+    check('...and the verbatim incident is refused by admits-nothing-pending, not the delay rule',
+      /^refused: admits-nothing-pending$/m.test(verbatim.stderr));
 
     const short = run(guard, { tool_name: 'ScheduleWakeup', tool_input: REFUSED[3][1] });
-    check('...and the short-delay refusal is still attributed to the delay rule',
-      /does not name what it is waiting for/.test(short.stderr));
+    check('...and the short-delay refusal is attributed to short-delay-unexplained',
+      /^refused: short-delay-unexplained$/m.test(short.stderr));
   }
 }
 
@@ -1210,12 +1217,12 @@ console.log(`\n${'─'.repeat(72)}`);
     const d = repo({ 'a.js': 'const id = "AKIAEXAMPLE123456ABC";\n' });
     const r = fire(d);
     check('scan-secrets refuses an AWS key id in the tree', r.code === 1);
-    check('...and names which pattern matched, rather than only failing', /aws key id/.test(r.out));
+    check('...and names which pattern matched, rather than only failing', /aws-key-id/.test(r.out));
   }
   {
     const d = repo({ 'a.js': 'const cfg = { password: "hunter2hunter2hunter2" };\n' });
     check('scan-secrets refuses an assigned password — its broadest rule',
-      fire(d).code === 1 && /assigned secret/.test(fire(d).out));
+      fire(d).code === 1 && /assigned-secret/.test(fire(d).out));
   }
 
   // The history pass, isolated. The secret is committed and then REMOVED, so the working tree
@@ -1232,6 +1239,48 @@ console.log(`\n${'─'.repeat(72)}`);
     // condition under which the `-E` path stayed broken from the day it was written.
     check('...and finds it too where git has no PCRE, via the widened fallback',
       fire(d, '--no-pcre').code === 1);
+  }
+
+  // ── every pattern named, because ten patterns share one exit code ───────────
+  //
+  // One repo carrying one example of each. Values are SHAPES, not keys — `AKIA` plus sixteen
+  // upper-alphanumerics is the format, and none of these authenticate anything.
+  //
+  // Assembled from parts so the literals are not sitting in this file: it is allowlisted in
+  // the scanner, but an allowlist is a thing that can be edited, and a fixture that depends on
+  // one is a fixture that breaks quietly when somebody tidies it.
+  {
+    const hex32 = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const long = 'EXAMPLEexampleEXAMPLE00';
+    const d = repo({
+      'k1.js': `const a = "sk-${long}";\n`,
+      'k2.js': `const b = "sk-ant-${long}";\n`,
+      'k3.js': `const c = "AC${hex32}";\n`,
+      'k4.js': `const d = "SK${hex32}";\n`,
+      'k5.js': `const e = "gh${'p'}_${long}";\n`,
+      'k6.js': `const f = "AKIA${'EXAMPLE123456ABC'}";\n`,
+      'k7.pem': `-----BEGIN RSA PRIVATE KEY-----\n`,
+      'k8.js': `const g = "eyJ${long}.${long}.sig";\n`,
+      'k9.js': `const h = "?code=ac_${long}";\n`,
+      'k10.js': `const cfg = { password: "hunter2hunter2hunter2" };\n`,
+    });
+    const out = fire(d).out;
+    for (const id of ['openai-key', 'anthropic-key', 'twilio-sid', 'twilio-api-key', 'github-token',
+      'aws-key-id', 'private-key-block', 'jwt', 'oauth-code', 'assigned-secret']) {
+      check(`scan-secrets names ${id}`, new RegExp(id).test(out));
+    }
+  }
+
+  // Both passes announce themselves, so "it scanned nothing" cannot look like "it found
+  // nothing" — which is precisely how the history pass hid for as long as it did.
+  {
+    const d = repo({ 'a.js': 'export const x = 1;\n' });
+    const full = fire(d).out;
+    check('scan-secrets reports the tree-pass ran, with a count', /\[tree-pass\]\s+\d+ tracked/.test(full));
+    check('...and the history-pass, with the git grep flavour it actually used',
+      /\[history-pass\]\s+\d+ commits scanned, via git grep -[PE]/.test(full));
+    check('...and --tree omits the history-pass rather than reporting an empty one',
+      !/\[history-pass\]/.test(fire(d, '--tree').out));
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -1265,6 +1314,33 @@ console.log(`\n${'─'.repeat(72)}`);
     fire(w('fake.mjs', "check('it works', true);\n")) === 1);
   check('...and allows one that compares something',
     fire(w('realtest.mjs', "check('it works', total === 42);\n")) === 0);
+
+  // ── each rule named, because six rules share one exit code ──────────────────
+  //
+  // Declaring depth-check's rules turned up a gap nothing else had: **`placeholder-value` had
+  // no fixture at all.** It was invisible while coverage was counted per FILE, because five
+  // sibling rules were well covered and the control read as tested.
+  //
+  // These assert the rule that fired, from --json, so a fixture cannot be satisfied by a
+  // different rule reaching the same verdict.
+  const ruleOf = (f) => {
+    const r = spawnSync('node', [depth, f, '--json'], { cwd: ROOT, encoding: 'utf8' });
+    try { return (JSON.parse(r.stdout || '{}').findings ?? []).map((x) => x.rule); } catch { return []; }
+  };
+  check('depth-check names stub-return',
+    ruleOf(w('r1.mjs', 'export function go() {\n  return null;\n}\n')).includes('stub-return'));
+  check('depth-check names empty-catch',
+    ruleOf(w('r2.mjs', 'export async function go(f) {\n  try { await f(); } catch (e) {\n  }\n}\n')).includes('empty-catch'));
+  check('depth-check names not-implemented',
+    ruleOf(w('r3.mjs', 'export function go() {\n  throw new Error("not implemented");\n}\n')).includes('not-implemented'));
+  check('depth-check names placeholder-value',
+    ruleOf(w('r4.mjs', 'export const host = "changeme";\n')).includes('placeholder-value'));
+  check('depth-check names always-true-test',
+    ruleOf(w('r5.mjs', "check('it works', true);\n")).includes('always-true-test'));
+  check('depth-check names unused-param',
+    ruleOf(w('r6.mjs', 'export function handle(args) {\n  return 42;\n}\n')).includes('unused-param'));
+  check('...and a real file trips none of the six',
+    ruleOf(w('r7.mjs', 'export const add = (a, b) => a + b;\n')).length === 0);
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
