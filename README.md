@@ -10,6 +10,8 @@ Clone it, point it at your code, and the process runs itself. No special command
 ```bash
 git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git
 cd NexaClaude-Code-Workspace-Setup
+./setup.sh --check                 # what is missing; changes nothing
+./setup.sh --code ../my-app        # tools, plugins, config, then RUNS THE GATE
 node scripts/check.mjs        # 19 checks; should say "All checks pass"
 ```
 

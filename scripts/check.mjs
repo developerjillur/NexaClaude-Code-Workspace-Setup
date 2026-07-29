@@ -583,6 +583,39 @@ try {
   }
 }
 
+// ── declared is not installed ────────────────────────────────────────────────
+//
+// check.mjs verified that the settings DECLARED each plugin. setup.sh then found that four of
+// the eight were not on this machine at all — including ponytail, whose declaration this file
+// had been happily confirming. Reading a config's claim about the world is not checking the
+// world, and it is the same shape as every other control here that failed open.
+//
+// soft(), because a missing plugin does not corrupt anything — it quietly removes a capability
+// the contract assumes. That deserves a permanent nag, not a stopped session. `./setup.sh`
+// installs them.
+{
+  const declared = (() => {
+    try { return Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, '.claude', 'settings.json'), 'utf8')).enabledPlugins ?? {}); }
+    catch { return []; }
+  })();
+  if (!declared.length) soft('no plugins are declared', 'the review path and the laziness ladder both come from plugins');
+  else {
+    const list = spawnSync('claude', ['plugin', 'list'], { encoding: 'utf8' });
+    if (list.status !== 0) soft('could not ask claude which plugins are installed', 'declared-but-absent cannot be detected without it');
+    else {
+      const out = list.stdout ?? '';
+      const missing = declared.filter((p) => !out.includes(p));
+      const disabled = declared.filter((p) => {
+        const i = out.indexOf(p);
+        return i !== -1 && /disabled/.test(out.slice(i, i + 200));
+      });
+      if (missing.length) soft(`${missing.length} declared plugin${missing.length === 1 ? '' : 's'} not installed: ${missing.join(', ')}`, './setup.sh');
+      if (disabled.length) soft(`${disabled.length} declared plugin${disabled.length === 1 ? '' : 's'} installed but DISABLED: ${disabled.join(', ')}`, './setup.sh');
+      if (!missing.length && !disabled.length) ok(`all ${declared.length} declared plugins are installed and enabled`);
+    }
+  }
+}
+
 console.log('\n───────────────────────────────────────────────────────────');
 if (fail) {
   console.log(`  ${fail} failure${fail > 1 ? 's' : ''}${warn ? `, ${warn} warning${warn > 1 ? 's' : ''}` : ''}.`);
