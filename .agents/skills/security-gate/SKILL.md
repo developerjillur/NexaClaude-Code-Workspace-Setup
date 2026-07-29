@@ -15,8 +15,9 @@ shipped**, which is why they are worth checking rather than assuming.
 
 **1 · Fail closed, always.**
 An empty allowlist restricts *everyone*, not nobody. A missing config denies. The shipped bug:
-`TWILIO_ALLOWED_CALLERS` empty once meant "no restriction" — the unguarded state was the
-default at the exact moment a public number went live.
+an empty caller allowlist once meant "no restriction" rather than "restrict everyone" — so
+**the unguarded state was the default**, at the exact moment the service became publicly
+reachable. Opening it up should take an explicit `ALLOW_ALL=true`, never an empty string.
 
 **2 · Does the guard live in code, or is it asked for in a prompt?**
 A prompt is a request. A gate is a guarantee. If the rule matters, it cannot be a sentence the

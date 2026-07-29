@@ -32,7 +32,7 @@ machine fails loudly instead of silently losing the review path.
 | `ponytail@ponytail` | the laziness ladder, every turn — §5 |
 | `code-review` · `feature-dev` · `github` | Anthropic's own review, explorer/architect subagents, PR work |
 | `code-simplifier` · `security-guidance` | edit-time simplification and security warnings |
-| `twilio-developer-kit` · `hostinger` | this product's actual stack |
+| *your stack's plugins* | **add them yourself** — the SDK you call, the host you deploy to. None ship enabled, because a plugin declared for somebody else's product is a dependency nobody here asked for |
 | `typescript-lsp` | symbol-level navigation — serves JavaScript too |
 
 Always `--background`, then `/codex:result`. Always `--effort xhigh`. For a *plan* rather than

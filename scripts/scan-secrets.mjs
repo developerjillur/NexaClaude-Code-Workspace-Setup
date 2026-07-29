@@ -48,7 +48,9 @@ const ALLOW = [
   { file: 'scripts/council/context.mjs', why: 'the detection patterns themselves' },
   { file: 'scripts/scan-secrets.mjs', why: 'this file' },
   { file: 'scripts/hooks/save-prompt.mjs', why: 'the prompt scrubber patterns' },
-  { file: 'code/test/twilio-settings.mjs', why: 'AC0123…/ACfeedface… are obvious placeholders' },
+  // Nothing under code/ is allowlisted by default. Add your own entries here when a fixture
+  // legitimately contains a credential-SHAPED string — and write down why, because a line here
+  // is a claim somebody can check, which is the difference between an allowlist and a blindfold.
   { file: 'code/.env.example', why: 'documents key NAMES with empty values' },
 ];
 const allowed = (f) => ALLOW.find((a) => f.endsWith(a.file));

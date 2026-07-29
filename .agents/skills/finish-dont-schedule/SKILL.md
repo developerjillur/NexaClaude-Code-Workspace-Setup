@@ -16,7 +16,7 @@ job, a queue, a council that takes twenty minutes. Something whose state changes
 
 > ```json
 > { "delaySeconds": 300,
->   "reason": "Nothing external to wait on — next item is the Gas Safe finding…
+>   "reason": "Nothing external to wait on — next item is the certification finding…
 >              short tick so the research starts with clean context rather than mid-turn." }
 > ```
 

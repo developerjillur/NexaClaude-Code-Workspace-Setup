@@ -9,7 +9,7 @@
 //
 // A loop scheduled a five-minute wakeup with this reason:
 //
-//     "Nothing external to wait on — next item is the Gas Safe finding…
+//     "Nothing external to wait on — next item is the certification finding…
 //      short tick so the research starts with clean context rather than mid-turn."
 //
 // **It wrote "nothing external to wait on" and then set a timer.** Eight items on the to-do

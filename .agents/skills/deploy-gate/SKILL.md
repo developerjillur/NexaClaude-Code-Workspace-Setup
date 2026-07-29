@@ -73,18 +73,24 @@ and the deploy gate was unusable in the deployed environment for exactly that re
 
 ## 5 · The live checks that have each caught a real hole
 
+Write out your own table — one line per route, with the status it MUST return unauthenticated.
+The shape that matters is that every privileged route appears with the credential removed:
+
 ```
-/                        → 200
-/api/status              → 401
-/api/calls               → 401
-/call    (no cookie)     → 401     ← an unauthenticated socket was accepted and held
-/call    (evil Origin)   → 403
-/voice   (unsigned)      → 403
-/twilio  (?trusted=1)    → 403     ← this was once shell access from a query string
-/twilio  (forged ticket)  → 403
+/                          → 200
+/api/<read>                → 401
+/api/<write>               → 401
+/<socket>  (no cookie)     → 401     ← an unauthenticated socket was accepted and held open
+/<socket>  (evil Origin)   → 403
+/<webhook> (unsigned)      → 403
+/<webhook> (?trusted=1)    → 403     ← a query-string flag was once shell access
+/<webhook> (forged sig)    → 403
 ```
 
-**Every line is a hole that shipped.** They are not hypothetical checks.
+**The two annotated lines are holes that actually shipped** in the project this was extracted
+from. They are not hypothetical: a socket that authenticates on the first frame instead of the
+handshake, and a "trusted" query parameter that a caller supplies. Yours will be different, and
+you will only find them by curling the route with the credential removed.
 
 ## 6 · The boot banner
 
@@ -92,10 +98,11 @@ and the deploy gate was unusable in the deployed environment for exactly that re
 docker compose logs --tail=20 | grep -E "Budget|Allowlist|bind first"
 ```
 
-Read it, do not skim it. **A deploy-time bug was found exactly here**: the banner printed
-`process.env.TWILIO_ALLOWED_CALLERS` (empty) while the runtime read the database
-(populated) — so it announced "callers get the restricted agent" while a caller was getting
-the full one.
+Read it, do not skim it. **A deploy-time bug was found exactly here**: the banner printed an
+allowlist read from `process.env` (empty) while the runtime read the same setting from the
+database (populated) — so it announced "everyone gets the restricted mode" while users were
+getting the unrestricted one. **Two sources for one setting, and the banner reported the one
+nothing used.**
 
 ## If anything fails
 

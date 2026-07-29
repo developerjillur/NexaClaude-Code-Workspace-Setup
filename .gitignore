@@ -36,3 +36,7 @@ docs/.prompt-check-state.json
 /.claude/commands/council.md
 /.claude/commands/council-custom.md
 /.council-version
+
+# Council runs are YOUR deliberations, not this package's. One worked example lives in
+# docs/examples/council-run.md; everything else stays local.
+.council/runs/

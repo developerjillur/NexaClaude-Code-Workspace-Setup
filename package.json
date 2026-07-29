@@ -33,8 +33,10 @@
     "mutate": "node scripts/mutation-test.mjs",
     "secrets": "node scripts/scan-secrets.mjs",
     "reflect": "node scripts/reflect.mjs",
-    "gate": "npm run secrets && npm run check && npm test",
+    "gate": "npm run secrets && npm run leakage && npm run check && npm test",
     "council:sync": "node scripts/council-sync.mjs",
-    "council:check": "node scripts/council-sync.mjs --check"
+    "council:check": "node scripts/council-sync.mjs --check",
+    "leakage": "node scripts/no-product-leakage.mjs",
+    "audit": "node scripts/kill-audit.mjs"
   }
 }

@@ -1,3 +1,15 @@
+<!--
+A real council run, kept as the one worked example of what this produces.
+
+Four vendors, anonymised peer review, Borda with self-votes excluded, and the bias
+diagnostics printed above the scores rather than below them. This particular run is the
+one that found the kill audit was a survivor of its own audit — two members read the
+fail-open off the source independently, one made it an explicit falsifier, and running it
+confirmed it. See docs/DECISIONS.md, 2026-07-29.
+
+Your own runs land in .council/runs/ and are gitignored — this is an example, not a log.
+-->
+
 # Council — # The kill audit ran. Judge what it found, and what it still cannot see.
 
 You advised this workspace one round ago. Your words, which drove what follows:

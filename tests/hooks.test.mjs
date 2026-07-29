@@ -217,7 +217,7 @@ console.log('\n▸ save-prompt — records prompts without ever interrupting one
   // scan-secrets caught it in this file. Allowlisting it would have been the wrong fix:
   // test data derived from a real credential does not belong in a repo about to be pushed.
   const secrets = {
-    prompt: 'ssh root@203.0.113.10 Ex4mpleP4ssw0rd,x and TWILIO_AUTH_TOKEN=EXAMPLEtokenEXAMPLE99 '
+    prompt: 'ssh root@203.0.113.10 Ex4mpleP4ssw0rd,x and SERVICE_AUTH_TOKEN=EXAMPLEtokenEXAMPLE99 '
       + 'and callback?code=ac_EXAMPLEexampleEXAMPLEexample00 and sk-proj-EXAMPLEexampleEXAMPLE00',
   };
   check('exits 0 (a logger must never block a prompt)', run(s, secrets).code === 0);
@@ -796,7 +796,7 @@ console.log(`\n${'─'.repeat(72)}`);
   check('ignores a different tool entirely', fire({ command: 'echo hi' }, 'Bash') === 0);
 
   const REFUSED = [
-    ['the reported wakeup verbatim', { delaySeconds: 300, reason: 'Nothing external to wait on — next item is the Gas Safe finding, so a short tick so research starts with clean context rather than mid-turn.' }],
+    ['the reported wakeup verbatim', { delaySeconds: 300, reason: 'Nothing external to wait on — next item is the certification finding, so a short tick so research starts with clean context rather than mid-turn.' }],
     ['the same admission in other words', { delaySeconds: 300, reason: 'nothing to wait for, just pacing' }],
     ['"purely a pacing tick"', { delaySeconds: 600, reason: 'no external signal; purely a pacing tick' }],
     ['a short delay naming nothing outside', { delaySeconds: 180, reason: 'continuing the to-do list' }],
@@ -1324,6 +1324,114 @@ console.log(`\n${'─'.repeat(72)}`);
         r.status === 1 && new RegExp(name).test(r.stdout));
     } finally { fs.rmSync(probe, { force: true }); }
   }
+}
+
+// ── ci-code-paths — three states, and the third must not look like the first ──
+//
+// CI used to name one private repository in three jobs, with hardcoded `code/src`,
+// `code/tools`, `code/server.js`. That made this workspace un-adoptable by anyone else, and it
+// carried the failure this repo exists to prevent: **grep over a missing directory exits 2,
+// which reads as "no matches found"**, so a hygiene job went green having scanned nothing.
+//
+// So the answer is three-valued. "There is no code here" is a supported setup and passes.
+// "Code was configured and is not on disk" is a checkout that failed, and must refuse.
+{
+  console.log('\n▸ ci-code-paths — is the product code actually here');
+  const cp = path.join(ROOT, 'scripts', 'ci-code-paths.mjs');
+
+  /** A scratch workspace with the given config and, optionally, some code in it. */
+  const scratch = (cfg, files = {}, env = {}, emptyDirs = []) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cipaths-'));
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    fs.copyFileSync(cp, path.join(d, 'scripts', 'ci-code-paths.mjs'));
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify(cfg));
+    for (const [f, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
+      fs.writeFileSync(path.join(d, f), body);
+    }
+    for (const dir of emptyDirs) fs.mkdirSync(path.join(d, dir), { recursive: true });
+    const r = spawnSync('node', [path.join(d, 'scripts', 'ci-code-paths.mjs')],
+      { cwd: d, encoding: 'utf8', env: { ...process.env, CODE_REPO: '', ...env } });
+    fs.rmSync(d, { recursive: true, force: true });
+    return r;
+  };
+
+  // SILENT, twice — the direction every defect in this workspace came from.
+  check('a bare workspace with no code passes, and says so',
+    (() => { const r = scratch({ codeDirs: ['code'] });
+      return r.status === 0 && /workspace-only/.test(r.stdout); })());
+  check('...and a workspace WITH code passes, naming what it found',
+    (() => { const r = scratch({ codeDirs: ['code'] }, { 'code/index.js': 'export const a = 1;\n' });
+      return r.status === 0 && /product code: code/.test(r.stdout); })());
+
+  // REFUSES: configured and absent. Two ways to configure it, both must refuse.
+  check('ci-code-paths refuses when CODE_REPO is set and the checkout brought nothing',
+    (() => { const r = scratch({ codeDirs: ['code'] }, {}, { CODE_REPO: 'someone/thing' });
+      return r.status === 1 && /configured but not present/.test(r.stderr); })());
+  check('...and when workspace.config.json names directories this checkout does not have',
+    (() => { const r = scratch({ codeDirs: ['src', 'lib'] });
+      return r.status === 1 && /configured but not present/.test(r.stderr); })());
+
+  // An empty `code/` is not code. The documented install makes it a symlink, and a dangling
+  // one leaves a directory that exists and holds nothing — which would otherwise be scanned
+  // as "present" and find, correctly, no problems at all.
+  check('an empty code/ directory counts as absent, not as clean code',
+    (() => { const r = scratch({ codeDirs: ['code'] }, {}, {}, ['code']);
+      return r.status === 0 && /workspace-only/.test(r.stdout); })());
+}
+
+// ── no-product-leakage — this package must not know its own birthplace ───────
+//
+// The extraction leaked, and none of it was a security problem — it was an **adoptability**
+// problem, invisible to the person who wrote it because to them every one of those names read
+// as normal. CI named a private repository in three jobs; the secret scanner allowlisted a
+// path that exists in nobody else's repo; two skills taught real lessons in one vendor's
+// vocabulary.
+//
+// Silent case first, because that is the direction every defect here came from.
+{
+  console.log('\n▸ no-product-leakage — nothing from the project this came out of');
+  const leak = path.join(ROOT, 'scripts', 'no-product-leakage.mjs');
+
+  const scratch = (files) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leak-'));
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    fs.copyFileSync(leak, path.join(d, 'scripts', 'no-product-leakage.mjs'));
+    for (const [f, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
+      fs.writeFileSync(path.join(d, f), body);
+    }
+    const r = spawnSync('node', [path.join(d, 'scripts', 'no-product-leakage.mjs'), '--json'],
+      { cwd: d, encoding: 'utf8' });
+    fs.rmSync(d, { recursive: true, force: true });
+    let j = {}; try { j = JSON.parse(r.stdout || '{}'); } catch { /* status still tells us */ }
+    return { status: r.status, findings: j.findings ?? [] };
+  };
+
+  // SILENT: ordinary content, including words that merely resemble the forbidden ones.
+  check('no-product-leakage allows a clean tree',
+    scratch({ 'README.md': '# a workspace\n\nIt calls an API and deploys somewhere.\n' }).status === 0);
+  check('...and allows a project that legitimately uses a phone vendor SDK by name in prose',
+    scratch({ 'docs/x.md': 'We send SMS. Our provider has an auth token.\n' }).status === 0);
+
+  // REFUSES, once per class, and each names the file and the reason.
+  check('refuses the original private repository name',
+    (() => { const r = scratch({ '.github/workflows/x.yml': 'repository: someone/realtime-codex-calling-agent\n' });
+      return r.status === 1 && r.findings.some((f) => /private repository/.test(f.why)); })());
+  check('refuses a product name left in a skill',
+    (() => { const r = scratch({ 'a/SKILL.md': 'NexaCall does this.\n' });
+      return r.status === 1 && r.findings.some((f) => f.file === 'a/SKILL.md'); })());
+  check('refuses a stack-specific plugin declaration',
+    scratch({ '.claude/settings.json': '{"enabledPlugins":{"hostinger":true}}' }).status === 1);
+
+  // The allowlist is a claim someone can check, not a blindfold: the credential FORMATS in the
+  // scanner are standard shapes any project can leak, and removing them to remove a word would
+  // make the scanner worse for everyone.
+  check('...but the credential-format files are allowlisted, with a reason',
+    /Twilio credential FORMATS/.test(fs.readFileSync(leak, 'utf8')));
+  check('...and it reports what it scanned, so an empty run cannot read as a clean one',
+    scratch({ 'README.md': '# x\n' }).status === 0
+      && /scanned/.test(spawnSync('node', [leak, '--json'], { cwd: ROOT, encoding: 'utf8' }).stdout));
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);
