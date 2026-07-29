@@ -1236,6 +1236,63 @@ console.log(`\n${'─'.repeat(72)}`);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── check.mjs — the deploy gate, which had no fixture of its own ─────────────
+//
+// The audit's scope report named it unaudited, and a council split on how much that matters:
+// the **operational** priority, because it is the deploy gate — against needs-it-least, because
+// its own refusal protects a number in a doc header. Both are about different risks, and the
+// one that decides it is that **check.mjs DELEGATES**. A lost child verdict silently disables
+// another control's findings without touching that control at all, so the mutation is invisible
+// from anywhere except here.
+//
+// The oracle has to name the missing gate, not observe "exit 1 somewhere" — otherwise deleting
+// the card-gate delegation is masked by any other failure, which is the confounding law again,
+// one level up.
+//
+// This plants a deficient card on the REAL board, because check.mjs reads the whole workspace
+// and a scratch copy would fail for twenty unrelated reasons. It is removed in a `finally` and
+// again on `exit`: a test that can leave a card on the board is a test that changes WIP.
+{
+  console.log('\n▸ check.mjs — the gate that delegates');
+  const gate = path.join(ROOT, 'scripts', 'check.mjs');
+  const planted = path.join(ROOT, 'board', '1-spec', `.probe-${process.pid}.md`);
+  const cleanup = () => { try { fs.rmSync(planted, { force: true }); } catch { /* already gone */ } };
+  process.on('exit', cleanup);
+
+  const before = spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+  check('check.mjs passes on this workspace before anything is planted', before.status === 0);
+
+  try {
+    // A card at 1-spec answering none of discovery-first's five questions. Nothing else about
+    // the workspace changes — one variable.
+    fs.writeFileSync(planted, '# probe — a card that skipped discovery\n\nStraight to spec.\n');
+    const after = spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+    check('check.mjs refuses when a card reaches 1-spec unanswered', after.status === 1);
+    check('...and names card-gate as the gate that refused, not merely "a failure"',
+      /card-gate/.test(after.stdout));
+    check('...and reports the total unanswered first, rather than only the ones it prints',
+      /card-gate: \d+ unanswered/.test(after.stdout));
+  } finally {
+    cleanup();
+  }
+
+  const restored = spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+  check('...and the workspace is green again once the probe is removed', restored.status === 0);
+
+  // guard-coverage's findings reach the gate too, and by a different path — the loop over
+  // out.findings rather than a count. Proved with the same half-probe shape used above.
+  {
+    const name = ['zz', String(process.pid), 'gateprobe'].join('-');
+    const probe = path.join(ROOT, 'scripts', `${name}.mjs`);
+    fs.writeFileSync(probe, '#!/usr/bin/env node\nprocess.exit(1);\n');
+    try {
+      const r = spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
+      check('check.mjs refuses an untested control, and names it',
+        r.status === 1 && new RegExp(name).test(r.stdout));
+    } finally { fs.rmSync(probe, { force: true }); }
+  }
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

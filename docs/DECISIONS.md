@@ -315,3 +315,32 @@ hooks.test    200 passed, 0 failed
 is the deploy gate. If the next audit round adds mutations for `check.mjs` and finds no
 survivors on the first run, that is either good news or evidence the mutations were written
 from the fixtures — the record above is the only thing that makes the difference checkable.
+
+### Follow-on the same day — the deploy gate, which the council argued about
+
+`check.mjs` was the largest name on the unaudited list. The council split on it: the
+**operational** priority, because it is the deploy gate — against **needs it least**, because
+its own refusal protects a number in a doc header. What settled it is neither: **check.mjs
+delegates.** A lost child verdict silently disables another control's findings without touching
+that control at all, so the defect is invisible from anywhere except the gate's own fixture.
+
+Three deletions, all now caught: card-gate's findings stop being counted, guard-coverage's stop
+being reported, and the gate prints its failures and then exits 0 — **the eleventh fail-open
+this workspace has had, deliberately reintroduced to check that it stays dead.**
+
+The oracle follows the advice literally — *"it must name the missing gate, not merely observe
+exit 1 somewhere."* The fixture plants a card that skipped discovery on the real board, asserts
+the refusal says **card-gate** by name, asserts the total is reported before the truncated list,
+and confirms the workspace goes green again once it is removed. Anything weaker would let an
+unrelated failure mask the deletion, which is the confounding law one level up.
+
+```
+kill-audit    22 caught, 0 survived, 0 unresolved, of 22 selected
+scope         9 of 14 refusing controls carry mutations  (was 5 of 14 when the audit began)
+hooks.test    206 passed, 0 failed
+```
+
+Still unaudited, and named on every run: `council-sync`, `kill-audit`, `mutate-controls`,
+`mutation-test`, `reflect`. Two of those (`mutate-controls`, `mutation-test`) are candidates
+for **retirement rather than coverage**, if `kill-audit` is shown to subsume them — which is a
+measurement nobody has taken, and the reason they are still here.

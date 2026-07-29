@@ -147,6 +147,30 @@ const KILLS = [
     from: '  if (!real) bad(',
     to: '  if (!real) ok(' },
 
+  // ── check.mjs: the deploy gate, which delegates to the others ─────────────
+  //
+  // Named by the scope report as unaudited, and the council split on it: one member called it
+  // the **operational** priority because it is the deploy gate, another said it needs coverage
+  // **least** because its own refusal only protects a number in a doc header. Both are right
+  // about different things — what matters here is that it DELEGATES, so a lost child verdict
+  // silently disables another control's findings without touching that control at all.
+  //
+  // The advice taken literally: *"delete each child-gate invocation, invert each propagated
+  // status, and make a child crash. The oracle must name the missing gate, not merely observe
+  // exit 1 somewhere."*
+  { id: 'check-cardgate', file: 'scripts/check.mjs',
+    what: 'check.mjs stops counting card-gate findings — cards reach any stage unanswered',
+    fromRe: /\n(\s*)if \(n\) \{\n(\s*)\/\/ The total is printed FIRST/,
+    to: '\n$1if (false) {\n$2// The total is printed FIRST' },
+  { id: 'check-coverage', file: 'scripts/check.mjs',
+    what: 'check.mjs stops reporting guard-coverage findings — an untested control passes the gate',
+    from: '  else for (const f of out.findings) {\n    bad(`${f.name}: ${f.detail}`',
+    to: '  else for (const f of []) {\n    bad(`${f.name}: ${f.detail}`' },
+  { id: 'check-exit', file: 'scripts/check.mjs',
+    what: 'check.mjs prints its failures and then exits 0 — the eleventh fail-open, restored',
+    fromRe: /\n(\s*)process\.exit\(1\);\n\}\nconsole\.log\(`  All checks pass/,
+    to: '\n$1process.exit(0);\n}\nconsole.log(`  All checks pass' },
+
   // ── guard-coverage ─────────────────────────────────────────────────────────
   { id: 'coverage-silent', file: 'scripts/guard-coverage.mjs',
     what: 'guard-coverage stops requiring a SILENT case — the direction every defect came from',
