@@ -143,7 +143,15 @@ const realDirs = (d) => (fs.existsSync(d) ? fs.readdirSync(d) : [])
   .filter((n) => !n.startsWith('._') && n !== '.DS_Store');
 for (const s of realDirs(skillDir)) {
   const p = path.join(skillDir, s, 'SKILL.md');
-  if (!fs.existsSync(p)) { bad(`skill ${s} has no SKILL.md`, 'the directory alone does nothing'); continue; }
+  if (!fs.existsSync(p)) {
+    // A dangling council link is not a broken skill — it is a council nobody has fetched
+    // yet, and the answer is setup, not a missing file. On a fresh clone this fired as a
+    // hard failure and pointed at the wrong thing entirely.
+    if (s === 'council' && !fs.existsSync(path.join(ROOT, '.council-src'))) {
+      soft('the council skill arrives with the council', 'npm run council:sync');
+    } else bad(`skill ${s} has no SKILL.md`, 'the directory alone does nothing');
+    continue;
+  }
   const head = fs.readFileSync(p, 'utf8').slice(0, 600);
   if (!/^---[\s\S]*?\bname:/.test(head)) bad(`skill ${s} has no name in frontmatter`, 'it cannot be invoked');
   if (!/^---[\s\S]*?\bdescription:/.test(head)) bad(`skill ${s} has no description`,
@@ -542,11 +550,23 @@ try {
       const p = path.join(ROOT, d);
       return fs.existsSync(p) ? fs.readdirSync(p).filter((f) => f.endsWith('.mjs') && !f.startsWith('._')).length : 0;
     };
+    // The council is FETCHED, not vendored, so before setup has run its scripts are
+    // legitimately absent. Counting them anyway produced "README says 24 scripts; there are 9"
+    // on a fresh clone — which sends a new user to edit the README to match a state that is
+    // temporary and correct. **A gate that names the wrong cause is worse than a quiet one:
+    // it points you at the wrong file with total confidence.**
+    const councilHere = fs.existsSync(path.join(ROOT, 'scripts', 'council', 'council.mjs'));
     const counts = [
-      ['scripts', real('scripts') + real('scripts/council'), /### (\d+) scripts —/],
-      ['council scripts', real('scripts/council'), /\| `council\/\*\.mjs` \| (\d+) files/],
-      ['skills', fs.existsSync(path.join(ROOT, '.agents/skills'))
-        ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0,
+      ...(councilHere ? [
+        ['scripts', real('scripts') + real('scripts/council'), /### (\d+) scripts —/],
+        ['council scripts', real('scripts/council'), /\| `council\/\*\.mjs` \| (\d+) files/],
+      ] : []),
+      // The council skill arrives with the council, so before setup the count is one short by
+      // design. Counted as if it were there — the README states the complete workspace, and
+      // it is the incomplete state that is temporary.
+      ['skills', (fs.existsSync(path.join(ROOT, '.agents/skills'))
+        ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0)
+        + (councilHere ? 0 : 1),
         /### (\d+) skills —/],
       ['board stages', fs.existsSync(path.join(ROOT, 'board'))
         ? fs.readdirSync(path.join(ROOT, 'board')).filter((d) => !d.startsWith('._')).length : 0, null],

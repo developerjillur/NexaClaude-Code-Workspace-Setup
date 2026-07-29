@@ -376,6 +376,30 @@ console.log(`\n${'─'.repeat(72)}`);
 // Caught by cloning into a clean directory and firing the guard, not by reading the code.
 {
   console.log('\n▸ The board survives a clone');
+
+  // A fresh clone has no council — it is fetched, not vendored — and the gate used to report
+  // that as three failures blaming the README: "says 24 scripts, there are 9". Every one named
+  // the wrong cause. **A gate that points at the wrong file with total confidence is worse
+  // than one that stays quiet**, so the counts that depend on the council are not checked
+  // until it is there, and the skill link gets a soft "run setup" instead of a hard failure.
+  {
+    const links = ['scripts/council', '.agents/skills/council', '.council-src'];
+    const saved = [];
+    for (const l of links) {
+      const p = path.join(ROOT, l);
+      try { saved.push([p, fs.readlinkSync(p)]); fs.unlinkSync(p); } catch { /* not linked */ }
+    }
+    try {
+      if (saved.length) {
+        const r = spawnSync('node', [path.join(ROOT, 'scripts', 'check.mjs')], { cwd: ROOT, encoding: 'utf8' });
+        check('the gate passes on a clone where the council is not fetched yet', r.status === 0);
+        check('...and says so, rather than blaming the README', /council/i.test(r.stdout));
+      }
+    } finally {
+      for (const [p, target] of saved) { try { fs.symlinkSync(target, p); } catch { /* back already */ } }
+    }
+  }
+
   const STAGES = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review',
     '5-verify', '6-done', '7-operate'];
   for (const st of STAGES) {

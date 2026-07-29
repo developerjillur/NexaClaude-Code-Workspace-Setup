@@ -194,17 +194,30 @@ if (input?.tool_name === 'Bash') {
 
   // Redirection, in-place edits, and the copy/move family — each followed by a path we care
   // about. Deliberately anchored on the WRITE verb, so `grep code/src/x.js` stays allowed.
+  // ── quoted paths, because this drive's name has a space in it ──────────────
+  //
+  // Every pattern below used `[^\s"'|;&]+`, which stops at the first space. So
+  // `cp /tmp/x.js "/Volumes/T7 Shield/…/src/tools.js"` matched nothing at all and the write
+  // went through — a hole, not a false positive, and the one direction that actually matters.
+  //
+  // A quoted argument is one token no matter what is inside it. Each pattern now takes
+  // `"…"`, `'…'` or a bare run, in that order, and the helper strips the quotes.
+  const Q = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s"'|;&<>]+))`;
+  /** The first non-empty capture group in a match, which is the token whichever form it took. */
+  const tok = (m) => m.slice(1).find((g) => g != null && g !== '') ?? '';
+
+  const ARG = String.raw`(?:"[^"]*"|'[^']*'|[^\s"'|;&]+)`;   // one argument, quoted or not
   const writes = [
-    /(?:^|[\s;&|])(?:>>?)\s*("?)([^\s"'|;&]+)\1/g,
-    /(?:^|[\s;&|])sed\s+(?:-[^\s]*\s+)*-i(?:\s+''|\s+"")?\s+(?:-[^\s]*\s+)*(?:"[^"]*"|'[^']*'|\S+)\s+("?)([^\s"'|;&]+)\1/g,
+    new RegExp(String.raw`(?:^|[\s;&|])(?:>>?)\s*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])sed\s+(?:-[^\s]*\s+)*-i(?:\s+''|\s+"")?\s+(?:-[^\s]*\s+)*${ARG}\s+${Q}`, 'g'),
     // cp / mv / install write to their LAST argument…
-    /(?:^|[\s;&|])(?:cp|mv|install)\s+(?:-[^\s]*\s+)*(?:\S+\s+)*("?)([^\s"'|;&]+)\1/g,
+    new RegExp(String.raw`(?:^|[\s;&|])(?:cp|mv|install)\s+(?:-[^\s]*\s+)*(?:${ARG}\s+)*${Q}`, 'g'),
     // …and `tee` writes to its FIRST. Folding it in with the others meant
     // `tee code/src/z.js < input` had its destination read as `input`, and the write to
     // product code was allowed. Found by a probe that ran the commands instead of reading
     // the pattern.
-    /(?:^|[\s;&|])tee\s+(?:-[^\s]*\s+)*("?)([^\s"'|;&<>]+)\1/g,
-    /(?:^|[\s;&|])(?:truncate|dd)\s[^;&|]*\bof=("?)([^\s"'|;&]+)\1/g,
+    new RegExp(String.raw`(?:^|[\s;&|])tee\s+(?:-[^\s]*\s+)*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])(?:truncate|dd)\s[^;&|]*\bof=${Q}`, 'g'),
   ];
 
   // A bare word is not a path, and neither is anything still carrying shell syntax.
@@ -251,8 +264,11 @@ if (input?.tool_name === 'Bash') {
   const targets = new Set();
   for (const re of writes) {
     for (const m of cmd.matchAll(re)) {
-      if (!m[2] || !looksLikePath(m[2])) continue;
-      targets.add(path.isAbsolute(m[2]) ? m[2] : path.resolve(base, m[2]));
+      // tok() picks whichever of the three quote forms matched, so a path with a space in it
+      // is one token rather than the fragment before the space.
+      const raw = tok(m);
+      if (!raw || !looksLikePath(raw)) continue;
+      targets.add(path.isAbsolute(raw) ? raw : path.resolve(base, raw));
     }
   }
   const guarded = [...targets].find(isCode);
