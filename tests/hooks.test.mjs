@@ -454,6 +454,36 @@ console.log(`\n${'─'.repeat(72)}`);
 
   check('a deliberate override still works', fire('git checkout .', { NEXA_ALLOW_DISCARD: '1' }).code === 0);
 
+  // ── the override the refusal ACTUALLY tells you to use ──────────────────────
+  //
+  // The env var is only reachable when it is exported into the session. As a hook, this runs
+  // in a process the agent spawns BEFORE your command, so an inline
+  // `NEXA_ALLOW_DISCARD=1 git checkout …` sets the variable for a process that does not exist
+  // yet — and the refusal used to instruct exactly that. **An escape hatch that cannot be
+  // operated is not an escape hatch**, and a control nobody can live with is a control that
+  // gets deleted rather than obeyed. Found by following the instruction and being refused.
+  //
+  // The marker file is consumed on use, so it cannot become a permanently-on switch the way an
+  // exported variable does.
+  //
+  // The marker lives at the WORKSPACE root, not in the repo being operated on: it is the
+  // workspace's control, and a per-repo marker would let any checkout disarm it.
+  {
+    const marker = path.join(ROOT, '.nexa-allow-discard');
+    try {
+      fs.writeFileSync(marker, '');
+      check('a .nexa-allow-discard marker is honoured', fire('git checkout .').code === 0);
+      check('...and consumed, so it cannot be left switched on', !fs.existsSync(marker));
+      check('...and the next discard is refused again', fire('git checkout .').code === 2);
+
+      const why = fire('git checkout .').stderr;
+      check('the refusal names the override that works', /touch \.nexa-allow-discard/.test(why));
+      check('...and says plainly that the inline env var does not',
+        /does NOT work/.test(why) && /separate\s*\n?\s*process/.test(why));
+      check('...and offers the non-destructive way back', /git show HEAD:/.test(why));
+    } finally { fs.rmSync(marker, { force: true }); }
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 

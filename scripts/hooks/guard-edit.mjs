@@ -193,7 +193,29 @@ if (input?.tool_name === 'Bash') {
       }
     }
   }
-  if (sawDiscard && process.env.NEXA_ALLOW_DISCARD !== '1') {
+  // ── the override has to work where the guard actually fires ─────────────────
+  //
+  // For a long time the only escape was `NEXA_ALLOW_DISCARD=1`, and the refusal said so. **It
+  // cannot work.** This runs as a PreToolUse hook, in a process the agent spawns *before* your
+  // command; an inline `NEXA_ALLOW_DISCARD=1 git checkout …` sets that variable for `git`, in a
+  // process that does not exist yet. The guard printed an instruction that could not be
+  // followed — discovered by following it, twice, and being refused both times.
+  //
+  // A refusal with an unusable escape hatch is the same category of failure as a fail-open: it
+  // is a control nobody can actually live with, and living with it is how it stays switched on.
+  //
+  // So there is a marker file, which the hook CAN see. It is **consumed on use** — deleted the
+  // moment it is honoured — so it cannot be created once and left on, which is what an
+  // environment variable in a shell profile becomes.
+  const flag = path.join(ROOT, '.nexa-allow-discard');
+  let allowed = process.env.NEXA_ALLOW_DISCARD === '1';
+  if (!allowed && fs.existsSync(flag)) {
+    try { fs.rmSync(flag); } catch { /* honoured anyway; the warning below is the record */ }
+    console.error('⚠ .nexa-allow-discard was present — honoured once, and removed.');
+    allowed = true;
+  }
+
+  if (sawDiscard && !allowed) {
     // Ask git what would actually be lost. `--porcelain` prints nothing for a clean path, so
     // silence here means the command destroys nothing and is allowed through untouched.
     const { spawnSync } = await import('node:child_process');
@@ -213,7 +235,13 @@ if (input?.tool_name === 'Bash') {
         `board/6-done/004-pricing-restored.md. A stray edit of your own is not worth\n` +
         `someone else's uncommitted work.\n\n` +
         `Instead: commit or stash by name first, or undo your own edit by rewriting the\n` +
-        `file. If you have read the list above and still mean it: NEXA_ALLOW_DISCARD=1.`,
+        `file — \`git show HEAD:path > path\` restores it as a WRITE rather than a discard,\n` +
+        `and leaves everything else alone.\n\n` +
+        `If you have read the list above and still mean it:\n` +
+        `  touch .nexa-allow-discard   # honoured once, then deleted\n\n` +
+        `(\`NEXA_ALLOW_DISCARD=1 git checkout …\` does NOT work: this hook runs in a separate\n` +
+        `process, before your command exists, so an inline variable never reaches it. It is\n` +
+        `still honoured when exported into the session environment.)`,
       );
     }
     process.exit(0); // clean path — the command destroys nothing

@@ -40,3 +40,6 @@ docs/.prompt-check-state.json
 # Council runs are YOUR deliberations, not this package's. One worked example lives in
 # docs/examples/council-run.md; everything else stays local.
 .council/runs/
+
+# The one-shot discard override — never committed, consumed on use.
+.nexa-allow-discard

@@ -20,10 +20,6 @@ refused.
   and **configured-but-missing, which refuses**. The old CI also carried the failure this
   workspace exists to prevent: `grep` over a missing directory exits 2, which reads as "no
   matches found", so a hygiene job went green having scanned nothing.
-- **`setup.sh` was committed mode `100644`.** The first line of the install instructions
-  answered `permission denied` on every fresh clone. Fixed, and asserted against the **git
-  index** rather than the working tree — a local `chmod +x` fixes your copy and nobody else's,
-  which is precisely how it survived.
 - **`mutation-test` shipped four mutations against files only the original product has.** For
   anyone else they resolved to nothing, it printed "skipping", and it **reported success having
   tested zero invariants**. Mutations are data now (`mutations.json`, with
@@ -104,17 +100,49 @@ nobody here owns is one nobody has watched work.
   five** because their code had moved and its patterns had not, reporting "5 caught, 0 survived"
   having tested three.
 
+### The install path, which nobody had ever tested
+
+Everything below was found by **doing the install into a scratch project**, not by reading the
+script. The workspace was correct on the machine it was written on and wrong everywhere else —
+the same shape as three earlier defects here.
+
+- **`setup.sh` was committed mode `100644`.** The first line of the install instructions
+  answered `permission denied` on every fresh clone. Asserted against the **git index** now, not
+  the working tree: a local `chmod +x` fixes your copy and nobody else's, which is exactly how
+  it survived a public release.
+- **The test suite only passed in the default configuration — the one nobody installs into.**
+  `PRODUCT` was hardcoded to `code/src/…` and thirteen shell fixtures spelled it out inline, so
+  the moment somebody ran `./setup.sh --code ../their-repo` the suite reported **26 failures**,
+  every one of them the guard behaving correctly on a path that was no longer product code. A
+  new user's first experience was: install, watch the tests fail, be told the workspace is "not
+  ready". Everything reads `workspace.config.json` now, exactly as the guard does.
+- **`setup.sh` judged a suite by scraping its stdout** for `N passed, M failed`, ignoring the
+  exit code. `guard-paths-with-spaces.mjs` prints `6/6 passed`, so **every install reported a
+  green suite as a failure.** The inverse was equally available and worse — demonstrated rather
+  than argued:
+
+  ```
+  $ printf 'console.log("7/7 passed"); process.exit(1);' > tests/zz-liar.mjs
+  $ node tests/zz-liar.mjs; echo $?
+  7/7 passed
+  1
+  ```
+
+  The old parser reads that as ok. Same shape as the CI job that grepped a missing directory
+  and read exit 2 as "no matches found". **A verdict is an exit code.**
+
+Verified end to end, from GitHub, into a fresh project: `13 ok · 1 skipped · 0 failed`, and the
+guard refuses an edit to the new project's source on the spot.
+
 ### Also
 
 - `verify-claims` refused a card citing `npm run test:offline` — its own product's test command,
   run and pasted — because it consulted only the workspace's `package.json`. A card documenting
   the exact command somebody ran was called a false claim. Both `package.json` files are
   consulted now, and the refusal names which it read.
-- New assertions for the install path: `setup.sh` executable in the index, every `npm run` the
-  README instructs is a real script, every `node <script>` it instructs exists in a bare clone.
 
 ```
-hooks.test.mjs   262 passed, 0 failed
+hooks.test.mjs   265 passed, 0 failed
 kill-audit        23 caught, 0 survived, 0 unresolved, of 23 selected
 guard-coverage    11 of 15 controls declare rules, 50 rules named
 check.mjs         all pass
