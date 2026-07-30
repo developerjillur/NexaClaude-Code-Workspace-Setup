@@ -291,6 +291,63 @@ exercises a module-not-found crash — which still exits non-zero, and would the
 **Green:** `hooks` 276/0 · `bootstrap` 63/0 · `spaces` 6/6 · `check.mjs` all pass ·
 `kill-audit` all caught · `validate --strict` ✔ ✔.
 
+---
+
+## 4 · Review  *(different model than the builder)*
+
+**Reviewer: GPT-5.6 via Codex CLI**, `read-only` sandbox, `xhigh` effort, against committed
+snapshot `4ff2f80`. **Verdict: BACK TO BUILD.**
+
+| Axis | Score | Note |
+|---|---|---|
+| Matches the spec | **2** | acceptance criteria still said install writes nothing; the named packaging test did not exist |
+| Nothing invented | **1** | *"somebody else's repo is a no-op"*, *"nothing existing was modified"*, complete undo, symlink-safe wrappers — all contradicted by the code |
+| Nothing duplicated | 3 | permission merging could create semantically duplicate rules |
+| Nothing extra | **2** | the walk-up heuristic was speculative and caused the wrong-root failure |
+| Fits the file | 3 | comments described behaviour the code did not provide |
+
+**Three axes below 3. The gate refused, correctly.** The most valuable line in it is
+*"nothing invented: 1"* — every one of those four was a sentence I had written in a comment or a
+banner and had not made true.
+
+### What it found, and what happened to each
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | Rejected repositories are still modified — `save-prompt`, `prompt-check`, `pre-compact` write `docs/` regardless of `decide()` | **fixed** — writers now require `isAdoptedWorkspace`; found independently by 5-verify minutes earlier |
+| 2 | `workspaceAbove` outranks `CLAUDE_PROJECT_DIR`, so `--plugin-dir` from another repo guards the wrong tree | **fixed** — environment now wins |
+| 3 | `git worktree add` checkouts are refused though they are a legitimate project root | **accepted, not fixed** — see below |
+| 4a | A user's `allow` silently loses to our appended `deny` | **fixed** — ours is skipped and the conflict reported |
+| 4b | `Bash(git push *)` vs `Bash(git push:*)` duplicated | **fixed** — normalised before dedup |
+| 4c | A merged `settings.local.json` was never recorded, so `/nexa-workspace:remove` left our rules behind | **fixed** — recorded as `modified`, restored from backup on removal |
+| 5 | `bin/` wrappers break when the command is a symlink on PATH | **fixed** — `$0` resolved through links |
+| 6 | `tests/plugin-packaging.test.mjs` was named as proof and did not exist | **fixed** — written, 18/0 |
+
+**Finding 3 is refused deliberately, and the disagreement is recorded rather than averaged.**
+Codex is right that a linked worktree is the user's real project root. The council was equally
+explicit that scaffolding one pollutes a checkout sharing history with the primary. Two models,
+opposite conclusions, and no measurement settles it — so the conservative reading stands and the
+cost is stated: **`git worktree add` checkouts are not adopted, and the user must run the
+workspace from the primary.**
+
+**Finding 1 was found twice, independently, within minutes** — by 5-verify as `?? docs/` and by
+Codex by reading. That is the §10 claim doing exactly what it says: two readings, one of them
+not mine.
+
+### Security gate (`skills/security-gate`)
+
+1. **Fail closed** — `guard-edit` refuses `project-root-unknown`; writers exit on unadopted trees
+2. **Guard in code, not prompt** — every control is an exit code, none is an instruction
+3. **Authorisation before the resource** — `decide()` runs before any write
+4. **Secrets scrubbed on the way out** — `save-prompt` unchanged, and now writes nowhere unadopted
+5. **Write confirmed before it happens** — create-only; atomic `rename`; backup before merge
+6. **Generated/third-party privileges** — the one symlink escaping the plugin is the fetched
+   council, asserted gitignored by `plugin-packaging`
+7. **Tenant resolved at the edge** — n/a, no multi-tenant surface
+
+**Re-verified after the fixes:** `hooks` 276/0 · `bootstrap` 83/0 · `packaging` 18/0 ·
+`spaces` 6/6 · `check.mjs` all pass · `validate --strict` ✔.
+
 ### 003 — the zero-command bootstrap
 
 `plugin/scripts/bootstrap.mjs`. Opening Claude Code in a clean repository root is the whole of

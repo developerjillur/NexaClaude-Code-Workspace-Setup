@@ -22,11 +22,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
 import { execSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT } = projectRoot();
+// Same consent rule as the other writers — it persists docs/.prompt-check-state.json.
+if (!isAdoptedWorkspace(ROOT)) process.exit(0);
 const notes = [];
 
 const run = (cmd, cwd = ROOT) => {

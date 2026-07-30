@@ -205,6 +205,64 @@ console.log('\n▸ the settings ladder — the merge is the last resort, not the
   check('...and that is reported, not silent', res.settings.conflicts.length > 0);
 }
 
+// ── the ways a merge can weaken a user without deleting anything ─────────────
+//
+// All three found by a second-model review, and none of them removes a line. That is what
+// makes them the dangerous kind: the user's file still reads exactly as they wrote it.
+console.log('\n▸ the merge must not quietly overrule the user');
+{
+  // deny is evaluated BEFORE allow. Appending our deny for something they explicitly allowed
+  // leaves their rule present and completely ineffective — worse than deleting it, because
+  // deleting it would at least be visible in a diff.
+  const theirs = { permissions: { allow: ['Read(./code/.env)'] } };
+  const { merged, conflicts } = mergeSettings(theirs, {
+    permissions: { deny: ['Read(./code/.env)', 'Read(./code/data/**)'] },
+  });
+  check('a deny we would add is NOT added when the user explicitly allows it',
+    !merged.permissions.deny?.includes('Read(./code/.env)'), JSON.stringify(merged.permissions.deny));
+  check('...their allow survives untouched', merged.permissions.allow.includes('Read(./code/.env)'));
+  check('...and the conflict is reported rather than resolved silently',
+    conflicts.some((c) => c.includes('Read(./code/.env)')), JSON.stringify(conflicts));
+  check('...while our other rules are still added',
+    merged.permissions.deny.includes('Read(./code/data/**)'));
+}
+{
+  // `Bash(git push *)` and `Bash(git push:*)` are the same rule in two spellings. Exact-string
+  // dedup adds a second copy — noise in the file a user reads when working out why they were
+  // blocked.
+  const { merged } = mergeSettings(
+    { permissions: { ask: ['Bash(git push *)'] } },
+    { permissions: { ask: ['Bash(git push:*)'] } },
+  );
+  check('two spellings of the same rule do not both end up in the file',
+    merged.permissions.ask.length === 1, JSON.stringify(merged.permissions.ask));
+  check('...and the spelling kept is the user\'s own',
+    merged.permissions.ask[0] === 'Bash(git push *)');
+}
+{
+  // The banner promises "nothing that already existed was modified — to undo all of it".
+  // A merged settings.local.json IS modified, and was recorded nowhere, so removal left our
+  // rules behind while the promise stayed on screen.
+  const r = repo();
+  fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(r, '.claude', 'settings.json'), '{}\n');
+  const original = `${JSON.stringify({ permissions: { deny: ['Read(./mine/**)'] } }, null, 2)}\n`;
+  fs.writeFileSync(path.join(r, '.claude', 'settings.local.json'), original);
+  const res = boot(r);
+  check('the merged file is recorded as MODIFIED, not created',
+    res.modified?.some((m) => m.file.endsWith('settings.local.json')), JSON.stringify(res.modified));
+  check('...and our rules really are in it before removal',
+    fs.readFileSync(path.join(r, '.claude', 'settings.local.json'), 'utf8').includes('Read(./code/.env)'));
+
+  const rm = remove(r);
+  check('removal RESTORES it to the user\'s original bytes',
+    fs.readFileSync(path.join(r, '.claude', 'settings.local.json'), 'utf8') === original,
+    fs.readFileSync(path.join(r, '.claude', 'settings.local.json'), 'utf8').slice(0, 100));
+  check('...and says which files it restored', rm.restored?.length > 0);
+  check('...leaving no .pre-nexa backup behind',
+    !fs.existsSync(path.join(r, '.claude', 'settings.local.json.pre-nexa')));
+}
+
 // ── manifest, removal, tombstone ─────────────────────────────────────────────
 console.log('\n▸ the manifest lives outside the repo, so removal is knowable');
 {
@@ -224,6 +282,46 @@ console.log('\n▸ the manifest lives outside the repo, so removal is knowable')
   check('a tombstoned repository is never scaffolded again',
     after.act === false && /tombstone/.test(after.reason), after.reason);
   check('...silently, because the user already said no', after.level === 'silent');
+}
+
+// ── consent, for the hooks that WRITE ────────────────────────────────────────
+//
+// The bootstrap refuses a repository it should not adopt. That refusal is worth nothing if the
+// writing hooks then write there anyway — and they did. 5-verify caught `?? docs/` appearing in
+// a fixture whose `board` belonged to somebody else: `save-prompt` had started a prompt log in
+// a repository we had explicitly declined.
+//
+// Location is not consent. The marker is `workspace.config.json`, which only the bootstrap
+// writes, so "did the user get adopted" has exactly one answer on disk.
+console.log('\n▸ the writing hooks — silent in a repository that was never adopted');
+{
+  const { spawnSync } = await import('node:child_process');
+  const hooks = path.join(ROOT, 'scripts', 'hooks');
+  const un = repo();                       // a git repo, no workspace.config.json
+  const yes = repo();
+  fs.writeFileSync(path.join(yes, 'workspace.config.json'), '{"codeDirs":["code"]}');
+
+  const fire = (script, cwd) => spawnSync('node', [path.join(hooks, script)], {
+    input: JSON.stringify({ prompt: 'hello', session_id: 'verify' }),
+    cwd, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd },
+  });
+
+  for (const script of ['save-prompt.mjs', 'prompt-check.mjs', 'session-end.mjs']) {
+    fire(script, un);
+  }
+  check('REFUSES to write: no docs/ appears in an unadopted repository',
+    !fs.existsSync(path.join(un, 'docs')), fs.existsSync(path.join(un, 'docs'))
+      ? fs.readdirSync(path.join(un, 'docs')).join(', ') : '');
+  check('...and nothing else was created there either',
+    fs.readdirSync(un).filter((f) => f !== '.git').length === 0,
+    fs.readdirSync(un).join(', '));
+
+  // THE SILENT CASE — in a workspace that WAS adopted, the log must still be written, or the
+  // fix has simply broken the audit trail everywhere instead of leaking it everywhere.
+  fire('save-prompt.mjs', yes);
+  check('...but it still writes in a workspace that was adopted',
+    fs.existsSync(path.join(yes, 'docs', 'prompts')),
+    fs.existsSync(path.join(yes, 'docs')) ? fs.readdirSync(path.join(yes, 'docs')).join(', ') : 'no docs/');
 }
 
 // ── the bin/ commands ────────────────────────────────────────────────────────
@@ -293,6 +391,27 @@ console.log('\n▸ nexa-remove — the CLI wrapper, not just the function');
     refused.status === 1, `exit ${refused.status}: ${(refused.stdout + refused.stderr).slice(0, 140)}`);
   check('...and says so on stderr rather than exiting quietly',
     /Cannot tell which project/.test(refused.stderr), refused.stderr.slice(0, 140));
+}
+
+// ── verify-install: the harness that must refuse to report ───────────────────
+//
+// Its two arms need a live authenticated session, so they are run by hand. What is testable —
+// and what actually failed — is the judgement of whether a session ran at all. The first
+// version isolated CLAUDE_CONFIG_DIR, every session died with "Not logged in", and the harness
+// reported five PASSES including "git status is unchanged after a session": true only because
+// nothing had happened.
+console.log('\n▸ verify-install — a harness that cannot fail its own control is worthless');
+{
+  const { sessionUsable } = await import(path.join(ROOT, 'scripts', 'verify-install.mjs'));
+  check('a normal session passes and is usable', sessionUsable({ out: 'READY' }) === true);
+  check('REFUSES an unauthenticated session — the false-pass that shipped',
+    sessionUsable({ out: 'Not logged in · Please run /login' }) === false);
+  check('...and a bad key', sessionUsable({ out: 'Invalid API key · Please run /login' }) === false);
+  check('...and an exhausted balance, which also answers nothing',
+    sessionUsable({ out: 'Credit balance is too low' }) === false);
+  check('...and a timeout, whatever it printed', sessionUsable({ out: 'READY', timedOut: true }) === false);
+  check('an empty transcript is allowed through — the arms judge that, not this',
+    sessionUsable({ out: '' }) === true);
 }
 
 // ── the harness that measures the settings race ──────────────────────────────

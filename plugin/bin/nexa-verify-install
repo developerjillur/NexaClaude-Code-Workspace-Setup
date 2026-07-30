@@ -1,9 +1,9 @@
 #!/bin/sh
-# nexa-code-paths — bare command for scripts/ci-code-paths.mjs, on PATH while this plugin is enabled.
+# nexa-verify-install — bare command for scripts/verify-install.mjs, on PATH while this plugin is enabled.
 #
 # $0 is resolved THROUGH SYMLINKS before taking its directory. A second-model review found the
-# naive form: with /usr/local/bin/nexa-code-paths linked to the plugin copy, "$(dirname "$0")" is
-# /usr/local/bin and the wrapper looks for /usr/local/bin/../scripts/ci-code-paths.mjs, which does not
+# naive form: with /usr/local/bin/nexa-verify-install linked to the plugin copy, "$(dirname "$0")" is
+# /usr/local/bin and the wrapper looks for /usr/local/bin/../scripts/verify-install.mjs, which does not
 # exist. Linking a command into PATH is the ordinary way to install one, so the naive form is
 # broken for the common case rather than an exotic one. Every expansion stays quoted, so a
 # plugin path containing spaces works too.
@@ -17,4 +17,4 @@ while [ -L "$src" ]; do
   esac
 done
 dir=$(cd -P "$(dirname "$src")" > /dev/null && pwd)
-exec node "$dir/../scripts/ci-code-paths.mjs" "$@"
+exec node "$dir/../scripts/verify-install.mjs" "$@"

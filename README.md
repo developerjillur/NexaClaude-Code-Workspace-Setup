@@ -211,10 +211,11 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 31 scripts — `scripts/`
+### 32 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `verify-install.mjs` | **the 5-verify arms only a real session can settle** — does a populated repo stay untouched, does a clean root scaffold and announce it. Refuses to report at all when the session did not run |
 | `measure-settings-race.mjs` | **the measurement the zero-command bootstrap rests on** — does a deny rule written by a `SessionStart` hook protect the session that wrote it? Two arms, and the BASELINE arm exists so a broken harness cannot report success |
 | `council-sync.mjs` | **fetches the council from GitHub** and links it into place — never vendored, because a copy is a dependency with a timer on it |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |

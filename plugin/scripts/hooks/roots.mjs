@@ -45,6 +45,20 @@ const looksLikeWorkspace = (p) =>
   isDir(path.join(p, 'board')) || fs.existsSync(path.join(p, 'workspace.config.json'));
 
 /**
+ * **May we write into this tree at all?** A stricter question than "where is the project", and
+ * the one every WRITING hook has to ask.
+ *
+ * `projectRoot()` answers *which* directory; it says nothing about consent. A repository the
+ * bootstrap deliberately declined — somebody else's `board`, an unreadable config, a tombstone
+ * — still has a perfectly good project root, and `save-prompt` would happily start a prompt log
+ * in it. That is precisely kill-condition 1, arriving through a side door: 5-verify caught
+ * `?? docs/` in a fixture the bootstrap had explicitly refused to adopt.
+ *
+ * So writing requires the marker the bootstrap itself writes. No config, no writing.
+ */
+export const isAdoptedWorkspace = (p) => fs.existsSync(path.join(p, 'workspace.config.json'));
+
+/**
  * Walk up from `start` looking for a workspace, bounded.
  *
  * This exists for one layout: the plugin lives at `<workspace>/plugin/`, so a hook script's
@@ -110,12 +124,25 @@ export function projectRoot({ cwdFallback = false } = {}) {
   if (looksLikeWorkspace(PLUGIN_ROOT)) {
     return { root: PLUGIN_ROOT, source: 'script location', trusted: true };
   }
-  const above = workspaceAbove(PLUGIN_ROOT);
-  if (above) return { root: above, source: 'workspace above the plugin', trusted: true };
+  // **CLAUDE_PROJECT_DIR outranks the walk-up, and that ordering was wrong until a real
+  // session proved it.** The walk-up existed for the in-repo layout, where the plugin sits at
+  // `<workspace>/plugin/`. Put it first and it also fires when somebody loads this plugin with
+  // `--plugin-dir` from a DIFFERENT repository — the normal way to try a plugin before
+  // installing it. The hook then resolves to the workspace the plugin was copied from, decides
+  // that project is already initialised, and does nothing at all, silently.
+  //
+  // Found by 5-verify, not by any unit test: the fixtures put the plugin and the project in the
+  // same tree, so the two roots agreed and the ordering never mattered.
+  //
+  // Nothing is lost by preferring the environment. In every clone deployment Claude Code is
+  // started *in* the workspace, so `CLAUDE_PROJECT_DIR` and the walk-up name the same directory;
+  // they diverge only in the dev-mode case above, where the environment is the correct answer.
   const env = process.env.CLAUDE_PROJECT_DIR;
   if (env && isDir(env)) {
     return { root: path.resolve(env), source: 'CLAUDE_PROJECT_DIR', trusted: true };
   }
+  const above = workspaceAbove(PLUGIN_ROOT);
+  if (above) return { root: above, source: 'workspace above the plugin', trusted: true };
   // **Only for gate scripts, and the distinction is load-bearing.** A gate script is a bare
   // command in a terminal, where nothing guarantees CLAUDE_PROJECT_DIR is set; running
   // `nexa-check` inside a project plainly means that project. A HOOK is different: it is handed

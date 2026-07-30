@@ -16,7 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
 import { execSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
@@ -26,7 +26,10 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 // a shadow prompt log into plugin/docs/prompts/ — the audit trail silently forking in two.
 // An installed plugin whose project cannot be resolved would do the same into its own cache,
 // collecting every project it is loaded in.
-if (!TRUSTED) process.exit(0);
+// Consent, not merely location. See isAdoptedWorkspace in roots.mjs: a repository the bootstrap
+// declined still has a project root, and writing a prompt log into it is kill-condition 1
+// through a side door. Caught by 5-verify as `?? docs/` in a repo we had refused to adopt.
+if (!TRUSTED || !isAdoptedWorkspace(ROOT)) process.exit(0);
 
 const OUT = path.join(ROOT, 'docs', 'compactions');
 

@@ -133,13 +133,34 @@ export function mergeSettings(theirs, ours) {
   const conflicts = [];
 
   out.permissions ??= {};
+  const allow = Array.isArray(out.permissions.allow) ? out.permissions.allow : [];
+
+  // `Bash(git push *)` and `Bash(git push:*)` are the same rule written two ways. Comparing
+  // raw strings adds a second, semantically identical entry — noise in a file the user reads
+  // when they are trying to work out why something was blocked.
+  const norm = (r) => String(r).replace(/:\*\)$/, ' *)').replace(/\s+/g, ' ').trim();
+
   for (const list of ['deny', 'ask']) {
     const mine = ours.permissions?.[list] ?? [];
     if (!mine.length) continue;
     const existing = Array.isArray(out.permissions[list]) ? out.permissions[list] : [];
-    // Set union by exact string. No normalisation: a rule the user wrote in their own form is
-    // theirs, and "helpfully" rewriting it is how a deny stops matching what it used to.
-    out.permissions[list] = [...existing, ...mine.filter((r) => !existing.includes(r))];
+    const seen = new Set(existing.map(norm));
+    const add = [];
+    for (const rule of mine) {
+      if (seen.has(norm(rule))) continue;
+      // **The user's own allow wins, and silently losing to us is the failure.** deny is
+      // evaluated before allow, so appending a deny for something they explicitly allowed
+      // leaves their rule textually present and completely ineffective — the file still reads
+      // as though it were honoured. Skip ours and say so.
+      if (list === 'deny' && allow.some((a) => norm(a) === norm(rule))) {
+        conflicts.push(`${rule}: you allow it, so our deny was NOT added`);
+        continue;
+      }
+      seen.add(norm(rule));
+      add.push(rule);
+    }
+    // Never remove, never reorder: a rule the user wrote in their own form stays in their form.
+    out.permissions[list] = [...existing, ...add];
   }
 
   if (ours.model !== undefined) {
@@ -170,7 +191,7 @@ export function mergeSettings(theirs, ours) {
  *                                                   never dirty a tracked file
  *   3. both exist                                 → the merge above, on the local file only
  */
-function writeSettings(root, payload, created) {
+function writeSettings(root, payload, created, modified) {
   const dir = path.join(root, '.claude');
   const shared = path.join(dir, 'settings.json');
   const local = path.join(dir, 'settings.local.json');
@@ -193,6 +214,12 @@ function writeSettings(root, payload, created) {
   const backup = `${local}.pre-nexa`;
   if (!fs.existsSync(backup)) fs.copyFileSync(local, backup);
   atomicWrite(local, `${JSON.stringify(merged, null, 2)}\n`);
+  // **Recorded as MODIFIED, not created — the distinction is the whole of undo.** This file
+  // existed before us; deleting it on removal would take the user's own settings with it, and
+  // leaving it alone (which is what happened until a second-model review found it) leaves our
+  // deny rules, model and env behind while the banner promises "to undo all of it". Neither is
+  // acceptable, so the pre-existing bytes are restored from the backup instead.
+  modified.push({ file: local, backup });
   return { where: 'settings.local.json (merged)', conflicts };
 }
 
@@ -239,6 +266,7 @@ export function bootstrap(root, templatesDir, opts = {}) {
   if (!verdict.act) return { ...verdict, created: [] };
 
   const created = [];
+  const modified = [];
   for (const s of STAGES) createOnly(path.join(root, 'board', s, '.gitkeep'), '', created);
   createOnly(path.join(root, 'workspace.config.json'), `${JSON.stringify(CONFIG, null, 2)}\n`, created);
   createOnly(path.join(root, '.claudeignore'), CLAUDEIGNORE, created);
@@ -253,21 +281,32 @@ export function bootstrap(root, templatesDir, opts = {}) {
     createOnly(path.join(root, f), fs.readFileSync(path.join(templatesDir, f), 'utf8'), created);
   }
 
-  const settings = writeSettings(root, SETTINGS, created);
+  const settings = writeSettings(root, SETTINGS, created, modified);
 
   atomicWrite(manifestPath(root), `${JSON.stringify({
-    root: real(root), created, settings: settings.where, at: new Date().toISOString(),
+    root: real(root), created, modified, settings: settings.where, at: new Date().toISOString(),
   }, null, 2)}\n`);
 
-  return { ...verdict, created, settings };
+  return { ...verdict, created, modified, settings };
 }
 
 /** Undo exactly what the manifest records, then tombstone so it never comes back. */
 export function remove(root) {
   const mf = manifestPath(root);
   if (!fs.existsSync(mf)) return { removed: [], reason: 'nothing was recorded for this repository' };
-  const { created = [] } = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  const { created = [], modified = [] } = JSON.parse(fs.readFileSync(mf, 'utf8'));
   const removed = [];
+  const restored = [];
+  // Restore before deleting: a modified file must go back to the bytes it had, not vanish.
+  for (const m of modified) {
+    try {
+      if (fs.existsSync(m.backup)) {
+        fs.copyFileSync(m.backup, m.file);
+        fs.rmSync(m.backup, { force: true });
+        restored.push(m.file);
+      }
+    } catch { /* leave it rather than make it worse */ }
+  }
   // Deepest first, so a directory is empty by the time we reach it.
   for (const f of [...created].sort((a, b) => b.length - a.length)) {
     try { fs.rmSync(f, { force: true }); removed.push(f); } catch { /* already gone */ }
@@ -276,5 +315,5 @@ export function remove(root) {
   }
   atomicWrite(tombstonePath(root), `${new Date().toISOString()}\n`);
   fs.rmSync(mf, { force: true });
-  return { removed, reason: 'removed and tombstoned' };
+  return { removed, restored, reason: 'removed and tombstoned' };
 }
