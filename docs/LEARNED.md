@@ -408,5 +408,39 @@ quietly. It worked. Nobody was listening. The missing half is a **cheap** applic
 do all 23 mutations still match their targets? — that costs milliseconds rather than minutes and
 can therefore live in `check.mjs`, where a rename would be refused the same day.
 
+## The comment was the specification, and nobody had checked it against the code
+
+A second-model review scored this workspace's own packaging **1 out of 5 on "nothing
+invented"**. Not one of its four examples was a lie. Every one was a sentence written in a
+comment or printed in a banner, believed by its author, and false:
+
+| What the text said | What the code did |
+|---|---|
+| *"somebody else's repository is a no-op"* | four hooks wrote `docs/` there regardless |
+| *"nothing that already existed was modified"* | a merged `settings.local.json` was |
+| *"to undo all of it, run `/nexa-workspace:remove`"* | removal left our permission rules behind |
+| *"resolves relative to itself so it works from the cache and a clone alike"* | not through a symlink, which is how commands are installed |
+
+The pattern is sharper than "documentation drifts". **These comments were written in the same
+sitting as the code they describe, by someone who had just read the docs and meant every
+word.** They are not stale; they were never true. The author wrote the intent down, felt the
+relief of having stated it, and did not go back to check whether the branch they had just
+written implemented it.
+
+The three fail-opens this repo shipped were all *reasoning* errors — a regex, an untracked
+directory, a symlinked path. This is a different species: **a specification error committed in
+the same file as its implementation**, where the specification is a comment and nothing on
+earth checks it.
+
+> **`verify-claims` follows a card's citations into the repo. Nothing follows a comment's.**
+> The claim density that makes this codebase readable is also an unchecked surface, and it is
+> the largest one here.
+
+What caught all four was the same move: a reader who could not see the intent. The comments are
+persuasive to anyone who already believes them — which is everyone who has just written them,
+and no one else. The two independent findings of the same defect (5-verify saw `?? docs/`; the
+reviewer read the branch) is the argument for §10 stated as a measurement rather than a
+principle.
+
 <!-- reflected-at: ff9e207 -->
 

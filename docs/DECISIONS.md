@@ -10,6 +10,40 @@ answer feels obvious. It stops feeling obvious in four weeks.
 
 ---
 
+## 2026-07-30 — A `git worktree` checkout is not adopted, and two models disagree about it
+
+**Decision.** `bootstrap.decide()` refuses any repository whose `.git` is a *file* rather than a
+directory — a linked worktree or a submodule. The user must run the workspace from the primary
+checkout.
+
+**The disagreement is the point, so it is recorded rather than averaged.**
+
+- **The council** (4/4, 2026-07-30) put worktrees in the never-fire predicate: scaffolding one
+  writes into a checkout that shares history with the primary, and *"planting nested ones is how
+  you get two boards."*
+- **Codex**, reviewing the implementation, called it a false negative: *"a legitimate feature
+  checkout created with `git worktree add ~/src/app-feature feature` … is the user's active
+  project root"*, and refusing it is a defect.
+
+Both are right about something. A worktree **is** a real project root; it also **is** a view
+onto a repository whose primary checkout may already have a board. Nothing on disk distinguishes
+"my feature branch, where I work" from "a scratch worktree off a repo that is already set up".
+
+**Chosen: refuse.** The two failures are not symmetric. Refusing a worktree costs a user one
+`cd` and an explanation. Adopting one writes `board/`, `docs/` and `.claude/settings.json` into
+a checkout the user may delete tomorrow with `git worktree remove`, taking a card's history with
+it — and possibly beside a second board in the primary.
+
+**The cost is stated rather than hidden:** anyone whose normal workflow *is* a worktree gets no
+zero-command adoption at all, and the banner does not currently explain why. That is a real gap.
+
+**How we would know this was wrong.** If more than one user reports that their primary checkout
+is not where they work, the predicate should invert: adopt the worktree and refuse only when the
+primary already has a `workspace.config.json`. That is a check nobody has written because nobody
+has reported it — and inventing it now would be designing for an imagined user.
+
+---
+
 ## 2026-07-30 — Zero-command adoption, and the one thing that cannot be zero-command
 
 **Decision.** The owner requires that installing the plugin is the whole of adoption: open Claude
