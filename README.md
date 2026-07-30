@@ -4,16 +4,19 @@
 Kanban pipeline with WIP=1, fifteen skills, three subagents, seven commands, and a five-model
 council that reviews your decisions across four vendors.**
 
-Clone it, point it at your code, and the process runs itself. No special commands to memorise —
-**Claude Code loads what it needs, when the situation matches.**
+**Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
+No special commands to memorise — Claude Code loads what it needs, when the situation matches.
 
 ```bash
-git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git
-cd NexaClaude-Code-Workspace-Setup
-./setup.sh --check                 # what is missing; changes nothing
-./setup.sh --code ../my-app        # tools, plugins, config, then RUNS THE GATE
-node scripts/check.mjs        # 19 checks; should say "All checks pass"
+claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
 ```
+
+The first two lines are separate because **no plugin can register a marketplace on your
+behalf** — see [Install](#install). The clone-and-`setup.sh` workflow still works and is
+documented below.
 
 ---
 
@@ -96,6 +99,78 @@ started counting the files instead.
 
 ## Install
 
+**The workspace is a Claude Code plugin. Installing it is the whole of setup** — open Claude
+Code in a repository afterwards and the board, the contract, the config and the permission
+rules are there. No init command, no `setup.sh`, no copying files.
+
+### The four commands
+
+```bash
+# 1 · the two marketplaces Claude Code does not know by default
+claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+
+# 2 · this workspace
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
+```
+
+Then open Claude Code in the repository you want to work in. That is it.
+
+**Why step 1 exists, and why it cannot be automated.** `nexa-workspace` depends on eight
+plugins. Six live in `claude-plugins-official`, which Claude Code registers for you. Two do
+not — and **no plugin manifest can register a marketplace on your behalf.** Adding a plugin
+source is a trust decision that belongs to the person typing it, so the dependency resolves
+only after you have added the source yourself. Skip step 1 and the install reports
+`dependency-unsatisfied` and names the command — loudly, rather than loading half a workspace.
+
+### What arrives with it
+
+| | |
+|---|---|
+| **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
+| **16 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
+| **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
+| **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
+| **6 hook events** | including the one that refuses: no product edit without a card in build |
+| **15 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`… on your `PATH` |
+
+### The first session, and one thing it cannot do
+
+Opening Claude Code in a **clean repository root** creates the workspace and prints every path
+it wrote, plus how to undo it. Opening it anywhere else does nothing: it refuses a repository
+that is not a git root, a linked worktree, your home directory, a temp directory, a repo whose
+`board/` is not ours, and any repo you have removed it from before.
+
+**`model` is read once at startup.** Permission rules and hooks are live in the first session —
+[measured](plugin/scripts/measure-settings-race.mjs), not assumed — but `model: opus` applies
+from your *next* session. The banner says so rather than leaving you to notice.
+
+### Undoing it
+
+```bash
+/nexa-workspace:remove --dry-run     # lists exactly what would go
+/nexa-workspace:remove               # removes it, and does not come back
+```
+
+It deletes only what it created, and **only files you have not edited since**. Write your real
+contract into `AGENTS.md` and removal leaves it alone and tells you it did. A copy of any file
+it merged into is kept outside the repository and restored.
+
+### Adding your own plugins
+
+`plugin/.claude-plugin/plugin.json` lists dependencies as `{ "name", "marketplace" }`. Add
+yours there — the SDK you call, the host you deploy to. Nothing stack-specific ships enabled,
+because a plugin declared for somebody else's product is a dependency nobody here asked for.
+
+Cross-marketplace dependencies need the target named in `allowCrossMarketplaceDependenciesOn`
+in `.claude-plugin/marketplace.json` at the repo root; the three foreign ones are already there.
+
+### The clone workflow still works
+
+Everything below this line predates the plugin and is unchanged. Use it if you want the
+workspace as a repository rather than an installation.
+
 ### Option A — your code lives inside the workspace
 
 ```bash
@@ -114,6 +189,12 @@ ln -s ../NexaClaude-Code-Workspace-Setup/AGENTS.md AGENTS.md
 ln -s ../NexaClaude-Code-Workspace-Setup/CLAUDE.md CLAUDE.md
 cp -r ../NexaClaude-Code-Workspace-Setup/code/.claude .     # then fix ../WORKSPACE inside it
 ```
+
+> **Option B and the plugin disagree, and the plugin wins.** With the plugin enabled, hooks
+> take their project from `CLAUDE_PROJECT_DIR` — so running Claude Code inside `my-app` finds
+> *my-app*, not the sibling board. Nothing on disk distinguishes that from loading the plugin
+> with `--plugin-dir` while working in an unrelated repo, so one of the two had to lose.
+> **Start Claude Code in the workspace, or export `CLAUDE_PROJECT_DIR` pointing at it.**
 
 **Link, never copy.** Two copies of a contract drift, and the drift is silent — the original
 project shipped a duplicated pricing table that showed a customer **$6.05 for a call the
@@ -140,7 +221,24 @@ Then rewrite `AGENTS.md` §1 and §2. They ship as templates with the questions 
 
 **Nothing here needs a magic phrase.** Three mechanisms, all automatic:
 
-**1 · Hooks fire on events.** Wired in `.claude/settings.json` — **8 scripts across six
+**0 · Install it, and that is all.** The workspace ships as a plugin. Open Claude Code in a
+clean repository root and it scaffolds itself — board, docs, config, contract, permissions — and
+tells you every file it created and how to undo it. It refuses in every other case: not a repo
+root, a linked worktree, your home directory, a repo that already has a `board/` that is not
+ours, or one where you ran `/nexa-workspace:remove` before.
+
+```bash
+claude plugin marketplace add openai/codex-plugin-cc
+claude plugin marketplace add DietrichGebert/ponytail
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
+```
+
+**One caveat, stated because it cannot be fixed:** `model` is read once at startup, so the
+first session runs on your default model. Permission rules and hooks are live immediately —
+[measured](scripts/measure-settings-race.mjs), not assumed.
+
+**1 · Hooks fire on events.** Declared in `plugin/hooks/hooks.json` — **8 scripts across six
 events** (`UserPromptSubmit` runs two):
 
 | Event | Script | What it does |
@@ -194,10 +292,12 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 28 scripts — `scripts/`
+### 32 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `verify-install.mjs` | **the 5-verify arms only a real session can settle** — does a populated repo stay untouched, does a clean root scaffold and announce it. Refuses to report at all when the session did not run |
+| `measure-settings-race.mjs` | **the measurement the zero-command bootstrap rests on** — does a deny rule written by a `SessionStart` hook protect the session that wrote it? Two arms, and the BASELINE arm exists so a broken harness cannot report success |
 | `council-sync.mjs` | **fetches the council from GitHub** and links it into place — never vendored, because a copy is a dependency with a timer on it |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
@@ -292,6 +392,29 @@ losing the review path:
 `codex@openai-codex` — **load-bearing**: `/codex:review` and a Stop gate that can block a turn ·
 `ponytail@ponytail` · `code-review` · `feature-dev` · `github` · `code-simplifier` ·
 `security-guidance` · `typescript-lsp`
+
+**Installing them — two of these live in marketplaces nobody registers for you.**
+`claude-plugins-official` registers itself the first time you launch Claude Code, so
+`code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance` and
+`typescript-lsp` install straight away. **`codex` and `ponytail` do not** — they are separate
+marketplaces, and *no plugin can add a marketplace on your behalf.* Registering a plugin source
+is a trust decision that stays with whoever clones the repo, which is why it is two commands and
+not a dependency line:
+
+```bash
+# 1 · register the two marketplaces that are not known by default
+claude plugin marketplace add openai/codex-plugin-cc       # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail      # → ponytail
+
+# 2 · install both plugins
+claude plugin install codex@openai-codex                   # the second model — §10
+claude plugin install ponytail@ponytail                    # the laziness ladder — §5
+```
+
+`./setup.sh` does step 2 for every entry in `enabledPlugins`, and step 1 for every entry in
+`extraKnownMarketplaces`. **Only `ponytail` is listed there today, so run the `openai-codex`
+line by hand first** — otherwise setup stops on `codex@openai-codex`, which is the one plugin
+the contract calls load-bearing.
 
 **Add your own stack's plugins.** The original carried two more for its telephony and hosting;
 they were removed here because they are not yours.

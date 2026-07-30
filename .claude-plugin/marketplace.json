@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "nexa",
+  "description": "The NexaClaude workspace: hooks that refuse, a WIP=1 pipeline, and a four-vendor council.",
+  "owner": {
+    "name": "Jillur Rahman",
+    "url": "https://github.com/developerjillur"
+  },
+  "allowCrossMarketplaceDependenciesOn": [
+    "claude-plugins-official",
+    "openai-codex",
+    "ponytail"
+  ],
+  "plugins": [
+    {
+      "name": "nexa-workspace",
+      "source": "./plugin",
+      "description": "Blocking hooks, a WIP=1 board, 15 skills, 3 subagents and a four-vendor council.",
+      "category": "workflow"
+    }
+  ]
+}
