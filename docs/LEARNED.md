@@ -474,5 +474,68 @@ nothing git tracks inside `plugin/` may be a symlink that escapes `plugin/`. The
 declared dependency now, which is what it should always have been — it is a published plugin
 with its own manifest, and vendoring links to it was never the shape.
 
-<!-- reflected-at: aaa28dc -->
+<!-- reflected-at: cf4d6d3 -->
 
+
+---
+
+## 2026-07-31 · The evening the suite was green and the product was broken
+
+Sixteen commits, ten patch versions, and a feature that passed **532 assertions, six gates and
+31/31 mutation coverage** while failing ten consecutive times in the user's hands. Every defect
+was found by a person using it, never by the tests. The pattern across all of them is one thing:
+
+> **Every check ran in the harness. None ran in the product.**
+
+`DECISIONS.md` holds each defect with its reasoning. What follows is only what no single entry
+says.
+
+### Green means "my fixture agreed with me"
+
+Six distinct ways a passing suite proved nothing, all live in one day:
+
+- a test file that **ran nothing** and exited 0 (importing a hook executed it)
+- a probe that **passed without its condition occurring** — it signalled between mutations
+- an **over-determined assertion** — two guards exit 1, so deleting one changed nothing visible
+- an **allowlist dead since a file moved**, flagging its own rules for weeks
+- a **guard watching a renamed directory**, comparing `''` to `''` forever
+- a **compensation outliving its cause** — a `+1` that made a count permanently wrong
+
+Each asserted something *adjacent* to the truth. The habit that catches all six is the same:
+**assert the thing itself, and assert that the condition occurred.**
+
+### The three failures that are about shipping, not code
+
+The code was correct in all three, and users got nothing:
+
+1. **Untracked.** Seven files, one an entire subsystem, absent from every clone.
+2. **Unversioned.** Plugin caches key on version; `main` moving reaches nobody.
+3. **Unreachable.** A working tool with no skill or command — the model chose a different
+   plugin's provider and reported no such capability existed.
+
+**Building a thing, shipping a thing, and making it findable are three separate pieces of work,**
+and this project had been treating them as one.
+
+### A safety rule that fires on grammar is not a safety rule
+
+The autopilot veto refused `"Would you like me to…"` and allowed `"Should I…"` — same file, same
+task. Measured, not argued. It made the feature fire almost never, which is how a control gets
+disabled rather than made safer.
+
+**Guard the irreversible. Let preferences through.** And do not stack a model on top of a rule
+list as a second veto; it multiplies false refusals and hides which one fired.
+
+### The most expensive habit was mine, not the code's
+
+I offered "restart Claude Code" **four times** — an answer the user had already falsified by
+restarting five times and saying so. The real answer sat in their log the whole time, in English.
+
+- **Read the user's evidence before forming a theory.** Their logs outrank your model of the
+  system.
+- **Never repeat an explanation they have already disproved.**
+- **Build the diagnostic instead of stating the theory** — and build it before it is needed,
+  because a silent path is undiagnosable by construction. The first diagnostic here was itself
+  wrong within ten minutes (one global file, so every project overwrote every other's).
+
+**A user reporting the same failure repeatedly is not a user who needs the explanation again.
+It is a signal that the explanation is wrong.**

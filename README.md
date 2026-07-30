@@ -1,7 +1,7 @@
 # NexaClaude Code Workspace
 
 **A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
-Kanban pipeline with WIP=1, seventeen skills, three subagents, eleven commands, and a five-model
+Kanban pipeline with WIP=1, eighteen skills, three subagents, eleven commands, and a five-model
 council that reviews your decisions across four vendors.**
 
 **Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
@@ -120,7 +120,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 | | |
 |---|---|
 | **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
-| **17 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
+| **18 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
 | **6 hook events** | including the one that refuses: no product edit without a card in build |
@@ -254,7 +254,7 @@ refusal, not a note.
 
 ## What is in the box
 
-### 17 skills — `.agents/skills/`
+### 18 skills — `.agents/skills/`
 
 | Skill | When it fires |
 |---|---|
