@@ -332,6 +332,7 @@ directory, symlinked**, because two copies drift. Invoke by name when the situat
 | `reuse-first` | before writing any new code, file or dependency |
 | `context-budget` | at `2-plan` — does this fit one window? |
 | **`measure-dont-claim`** | **before stating any number, rate, cost or comparison** |
+| **`test-the-real-thing`** | **before claiming anything works, and the moment a user says it does not** |
 | `review-gate` | before a card leaves `4-review` |
 | `security-gate` | same, and it cannot be traded against the review score |
 | `definition-of-done` | at `5-verify` |
@@ -349,8 +350,14 @@ idea → spec-first ──→ reuse-first ──→ context-budget ──→ [bu
                                                                     + Codex (§10)      (§11)
 ```
 
-Underneath all of them: **`measure-dont-claim`** whenever a number is about to be stated, and
-**`skill-finder`** whenever the route above does not obviously cover the task.
+Underneath all of them: **`measure-dont-claim`** whenever a number is about to be stated,
+**`test-the-real-thing`** before any claim that something works, and **`skill-finder`** whenever
+the route above does not obviously cover the task.
+
+**`test-the-real-thing` exists because a feature shipped with 532 green assertions, six clean
+gates and 31/31 mutation coverage — and then failed ten consecutive times in a user's hands.**
+Every failure was a category the suite could not see. A green suite is evidence about your
+harness, not about the product.
 
 ### The tier is not a choice
 

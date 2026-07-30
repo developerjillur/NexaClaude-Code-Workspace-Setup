@@ -122,3 +122,15 @@ git mv board/5-verify/<card>.md board/6-done/
 ```
 
 **Work that did not move a card did not happen.** The board is the record; chat is not.
+
+## Did you run it the way a user runs it?
+
+Before any of the above counts, invoke **`test-the-real-thing`**.
+
+A card can satisfy every tick here — tests green, guard watched failing, claims resolving — and
+still ship a feature that does not work, because all of those run in the harness rather than in
+the product. Not hypothetical: on 2026-07-30 a feature passed 532 assertions, six gates and
+31/31 mutation coverage, then failed **ten consecutive times** in the user's hands.
+
+**If nothing in this card launched the real thing, end to end, at least once — write that in the
+card** rather than implying coverage you do not have.
