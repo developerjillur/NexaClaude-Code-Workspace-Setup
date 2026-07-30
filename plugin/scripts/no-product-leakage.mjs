@@ -65,6 +65,27 @@ const ALLOWED = [
   { file: 'docs/examples/council-run.md', why: 'a verbatim transcript, kept as an example' },
 ];
 
+// ── the allowlist has to survive the scripts moving, and it did not ─────────
+//
+// Entries are written as `scripts/x.mjs`, the pre-plugin layout. Packaging moved everything to
+// `plugin/scripts/x.mjs`, and the comparison was `rel === a.file` — an exact string match — so
+// **every exemption silently stopped matching.** The scanner then flagged its own pattern list,
+// `scan-secrets`' credential formats, `save-prompt`'s redaction patterns and `DECISIONS.md`, and
+// exited 1 on four findings that were all itself.
+//
+// A dead allowlist fails in the noisy direction, which is why it survived: four permanent
+// findings look like known debt rather than a broken exemption. The quiet direction would have
+// been worse.
+//
+// Matched on the RESOLVED path now, with both layouts accepted, so a move re-points it instead
+// of retiring it. `scripts` is a symlink to `plugin/scripts` in a clone, so realpath collapses
+// the two forms to one.
+const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const ALLOWED_REAL = new Set(ALLOWED.flatMap((a) => [
+  real(path.join(ROOT, a.file)),
+  real(path.join(ROOT, 'plugin', a.file)),
+]));
+
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.council-src', '.council']);
 
 const files = [];
@@ -84,7 +105,7 @@ const files = [];
 const findings = [];
 for (const f of files) {
   const rel = path.relative(ROOT, f);
-  if (ALLOWED.some((a) => rel === a.file)) continue;
+  if (ALLOWED_REAL.has(real(f))) continue;
   let body;
   try {
     if (fs.statSync(f).size > 4_000_000) continue;

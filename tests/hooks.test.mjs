@@ -240,11 +240,16 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
 console.log('\n▸ save-prompt — records prompts without ever interrupting one');
 {
   const s = path.join(HOOKS, 'save-prompt.mjs');
-  const dir = path.join(ROOT, 'docs', 'prompts');
+  // **NEXA_STATE_DIR, so this test touches neither the repository nor the real prompt log.**
+  // The earlier version wrote into the developer's actual log and restored it afterwards, which
+  // worked only while the log lived in the repo — and meant a crashed run left the real record
+  // truncated. A temp directory removes both problems.
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'save-prompt-state-'));
+  const env = { NEXA_STATE_DIR: state };
+  const dir = path.join(state, 'prompts');
   const today = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   const file = path.join(dir, `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}.md`);
-  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
 
   // The four secret SHAPES that have appeared in this project's prompts — synthetic values.
   // The first version used a real (expired) OAuth code copied from the prompt history, and
@@ -254,21 +259,77 @@ console.log('\n▸ save-prompt — records prompts without ever interrupting one
     prompt: 'ssh root@203.0.113.10 Ex4mpleP4ssw0rd,x and SERVICE_AUTH_TOKEN=EXAMPLEtokenEXAMPLE99 '
       + 'and callback?code=ac_EXAMPLEexampleEXAMPLEexample00 and sk-proj-EXAMPLEexampleEXAMPLE00',
   };
-  check('exits 0 (a logger must never block a prompt)', run(s, secrets).code === 0);
+  check('exits 0 (a logger must never block a prompt)', run(s, secrets, env).code === 0);
 
   const written = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  check('writes into the state directory, not the repository', written.length > 0
+    && !fs.existsSync(path.join(ROOT, 'docs', 'prompts')));
   check('scrubs an ssh password', !/Ex4mpleP4ssw0rd/.test(written));
   check('scrubs a token assignment', !/EXAMPLEtokenEXAMPLE99/.test(written));
   check('scrubs an OAuth code', !/ac_EXAMPLEexample/.test(written));
   check('scrubs an sk- key', !/sk-proj-EXAMPLE/.test(written));
   check('still records something readable', /ssh|«/.test(written));
 
-  check('ignores slash commands', run(s, { prompt: '/compact' }).code === 0);
-  check('survives malformed input', run(s, {}).code === 0);
+  check('ignores slash commands', run(s, { prompt: '/compact' }, env).code === 0);
+  check('survives malformed input', run(s, {}, env).code === 0);
 
-  // Leave the log as it was — a test that pollutes the record is a test that gets deleted.
-  if (before === null) fs.rmSync(file, { force: true });
-  else fs.writeFileSync(file, before);
+  fs.rmSync(state, { recursive: true, force: true });
+}
+
+// ── the first session in a fresh repository, end to end ─────────────────────
+//
+// **The one path every user takes, and until now the only one with no test.** The suites
+// exercised `session-start` with garbage input and `bootstrap` without the banner; nobody ran
+// the two together. So this shipped: `created` holds `{file, wroteHash}` records, the banner
+// passed one straight to `path.relative`, and the hook died with ERR_INVALID_ARG_TYPE **after**
+// scaffolding the repository. A first-ever session showed a stack trace, having silently
+// succeeded — the worst possible pairing, because the user has no reason to think anything
+// worked and every reason to delete what appeared.
+//
+// Reaching the production path needs care: `decide()` refuses a temp directory and the hook
+// never passes `allowTemp`, so a fixture in mkdtemp is declined for the right reason and proves
+// nothing. `os.tmpdir()` honours TMPDIR, so the child gets a DECOY temp base — the arena is then
+// not under any temp root the child knows about, and the strict predicate is genuinely
+// exercised rather than bypassed.
+console.log('\n▸ the first session in a fresh repo — one hook, zero commands typed');
+{
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'first-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'first-home-'));
+  const decoy = fs.mkdtempSync(path.join(os.tmpdir(), 'first-decoy-'));
+  spawnSync('git', ['init', '-q'], { cwd: arena, stdio: 'ignore' });
+
+  const r = spawnSync('node', [path.join(HOOKS, 'session-start.mjs')], {
+    input: JSON.stringify({ session_id: 'first', cwd: arena }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: decoy, CLAUDE_PROJECT_DIR: arena },
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+
+  check('the hook exits 0', r.status === 0, `exit ${r.status}: ${(r.stderr || '').trim().split('\n')[0]}`);
+  check('...and does not throw — a stack trace here is what a first-ever session showed',
+    !/ERR_INVALID_ARG_TYPE|TypeError|at Object\./.test(out), out.split('\n').slice(0, 3).join(' | '));
+  check('...and announces the adoption rather than doing it silently',
+    /was just set up as a workspace/.test(out));
+
+  // The repository gets what cannot live elsewhere, and nothing more.
+  const inRepo = fs.readdirSync(arena).filter((f) => f !== '.git' && !f.startsWith('._')).sort();
+  check('the repository receives exactly five entries, none of them the board',
+    JSON.stringify(inRepo) === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+    inRepo.join(', '));
+
+  // …and the rest is in ~/.nexa, keyed by the project's path.
+  // realpathSync, because stateRoot resolves before deriving the name and macOS maps
+  // /var/folders → /private/var/folders. Deriving it from the unresolved path here produced a
+  // name that differed by one segment and looked like a code failure.
+  const proj = path.join(home, '.nexa', 'projects',
+    fs.realpathSync(arena).replace(/[^A-Za-z0-9._-]/g, '-'));
+  check('the board, docs, templates and config landed in ~/.nexa/projects/<path>',
+    ['board/3-build', 'docs/DECISIONS.md', 'docs/LEARNED.md', 'templates/CARD.md', 'config.json', '.nexa-id']
+      .every((f) => fs.existsSync(path.join(proj, f))), proj);
+  check('...and the banner shows those paths under ~, not as ../../.. from the repo',
+    /`~\/\.nexa\/projects\//.test(out) && !/\.\.\/\.\.\//.test(out));
+
+  for (const d of [arena, home, decoy]) fs.rmSync(d, { recursive: true, force: true });
 }
 
 // ── the non-blocking hooks: the only requirement is that they never break a session ──
@@ -284,10 +345,12 @@ for (const h of ['session-start.mjs', 'after-edit.mjs', 'session-end.mjs']) {
 console.log('\n▸ pre-compact — records what CLAUDE.md says compaction loses');
 {
   const p = path.join(HOOKS, 'pre-compact.mjs');
-  const dir = path.join(ROOT, 'docs', 'compactions');
-  const before = fs.existsSync(dir) ? fs.readdirSync(dir) : null;
+  // Same isolation as save-prompt above: a temp state directory rather than the real one.
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compact-state-'));
+  const env = { NEXA_STATE_DIR: state };
+  const dir = path.join(state, 'compactions');
 
-  check('exits 0 (must never be able to fail a compaction)', run(p, {}).code === 0);
+  check('exits 0 (must never be able to fail a compaction)', run(p, {}, env).code === 0);
 
   // `._x.md` are macOS AppleDouble files — this drive is exFAT, so they appear beside every
   // written file and they sort FIRST. check.mjs documents this hazard; the first version of
@@ -303,8 +366,9 @@ console.log('\n▸ pre-compact — records what CLAUDE.md says compaction loses'
   // complete, which is the failure this project keeps finding in its own artifacts.
   check('says out loud that measurements are NOT captured', /measurements|Item 4/.test(written));
 
-  check('survives garbage input', run(p, { nonsense: true }).code === 0);
-  if (before === null) fs.rmSync(dir, { recursive: true, force: true });
+  check('writes into the state directory, not the repository', files.length > 0);
+  check('survives garbage input', run(p, { nonsense: true }, env).code === 0);
+  fs.rmSync(state, { recursive: true, force: true });
 }
 
 // ── the settings drift check: it must know about every hook we actually declare ──
@@ -446,6 +510,12 @@ console.log(`\n${'─'.repeat(72)}`);
     'git restore src', 'git reset --hard', 'git reset --hard HEAD',
     'git reset --hard origin/main', 'git clean -fd', 'git clean -fdx',
     'git stash', 'git stash push', 'git stash -u',
+    // A real clean chained AFTER a dry run. Each `git clean` is judged on its own arguments,
+    // so the exemption below cannot be used as a prefix to smuggle one through.
+    'git clean -xfdn; git clean -xfd',
+    // `notes` is a pathspec, not a flag. The dry-run exemption only considers a dash followed
+    // by letters, so a filename containing `n` must not read as `-n`.
+    'git clean -fd -- notes',
   ]) check('blocks ' + cmd, fire(cmd).code === 2);
 
   // `git reset --hard HEAD` is listed above on purpose. The first version of this guard
@@ -463,6 +533,13 @@ console.log(`\n${'─'.repeat(72)}`);
     'git checkout -b feat/x', 'git checkout package-lock.json',
     'git stash list', 'git stash show', 'git stash pop', 'git stash apply',
     'git log --oneline', 'git diff --stat', 'git clean -n', 'git status',
+    // **Dry runs, which delete nothing.** `git clean -n` alone was always allowed — it carries
+    // no f/d/x for the pattern to catch. The COMBINED form was not: `-xfdn` is how anyone
+    // actually asks "what would this remove", and it was refused identically to the real
+    // command. Found when this guard blocked exactly that question being asked of it.
+    // A false refusal costs more than friction: it is how `touch .nexa-allow-discard` becomes
+    // a reflex, and the next genuine refusal gets waved through unread.
+    'git clean -xfdn', 'git clean --dry-run -xfd', 'git clean -ndx',
   ]) check('allows ' + cmd, fire(cmd).code === 0);
 
   check('a deliberate override still works', fire('git checkout .', { NEXA_ALLOW_DISCARD: '1' }).code === 0);
@@ -1067,24 +1144,185 @@ console.log(`\n${'─'.repeat(72)}`);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ── image-gen — the path handling IS the tool ───────────────────────────────
+//
+// Codex is an agent, not an image endpoint: it writes and runs code, so **it** decides where the
+// file goes and it is inconsistent about saying so. Measured against the real CLI: asked for
+// `/tmp/x/circle.png` it reported `/private/tmp/x/circle.png`, because macOS resolves `/tmp`
+// through a symlink — the same file under a different string.
+//
+// So the printed path is a hint and the filesystem is the authority. These assertions cover the
+// decision, which is where the bugs live; the subprocess call costs minutes and tokens and is
+// exercised by hand (a 1 MB PNG, recorded in the card).
 {
-  console.log('\n▸ council-sync --check — is the council there, and current');
-  const sync = path.join(ROOT, 'scripts', 'council-sync.mjs');
-  const r = spawnSync('node', [sync, '--check'], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
-  // Either answer is legitimate; what must hold is that it SAYS which, and never crashes.
-  check('council-sync --check reports rather than crashing', r.status === 0 || r.status === 1);
-  check('...and names the council in what it says', /council/i.test(r.stdout + r.stderr));
-  // Run in a throwaway root rather than by unlinking the live .council-src. Touching the
-  // real one to test it is how a test breaks the thing it is testing.
-  check('council-sync --check refuses when the council is absent', (() => {
-    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'nocouncil-'));
-    fs.mkdirSync(path.join(t, 'scripts'), { recursive: true });
-    installScript(t, 'council-sync.mjs');
+  console.log('\n▸ image-gen — codex says one path, the file is at another');
+  const ig = await import(path.join(ROOT, 'plugin', 'scripts', 'image-gen.mjs'));
+  const arena = fs.mkdtempSync(path.join(os.tmpdir(), 'imggen-'));
+
+  // A real 1x1 PNG, so magic-byte sniffing has something true to find.
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489'
+    + '0000000a49444154789c6360000002000100' + '05fe02fea7'.padEnd(10, '0') + '0000000049454e44ae426082', 'hex');
+  fs.writeFileSync(path.join(arena, 'real.png'), PNG);
+  fs.writeFileSync(path.join(arena, 'liar.png'), '<html><body>error 500</body></html>\n');
+  fs.writeFileSync(path.join(arena, 'vector.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>\n');
+
+  check('a real PNG is recognised by its bytes', ig.looksLikeImage(path.join(arena, 'real.png')) === 'png');
+  check('...and an HTML error page named .png is REFUSED, not trusted for its extension',
+    ig.looksLikeImage(path.join(arena, 'liar.png')) === false);
+  check('...and a genuine SVG is accepted', ig.looksLikeImage(path.join(arena, 'vector.svg')) === 'svg');
+
+  // Every shape codex has been observed to answer in.
+  check('parses WROTE=', ig.parsePaths('WROTE=/x/a.png').includes('/x/a.png'));
+  check('parses a markdown image link', ig.parsePaths('done ![c](out/a.png)').includes('out/a.png'));
+  check('parses a bare filename in prose', ig.parsePaths('I saved circle.png').includes('circle.png'));
+  check('parses a ~ path', ig.parsePaths('at ~/p/a.jpg').includes('~/p/a.jpg'));
+  check('and finds nothing when there is nothing', ig.parsePaths('no image today').length === 0);
+
+  // **The symlinked-prefix case, which is the reason this tool exists.**
+  //
+  // `os.tmpdir()` hands back `/var/folders/…` and the real path is `/private/var/folders/…` —
+  // the same file under two strings, exactly as codex reported `/private/tmp/x.png` for a file
+  // asked for at `/tmp/x.png`. A comparison by string fails here; by realpath it holds.
+  //
+  // The first version of this assertion invented a `/tmp/<basename>` path that existed nowhere
+  // and failed for that reason — a fixture bug that looked like a code bug.
+  const stated = path.join(arena, 'real.png');            // unresolved form
+  const truth = fs.realpathSync(path.join(arena, 'real.png'));  // /private/… form
+  check('the two path forms really do differ, or this proves nothing', stated !== truth,
+    `${stated} vs ${truth}`);
+  check('a path stated through a symlinked prefix still resolves to the real file',
+    ig.resolveCandidate(stated, [arena]) === truth, String(ig.resolveCandidate(stated, [arena])));
+
+  // Precedence: a usable named path wins.
+  const before = ig.snapshotImages(arena);
+  fs.writeFileSync(path.join(arena, 'appeared.png'), PNG);
+  check('a named, verified path is preferred',
+    ig.pickResult({ out: `WROTE=${path.join(arena, 'real.png')}`, bases: [arena], workdir: arena, before })
+      .file === fs.realpathSync(path.join(arena, 'real.png')));
+
+  // THE FALLBACK: codex wrote the file and never said so usably.
+  const silent = ig.pickResult({ out: 'all done!', bases: [arena], workdir: arena, before });
+  check('...and a file that appeared unannounced is still found',
+    silent.file === fs.realpathSync(path.join(arena, 'appeared.png')), String(silent.file));
+  check('...and it says the path came from disk, not from the output',
+    /found on disk/.test(silent.how));
+
+  // A named path that is a lie must not win over a real file on disk.
+  const lying = ig.pickResult({ out: `WROTE=${path.join(arena, 'liar.png')}`, bases: [arena], workdir: arena, before });
+  check('a named path pointing at a non-image is rejected in favour of a real one',
+    lying.file === fs.realpathSync(path.join(arena, 'appeared.png')), String(lying.file));
+
+  // THE REFUSAL: nothing was produced, and it must say so rather than invent a path.
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'imggen-empty-'));
+  const nothing = ig.pickResult({ out: 'I could not do it', bases: [empty], workdir: empty, before: new Set() });
+  check('REFUSES when no image exists — no path is invented',
+    nothing.file === null && /no image/.test(nothing.how));
+
+  // ── --out is the one attacker-shaped input this tool has ───────────────────
+  //
+  // An image generator is a file-writing tool, and `--out` says where. Measured before
+  // containment existed: `../../../etc` resolved to `/Users/you/orca/etc`, `/etc` resolved to
+  // `/etc`, and `~/x` created a directory literally named `~` because `path.resolve` does not
+  // expand tildes.
+  //
+  // Two destinations are legitimate: **inside the repo** (a logo or icon that is a source
+  // resource and gets committed) and **inside the project's state directory** (scratch output
+  // that must not dirty anyone's git status). Nothing else.
+  {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'img-root-'));
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'img-state-'));
+    const ok = (o) => ig.resolveOutDir(o, { root, stateDir: state });
+
+    check('--out into the repo is allowed — a source resource belongs beside the code',
+      ok('assets/brand').dir === path.join(fs.realpathSync(root), 'assets/brand'), JSON.stringify(ok('assets/brand')));
+    check('...and into the state directory too', !ok(path.join(state, 'images')).error);
+    check('REFUSES a traversal out of the project', !!ok('../../../etc').error);
+    check('...REFUSES an absolute path outside it', !!ok('/etc').error);
+    check('...and REFUSES a home-directory path rather than creating a literal ~ folder',
+      !!ok('~/somewhere').error);
+    check('...and the refusal says where it actually resolved, so it is debuggable',
+      /resolves to \//.test(ok('../../../etc').error));
+
+    for (const d of [root, state]) fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  // And the command itself refuses an empty prompt rather than burning a codex run.
+  const noPrompt = spawnSync('node', [path.join(ROOT, 'plugin', 'scripts', 'image-gen.mjs'), '--json'],
+    { encoding: 'utf8' });
+  check('...and the command refuses an empty prompt before spending a codex run',
+    noPrompt.status === 1 && /no prompt/.test(`${noPrompt.stdout}${noPrompt.stderr}`));
+
+  for (const d of [arena, empty]) fs.rmSync(d, { recursive: true, force: true });
+}
+
+{
+  console.log('\n▸ kill-audit\'s journal — a killed audit must not leave a control disarmed');
+  // **This is the defect the audit caused twice, not one it found.** kill-audit mutates real
+  // controls; killed mid-run it left `depth-check.mjs` with its empty-catch rule returning null,
+  // and later `guard-edit.mjs` with its discard guard rewritten to `if (false)`. The workspace's
+  // one blocking control, disarmed, in a file that read as ordinary.
+  //
+  // Signal handlers cannot fix it — measured: this process blocks inside `spawnSync` for minutes
+  // and a JS handler cannot run during a synchronous call, so SIGTERM waits behind the block;
+  // SIGKILL skips handlers outright. So the original bytes go to a journal on disk *before* the
+  // file is touched, and the NEXT run repairs from it.
+  //
+  // Tested against a temp file rather than by killing a real audit, which takes minutes. The
+  // full end-to-end version — SIGKILL a live run, then prove the next one repairs it — was run
+  // by hand and is recorded in the card.
+  const ka = path.join(ROOT, 'scripts', 'kill-audit.mjs');
+  const journal = path.join(ROOT, '.nexa-kill-audit-inflight.json');
+  const victim = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ka-journal-')), 'control.mjs');
+  const GOOD = '// the armed control\nexport const guard = () => true;\n';
+  fs.writeFileSync(victim, '// DISARMED BY A KILLED AUDIT\nexport const guard = () => false;\n');
+  fs.writeFileSync(journal, JSON.stringify({ file: victim, original: GOOD, at: '2026-07-30T00:00:00Z' }));
+
+  const r = spawnSync('node', [ka, '--only=__nothing_matches__'], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+  check('a killed run\'s journal is recovered before the next run does anything',
+    fs.readFileSync(victim, 'utf8') === GOOD, fs.readFileSync(victim, 'utf8').split('\n')[0]);
+  check('...and it says so, rather than repairing silently',
+    /recovered/.test(`${r.stdout}${r.stderr}`));
+  check('...and the journal is cleared, so it cannot repair twice from stale bytes',
+    !fs.existsSync(journal));
+
+  fs.rmSync(path.dirname(victim), { recursive: true, force: true });
+}
+
+{
+  console.log('\n▸ council-update — the vendored council knows how stale it is');
+  const upd = path.join(ROOT, 'scripts', 'council-update.mjs');
+  const r = spawnSync('node', [upd], { cwd: ROOT, encoding: 'utf8', timeout: 120000 });
+  // Current, behind, or offline are all legitimate; crashing is not, and neither is silence.
+  check('council-update reports rather than crashing', r.status === 0 || r.status === 1);
+  check('...and names the pinned commit, so staleness is visible without a network call',
+    /vendored at|pinned to/i.test(r.stdout + r.stderr));
+
+  // THE REFUSAL: a copy with no provenance is the exact failure of the 2026 vendoring — it was
+  // wrong for a week and nobody could tell by looking. An unpinned copy must fail, not shrug.
+  // ── assert WHICH guard fired, not merely that something did ────────────────
+  //
+  // **This assertion was worthless and `kill-audit` proved it.** It checked `status === 1`, and
+  // an unpinned copy exits 1 down two entirely different paths: the provenance refusal, and the
+  // drift check that follows it (a null pin never equals upstream HEAD). So deleting the
+  // provenance guard changed nothing this could see — the `council-provenance` mutation
+  // SURVIVED while the test stayed green.
+  //
+  // That is the over-determined-fixture failure `guard-edit` carries rule ids for, committed
+  // here by the same hand that wrote the warning. One bit cannot say which rule fired, so the
+  // assertion has to read the reason.
+  const unpinned = (() => {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'unpinned-council-'));
+    fs.writeFileSync(path.join(t, 'members.json'), '{}');
     try {
-      return spawnSync('node', [path.join(t, 'scripts', 'council-sync.mjs'), '--check'],
-        { cwd: t, encoding: 'utf8' }).status === 1;
+      const r = spawnSync('node', [upd], { cwd: ROOT, encoding: 'utf8',
+        env: { ...process.env, NEXA_COUNCIL_DIR: t } });
+      return { code: r.status, say: `${r.stdout ?? ''}${r.stderr ?? ''}` };
     } finally { fs.rmSync(t, { recursive: true, force: true }); }
-  })());
+  })();
+  check('council-update REFUSES a copy with no .vendored-from', unpinned.code === 1);
+  check('...naming PROVENANCE as the reason, not drift — the two exit 1 identically',
+    /\.vendored-from is missing|no provenance/.test(unpinned.say),
+    unpinned.say.split('\n').filter(Boolean).slice(-2).join(' | '));
 }
 
 {
@@ -1676,6 +1914,35 @@ console.log(`\n${'─'.repeat(72)}`);
   check('...and it reports what it scanned, so an empty run cannot read as a clean one',
     scratch({ 'README.md': '# x\n' }).status === 0
       && /scanned/.test(spawnSync('node', [leak, '--json'], { cwd: ROOT, encoding: 'utf8' }).stdout));
+
+  // ── the HUMAN path, which nothing here was exercising ──────────────────────
+  //
+  // Every assertion above runs with `--json`, and `--json` exits from its own line. So the
+  // ordinary invocation — `npm run leakage`, and `npm run gate` — had **no coverage of whether
+  // it refuses at all**. `kill-audit`'s `leakage-exit` mutation turned that exit into 0 and
+  // survived: findings printed in full, exit code 0, every test still green.
+  //
+  // "Prints its failures and then exits 0" is the eleventh fail-open this project has shipped,
+  // and it was sitting in the one output mode a person actually reads.
+  const human = (files) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leak-human-'));
+    fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
+    installScript(d, 'no-product-leakage.mjs');
+    for (const [f, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
+      fs.writeFileSync(path.join(d, f), body);
+    }
+    const r = spawnSync('node', [path.join(d, 'scripts', 'no-product-leakage.mjs')],
+      { cwd: d, encoding: 'utf8' });
+    fs.rmSync(d, { recursive: true, force: true });
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+  const dirty = human({ 'a/SKILL.md': `${forbidden.product} does this.\n` });
+  check('REFUSES without --json too — the mode every person and `npm run gate` uses',
+    dirty.status === 1, `exit ${dirty.status}`);
+  check('...and names the finding in that mode as well', /SKILL\.md/.test(dirty.out));
+  check('...while a clean tree still exits 0 in the human mode',
+    human({ 'README.md': '# a workspace\n' }).status === 0);
 }
 
 // ── mutation-test — YOUR invariants, where kill-audit does the workspace's ────
@@ -1781,11 +2048,39 @@ console.log(`\n${'─'.repeat(72)}`);
     const setup = fs.readFileSync(path.join(ROOT, 'setup.sh'), 'utf8');
     check('setup.sh decides a suite by its exit code, not by parsing its output',
       /out="\$\(node "\$t" 2>&1\)"; rc=\$\?/.test(setup) && /if \[ "\$rc" -eq 0 \]/.test(setup));
+    // ── no suite may leave anything in the developer's real state directory ────
+    //
+    // Session state moved to ~/.nexa/workspaces/<id>/ on 2026-07-30, and the first version of
+    // that change left **four fixture repositories behind in it** — a test firing a writing
+    // hook resolves a state root like anything else, and a temp repo gets a temp id and its own
+    // directory. Nothing failed; the pollution was only visible by listing the home directory.
+    //
+    // The suites are isolated with NEXA_STATE_DIR now. This is the check that says so, and the
+    // reason it lives here is that this block already runs every other suite.
+    // **The watched path is ASKED FOR, never spelled out here.** The first version hardcoded
+    // `~/.nexa/workspaces`; card 003 renamed that to `~/.nexa/projects`, and this guard went on
+    // comparing '' to '' — passing on every run while 32 fixture directories accumulated in the
+    // developer's real home. A guard that names a path independently of the code it guards stops
+    // guarding the moment that path moves, and says nothing when it does.
+    //
+    // So the location comes from `stateRoot`, the same function the writers use. Rename the
+    // layout again and this follows it.
+    const { stateRoot } = await import(path.join(ROOT, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
+    const nexa = path.dirname(stateRoot(os.tmpdir()));
+    const listing = () => (fs.existsSync(nexa) ? fs.readdirSync(nexa).sort().join(',') : '');
+    const stateBefore = listing();
+    check('the leak guard is watching a directory that actually exists',
+      fs.existsSync(nexa) || stateBefore === '', nexa);
+
     check('...and every suite in tests/ exits 0 when it passes, whatever wording it uses',
       fs.readdirSync(path.join(ROOT, 'tests'))
         .filter((f) => f.endsWith('.mjs') && !f.startsWith('._') && f !== 'hooks.test.mjs')
         .every((f) => spawnSync('node', [path.join(ROOT, 'tests', f)],
           { cwd: ROOT, encoding: 'utf8', timeout: 600000 }).status === 0));
+
+    check('...and none of them left a fixture behind in the real ~/.nexa',
+      listing() === stateBefore,
+      `${stateBefore.split(',').length} → ${listing().split(',').length} entries`);
   }
 
   // Every command the README tells a newcomer to run must at least resolve.

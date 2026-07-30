@@ -18,10 +18,6 @@
   ],
   "dependencies": [
     {
-      "name": "all-cli-council",
-      "marketplace": "all-cli-council"
-    },
-    {
       "name": "codex",
       "marketplace": "openai-codex"
     },

@@ -9,8 +9,7 @@
   "allowCrossMarketplaceDependenciesOn": [
     "claude-plugins-official",
     "openai-codex",
-    "ponytail",
-    "all-cli-council"
+    "ponytail"
   ],
   "plugins": [
     {

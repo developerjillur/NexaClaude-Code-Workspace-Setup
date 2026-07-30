@@ -32,7 +32,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { projectRootFor } from './hooks/roots.mjs';
+import { projectRootFor, paths } from './hooks/roots.mjs';
 
 // @rules absent, unreadable, no-commit-marker, dangling-commit, behind-head, uncommitted, not-indexed
 //
@@ -43,6 +43,8 @@ import { projectRootFor } from './hooks/roots.mjs';
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
 const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 if (!ROOT_TRUSTED) {
   console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
   process.exit(2);
@@ -57,7 +59,7 @@ const git = (args, cwd) => {
 /** Directories the workspace considers product code. */
 function codeDirs() {
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(P.config, 'utf8'));
     const d = Array.isArray(cfg.codeDirs) ? cfg.codeDirs.filter((x) => typeof x === 'string' && x) : [];
     return d.length ? d : ['code'];
   } catch { return ['code']; }

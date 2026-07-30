@@ -192,6 +192,53 @@ const KILLS = [
     what: 'guard-coverage stops requiring a SILENT case — the direction every defect came from',
     from: '  } else if (!silent) {',
     to: '  } else if (false) {' },
+
+  // ── the controls added on 2026-07-30, mutated because the audit named them ──
+  //
+  // This file's own scope report is the reason these exist: it listed `migrate.mjs`,
+  // `council-run.mjs` and `council-update.mjs` under *"no mutation exists for these, so this run
+  // says nothing about them"* — a clean 23/23 that was silent about the three newest controls,
+  // one of which can delete somebody's committed decision history.
+  //
+  // **An honest scope report is only worth something if it is acted on.** Reading "0 survived"
+  // and stopping there is how a green audit becomes decoration.
+  { id: 'migrate-tracked', file: 'scripts/bootstrap.mjs',
+    what: 'nexa-migrate stops asking git — it moves a COMMITTED board and DECISIONS.md out of the user\'s repo',
+    from: "    return out.trim() === '';",
+    to: '    return true;' },
+  { id: 'migrate-clobber', file: 'scripts/bootstrap.mjs',
+    what: 'migration overwrites a project directory that already holds work, instead of skipping it',
+    from: '    if (fs.existsSync(to)) { kept.push({ rel, why: \'already present in ~/.nexa\' }); continue; }',
+    to: '    if (false) { kept.push({ rel, why: \'already present in ~/.nexa\' }); continue; }' },
+  { id: 'council-provenance', file: 'scripts/council-update.mjs',
+    what: 'the vendored council stops needing provenance — a stale copy reports itself current, which is exactly how the UTF-8 corruption survived a week',
+    from: 'if (!pin?.commit) {',
+    to: 'if (false) {' },
+  { id: 'council-cwd', file: 'scripts/council-run.mjs',
+    what: 'the council runs from the user\'s repo again, dropping .council/runs/ back into their tree',
+    from: 'const cwd = out ?? process.cwd();',
+    to: 'const cwd = process.cwd();' },
+
+  // ── closing the scope report's own list ────────────────────────────────────
+  //
+  // The previous run named seven controls it said nothing about. Three are covered above; these
+  // close three more. **A scope report is only worth printing if it shrinks.**
+  { id: 'leakage-exit', file: 'scripts/no-product-leakage.mjs',
+    what: 'no-product-leakage prints every finding and then exits 0 — a scanner that reports and passes',
+    from: 'process.exit(1);',
+    to: 'process.exit(0);' },
+  { id: 'leakage-allow', file: 'scripts/no-product-leakage.mjs',
+    what: 'the allowlist matches everything, so a real product leak is exempted anywhere',
+    from: '  if (ALLOWED_REAL.has(real(f))) continue;',
+    to: '  if (true) continue;' },
+  { id: 'reflect-stale', file: 'scripts/reflect.mjs',
+    what: 'reflect --check stops refusing an unresolvable marker — staleness can never be detected again',
+    from: '  if (!resolves) {',
+    to: '  if (false) {' },
+  { id: 'ci-paths-missing', file: 'scripts/ci-code-paths.mjs',
+    what: 'CI stops refusing when the code paths are absent — the job scans nothing and goes green',
+    from: '    process.exit(1);',
+    to: '    process.exit(0);' },
 ];
 
 // ── the seam that lets this file be audited itself ───────────────────────────
@@ -246,6 +293,49 @@ function runEverything() {
   return one('check.mjs', [path.join(ROOT, 'scripts', 'check.mjs')]);
 }
 
+// ── the journal, because restore-on-exit cannot be relied on ────────────────
+//
+// **Measured, after this bit somebody twice.** A handler was added for SIGTERM and SIGHUP, and
+// it still did not work: this process spends minutes blocked inside `spawnSync` running the
+// suite, and **a JavaScript signal handler cannot run during a synchronous call.** The signal is
+// queued behind a block that outlasts the shell that sent it. SIGKILL skips handlers entirely.
+//
+// Proven rather than reasoned: a probe started an audit, waited for a real mutation to appear on
+// disk, sent SIGTERM, and found `guard-edit.mjs` still mutated — its discard guard rewritten to
+// `if (false)`. The workspace's one blocking control, disarmed, in a file that looked ordinary.
+//
+// So the original bytes go to a JOURNAL on disk *before* the file is touched, and the next run
+// restores from it. That survives every death mode, because it does not need this process to be
+// alive to work. In-process restore stays as the fast path; the journal is the one that holds.
+const JOURNAL = path.join(ROOT, '.nexa-kill-audit-inflight.json');
+
+function journalWrite(file, original) {
+  try {
+    fs.writeFileSync(JOURNAL, `${JSON.stringify({ file, original, at: new Date().toISOString() })}\n`);
+  } catch { /* the run still proceeds; the in-process restore is the fast path */ }
+}
+const journalClear = () => { try { fs.unlinkSync(JOURNAL); } catch { /* already gone */ } };
+
+/**
+ * Restore whatever a previous run left mutated. Runs FIRST, before anything is read or mutated,
+ * so a killed audit cannot make the next one measure a disarmed control and call it caught.
+ */
+function journalRecover() {
+  if (!fs.existsSync(JOURNAL)) return;
+  try {
+    const { file, original, at } = JSON.parse(fs.readFileSync(JOURNAL, 'utf8'));
+    if (typeof file === 'string' && typeof original === 'string' && fs.existsSync(file)) {
+      if (fs.readFileSync(file, 'utf8') !== original) {
+        fs.writeFileSync(file, original);
+        console.error(`  ⚠️  recovered ${path.relative(ROOT, file)} — a previous run (${at}) was killed`
+          + ' mid-mutation and left it disarmed. Restored before starting.');
+      }
+    }
+  } catch { /* corrupt journal: nothing safe to do but leave it and say so below */ }
+  journalClear();
+}
+journalRecover();
+
 // Restore-on-exit, unconditionally. This file edits real controls.
 const inFlight = new Map();
 const restoreAll = () => {
@@ -255,6 +345,22 @@ const restoreAll = () => {
 process.on('exit', restoreAll);
 process.on('SIGINT', () => { restoreAll(); process.exit(130); });
 process.on('uncaughtException', (e) => { restoreAll(); console.error(e); process.exit(1); });
+// ── SIGTERM, and why its absence cost a disarmed workspace twice ─────────────
+//
+// `exit`, SIGINT and `uncaughtException` were covered; **SIGTERM was not**, and SIGTERM is what
+// a session teardown, a `kill`, a CI cancel and a background-task stop actually send. Node has
+// no default handler that unwinds — the process dies where it stands, and the mutation applied
+// at that moment stays on disk.
+//
+// It has now happened twice. The second time, `depth-check.mjs` was left with its empty-catch
+// rule returning `null`: **the control was disarmed, the file looked ordinary, and the only
+// symptom was two failures in a suite nobody would connect to an audit that had died earlier.**
+// A tool that exists to prove the controls work must not be the thing that switches one off.
+//
+// SIGHUP for the same reason, one terminal-close away.
+for (const sig of ['SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => { restoreAll(); process.exit(143); });
+}
 
 const say = (s) => { if (!JSON_OUT) console.log(s); };
 
@@ -304,6 +410,7 @@ for (const k of KILLS) {
   if (mutated === original) { results.push({ ...k, status: 'no-op' }); say(`  ·  ${k.id.padEnd(18)} mutation changed nothing — skipped`); continue; }
 
   inFlight.set(f, original);
+  journalWrite(f, original);          // survives SIGKILL, which no handler does
   fs.writeFileSync(f, mutated);
   let res;
   try {
@@ -313,6 +420,7 @@ for (const k of KILLS) {
   } finally {
     fs.writeFileSync(f, original);
     inFlight.delete(f);
+    journalClear();
   }
 
   const status = res.invalid ? 'invalid' : res.broke ? 'incomplete' : (res.red ? 'caught' : 'SURVIVED');

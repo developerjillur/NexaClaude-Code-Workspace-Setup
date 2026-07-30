@@ -1,16 +1,15 @@
 # NexaClaude Code Workspace
 
 **A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
-Kanban pipeline with WIP=1, fifteen skills, three subagents, seven commands, and a five-model
+Kanban pipeline with WIP=1, sixteen skills, three subagents, nine commands, and a five-model
 council that reviews your decisions across four vendors.**
 
 **Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
 No special commands to memorise — Claude Code loads what it needs, when the situation matches.
 
 ```bash
-claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
-claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
-claude plugin marketplace add developerjillur/all-cli-council # → all-cli-council
+claude plugin marketplace add openai/codex-plugin-cc   # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail  # → ponytail
 claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
 claude plugin install nexa-workspace@nexa
 ```
@@ -80,21 +79,12 @@ elsewhere, so the exact count moves by one — a number that drifts is worth say
 than rounding into a claim.)
 
 ```bash
-# a bare clone can run these two
 node tests/hooks.test.mjs             # the hooks, the gates, the controls
+node tests/bootstrap.test.mjs         # zero-command adoption, in both directions
+node tests/plugin-packaging.test.mjs  # what stops being true once it is installed
+node tests/state-root.test.mjs        # where files go, and what a rename does to them
 node tests/guard-paths-with-spaces.mjs
-
-# these arrive with ./setup.sh — the council is FETCHED, not vendored
-node tests/council.test.mjs           # containment, ranking, aggregation
-node tests/survives-session-death.mjs # launches a council, SIGKILLs the
-                                      # session, checks the run lived
 ```
-
-**The split matters.** The first two are in this repo. The second two come from the council,
-which is cloned at setup rather than copied in — so on a fresh clone they do not exist yet, and
-a instruction that cannot be followed is a broken instruction. Counts are deliberately not
-quoted here: a number in a README is a claim, and this one drifted three times before a check
-started counting the files instead.
 
 ---
 
@@ -107,10 +97,9 @@ rules are there. No init command, no `setup.sh`, no copying files.
 ### The four commands
 
 ```bash
-# 1 · the three marketplaces Claude Code does not know by default
-claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
-claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
-claude plugin marketplace add developerjillur/all-cli-council # → all-cli-council
+# 1 · the two marketplaces Claude Code does not know by default
+claude plugin marketplace add openai/codex-plugin-cc   # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail  # → ponytail
 
 # 2 · this workspace
 claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
@@ -130,7 +119,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 
 | | |
 |---|---|
-| **9 plugins**, resolved automatically | `all-cli-council` (`/council`), `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
+| **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
 | **16 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
@@ -294,13 +283,16 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 32 scripts — `scripts/`
+### 36 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
 | `verify-install.mjs` | **the 5-verify arms only a real session can settle** — does a populated repo stay untouched, does a clean root scaffold and announce it. Refuses to report at all when the session did not run |
 | `measure-settings-race.mjs` | **the measurement the zero-command bootstrap rests on** — does a deny rule written by a `SessionStart` hook protect the session that wrote it? Two arms, and the BASELINE arm exists so a broken harness cannot report success |
-| `council-sync.mjs` | **fetches the council from GitHub** and links it into place — never vendored, because a copy is a dependency with a timer on it |
+| `hooks/autopilot.mjs` · `autopilot-ctl.mjs` | **unattended auto-continue**, off by default — a rule list vetoes anything about pushing, deleting, credentials, money, people or production *before* a model is asked |
+| `image-gen.mjs` | **generates an image with the codex CLI** and finds the file wherever codex actually put it — the printed path is a hint, the filesystem is the authority |
+| `council-run.mjs` | runs the vendored council **from the project directory**, so its deliberations land in `~/.nexa` rather than your repo |
+| `council-update.mjs` | reports drift against upstream and re-vendors — the council is pinned in `.vendored-from`, not merely copied |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `kill-audit.mjs` | **delete one real protection at a time and see whether anything notices.** Not "is this control watched?" but "is each of its rules watched?" — a control can be watched and still have nine of its ten rules unwatched. Found four on its first run |
@@ -315,14 +307,26 @@ before any code exists)
 
 ### The council — four vendors, three stages, no API keys
 
-Synced from [`all-cli-council`](https://github.com/developerjillur/all-cli-council), which is
-the same code published standalone. **15 scripts, 510 assertions.**
+Ships **inside the plugin** at `plugin/scripts/council/` — [all-cli-council](https://github.com/developerjillur/all-cli-council)
+copied verbatim (MIT): **15 scripts, 510 assertions.** Nothing to fetch, no extra marketplace,
+no clone. A core feature that needs a second install step is not one.
+
+It has had four other homes and each cost something: a vendored copy with *rewritten paths* broke
+three ways in an afternoon and later went stale carrying a silent UTF-8 corruption bug; a per-repo
+clone behind symlinks vanished on install, taking `/council` with it; a marketplace dependency
+worked but made everyone add a fourth source; a shared clone in `~/.nexa` was still a fetch.
+
+**This is the first version without path rewriting** — the copy reaches nothing outside its own
+directory, so there is no moving layout to chase — **and the first with provenance**:
+`.vendored-from` pins the upstream commit, `nexa-check` prints it every run, and
+`nexa-council-update` reports drift. The 2026 copy was neither pinned nor dated, which is why
+nobody noticed it had been wrong for a week.
 
 ```bash
-node scripts/council/council.mjs "<question>" --context src/a.js src/b.js
-node scripts/council/council.mjs "x" --preflight              # who is reachable; free
-node scripts/council/verify-containment.mjs                   # prove no member can write
-node scripts/council/watch.mjs                                # follow a run from another terminal
+nexa-council "<question>" --context src/a.js src/b.js
+nexa-council "x" --preflight       # who is reachable; free
+nexa-council-update                # is the vendored council behind upstream?
+nexa-council-watch                 # follow a run from another terminal
 ```
 
 Every member answers **alone**, then ranks the others **without knowing whose answer is whose**,
@@ -459,7 +463,7 @@ that has not been used enough to know.**
 - **Node ≥ 20** — no dependencies; every script is plain Node
 - **Claude Code**
 - Optional but recommended: the CLIs the council calls (`codex`, and any others you list in
-  `scripts/council/members.json`). `--preflight` tells you which are reachable and costs
+  `~/.nexa/council/scripts/members.json`). `--preflight` tells you which are reachable and costs
   nothing.
 
 ---

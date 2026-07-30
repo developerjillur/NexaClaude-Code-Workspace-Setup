@@ -8,12 +8,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, PLUGIN_ROOT } from './roots.mjs';
+import { projectRoot, PLUGIN_ROOT, paths } from './roots.mjs';
 import { bootstrap } from '../bootstrap.mjs';
 import { execFileSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT, trusted: TRUSTED } = projectRoot();
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 
 // ── zero-command adoption ────────────────────────────────────────────────────
 //
@@ -38,7 +40,7 @@ if (TRUSTED) {
   }
 }
 const cards = (s) => {
-  const d = path.join(ROOT, 'board', s);
+  const d = path.join(P.board, s);
   return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
 };
 
@@ -47,7 +49,23 @@ out.push('## Workspace state (SessionStart hook — not written by the model)');
 
 if (boot.created?.length) {
   out.push(`\n**This repository was just set up as a workspace — ${boot.created.length} files were created.**`);
-  out.push(boot.created.map((f) => `- \`${path.relative(ROOT, f)}\``).join('\n'));
+  // **Two shapes and two places, both of which this got wrong.**
+  //
+  // `created` holds `{file, wroteHash}` records, not strings — passing one straight to
+  // `path.relative` threw ERR_INVALID_ARG_TYPE and killed the hook *after* it had already
+  // scaffolded the repository. So a first-ever session showed a stack trace instead of the
+  // welcome, having silently succeeded. No unit test reached it: the suites exercise
+  // `session-start` with garbage input and `bootstrap` without the banner, and the one path a
+  // real user always takes ran in neither.
+  //
+  // And since card 003 the files land in two trees, so a single `path.relative(ROOT, …)` would
+  // render the ~/.nexa half as `../../../../.nexa/…`. Repo files show repo-relative; the rest
+  // show under `~`, which is where the user will actually go looking.
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const shown = (p) => (p.startsWith(`${ROOT}${path.sep}`)
+    ? path.relative(ROOT, p)
+    : (home && p.startsWith(home) ? `~${p.slice(home.length)}` : p));
+  out.push(boot.created.map((c) => `- \`${shown(typeof c === 'string' ? c : c.file)}\``).join('\n'));
   out.push(`Settings went to \`${boot.settings?.where}\`.` +
     (boot.settings?.conflicts?.length ? ` Yours were kept where they differed: ${boot.settings.conflicts.join('; ')}.` : ''));
   // Worded precisely, because the previous wording was false: a settings.local.json that
@@ -87,7 +105,7 @@ for (const [c, l] of waiting) out.push(`- ${c.length} ${l}: ${c.join(', ')}`);
 
 // The last decision, so a session does not re-open a settled question.
 try {
-  const dec = fs.readFileSync(path.join(ROOT, 'docs', 'DECISIONS.md'), 'utf8');
+  const dec = fs.readFileSync(path.join(P.docs, 'DECISIONS.md'), 'utf8');
   // Skip the format example at the top of the file — telling a fresh session that the last
   // decision was '<the decision, as a sentence>' is worse than telling it nothing.
   const last = [...dec.matchAll(/^### (.+)$/gm)]

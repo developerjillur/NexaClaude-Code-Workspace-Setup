@@ -17,16 +17,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { projectRootFor } from './hooks/roots.mjs';
+import { projectRootFor, paths } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
 const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 if (!ROOT_TRUSTED) {
   console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
   process.exit(2);
 }
-const LEARNED = path.join(ROOT, 'docs', 'LEARNED.md');
+const LEARNED = path.join(P.docs, 'LEARNED.md');
 const CHECK_ONLY = process.argv.includes('--check');
 
 // How much accumulated change is too much to leave unreflected. Not a measured number — a
@@ -96,7 +98,7 @@ out.push(commits.length ? commits.map((c) => `  ${c}`).join('\n') : '  (none)');
 
 // Decisions are the highest-signal input: each one already carries its own reasoning, so a
 // pattern across several of them is the thing a single decision cannot state.
-const decFile = path.join(ROOT, 'docs', 'DECISIONS.md');
+const decFile = path.join(P.docs, 'DECISIONS.md');
 const decisions = fs.existsSync(decFile)
   // The file documents its own format in a fenced block whose heading looks exactly like a
   // real entry. Counting it made "5 decisions" out of 4 — a small wrong number, and this
@@ -109,14 +111,14 @@ out.push(decisions.length ? decisions.map((d) => `  ${d.replace(/^###\s*/, '')}`
 // Where the work actually is, which is often not where anyone remembers it being.
 out.push(`\n── The board ${'─'.repeat(58)}`);
 for (const stage of ['0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done']) {
-  const dir = path.join(ROOT, 'board', stage);
+  const dir = path.join(P.board, stage);
   const cards = fs.existsSync(dir)
     ? fs.readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
   if (cards.length) out.push(`  ${stage.padEnd(11)} ${cards.join(', ')}`);
 }
 
 // Prompts are what was actually ASKED, which is the one record that shows intent drifting.
-const pDir = path.join(ROOT, 'docs', 'prompts');
+const pDir = P.prompts;
 const days = fs.existsSync(pDir) ? fs.readdirSync(pDir).filter((f) => /^\d{4}-\d\d-\d\d\.md$/.test(f)).sort() : [];
 out.push(`\n── Prompt log (${days.length} day${days.length === 1 ? '' : 's'}) ${'─'.repeat(45)}`);
 out.push(days.length
