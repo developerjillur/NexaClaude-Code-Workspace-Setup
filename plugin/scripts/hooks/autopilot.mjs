@@ -34,6 +34,8 @@
 // delete this" is 3% catastrophic**, and that is the wrong shape of tool for this job.
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { projectRoot, statePath } from './roots.mjs';
@@ -97,14 +99,38 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) !== fs.realpathSync(file
   // imported, not invoked
 } else {
 
-const OFF = () => process.exit(0);
+// ── the breadcrumb, because silence is undiagnosable ────────────────────────
+//
+// Every early exit below is silent on purpose — a Stop hook that talks on every turn is one you
+// uninstall. But that makes "autopilot is on and nothing happened" impossible to tell apart from
+// "the hook never ran", "it could not find your project", and "it found a different project".
+//
+// Observed: a user with autopilot ON, a question that passes the veto, `running stop hooks 3/5`
+// on screen, and **an empty log**. Nothing distinguished those four cases, and none of them can
+// be reproduced from outside the session.
+//
+// So one line goes to a FIXED path on every invocation, before any gate. It is the only thing
+// here that runs unconditionally, it is ~200 bytes, and `nexa-autopilot doctor` reads it back.
+// A diagnostic that only exists when the thing already works is not a diagnostic.
+function breadcrumb(stage, extra = {}) {
+  try {
+    const home = os.homedir();
+    if (!home) return;
+    const dir = path.join(home, '.nexa');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'autopilot-last-stop.json'),
+      `${JSON.stringify({ at: new Date().toISOString(), stage, ...extra }, null, 2)}\n`);
+  } catch { /* a breadcrumb that fails must never be the reason a turn breaks */ }
+}
+
+const OFF = (stage, extra) => { if (stage) breadcrumb(stage, extra); process.exit(0); };
 
 // ── recursion guard ─────────────────────────────────────────────────────────
 //
 // This hook spawns `claude -p` to think. If the plugin is INSTALLED, that child session loads
 // this same Stop hook — which would spawn another child, forever. The child is marked, and a
 // marked child leaves immediately.
-if (process.env.NEXA_AUTOPILOT_CHILD === '1') OFF();
+if (process.env.NEXA_AUTOPILOT_CHILD === '1') OFF('child of the model call — left immediately');
 
 let input = {};
 try {
@@ -112,22 +138,28 @@ try {
   process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) raw += chunk;
   input = JSON.parse(raw || '{}');
-} catch { OFF(); }
+} catch { OFF('stdin was not JSON'); }
 
 // Already inside an auto-continue. Without this, a block triggers a Stop which triggers a block.
-if (input.stop_hook_active) OFF();
+if (input.stop_hook_active) OFF('already inside an auto-continue (stop_hook_active)');
 
-const { root: ROOT, trusted } = projectRoot();
-if (!trusted) OFF();
+const { root: ROOT, trusted, source } = projectRoot();
+if (!trusted) {
+  OFF('NO PROJECT FOUND — the hook could not tell which project this is', {
+    resolvedTo: ROOT, source,
+    claudeProjectDir: process.env.CLAUDE_PROJECT_DIR ?? '(not set)',
+    fix: 'the repo needs a .nexa marker (run nexa-init --apply), or CLAUDE_PROJECT_DIR must be set',
+  });
+}
 
 const stateFile = statePath(ROOT, 'autopilot.json');
-if (!stateFile) OFF();
+if (!stateFile) OFF('no state directory could be resolved', { root: ROOT });
 
 let state = {};
-try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { OFF(); }
+try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { OFF('no autopilot state for this project — it was never turned on here', { root: ROOT, stateFile }); }
 // **Off is the default and must be the cheapest path**: this runs on every turn of every
 // session, so an unconfigured workspace pays one failed read and one parse.
-if (!state.enabled) OFF();
+if (!state.enabled) OFF('autopilot is OFF for this project', { root: ROOT, stateFile });
 
 const logFile = statePath(ROOT, 'autopilot-log.jsonl');
 const log = (entry) => {

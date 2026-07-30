@@ -11,6 +11,8 @@
 // switching on, which is also why `check.mjs` reports it on every run.
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { projectRootFor, statePath } from './hooks/roots.mjs';
 
 const { root: ROOT, trusted } = projectRootFor(import.meta.url);
@@ -68,6 +70,43 @@ if (cmd === 'on') {
     } catch { /* skip a corrupt line rather than dying on it */ }
   }
   console.log('');
+} else if (cmd === 'doctor') {
+  // ── why did nothing happen? ───────────────────────────────────────────────
+  //
+  // The Stop hook is silent on every early exit, which is right — one that talks on every turn
+  // gets uninstalled — and it makes "on, and nothing happened" indistinguishable from "the hook
+  // never ran". This reads the breadcrumb the hook drops before any gate, and compares what the
+  // hook resolved against what this CLI resolves. **A mismatch between those two is the failure
+  // mode**, and it is invisible from either side alone.
+  const crumb = path.join(os.homedir(), '.nexa', 'autopilot-last-stop.json');
+  console.log('\n  ── what this command sees ───────────────────────────────');
+  console.log(`  project      ${ROOT}`);
+  console.log(`  state file   ${stateFile}`);
+  console.log(`  enabled      ${state.enabled ? `yes (${state.continues ?? 0}/${state.maxContinues ?? 10} used)` : 'NO'}`);
+  console.log(`  marker       ${fs.existsSync(path.join(ROOT, '.nexa')) ? 'present' : 'MISSING — run nexa-init --apply'}`);
+
+  console.log('\n  ── what the Stop hook last saw ──────────────────────────');
+  let c = null;
+  try { c = JSON.parse(fs.readFileSync(crumb, 'utf8')); } catch { /* never run */ }
+  if (!c) {
+    console.log('  The hook has never run on this machine.');
+    console.log('  → the plugin was installed or updated after this session started.');
+    console.log('    Restart Claude Code; hooks are loaded once, at session start.\n');
+  } else {
+    console.log(`  at           ${c.at}`);
+    console.log(`  outcome      ${c.stage}`);
+    for (const [k, v] of Object.entries(c)) {
+      if (k === 'at' || k === 'stage') continue;
+      console.log(`  ${k.padEnd(12)} ${v}`);
+    }
+    const mine = path.resolve(ROOT);
+    if (c.root && path.resolve(c.root) !== mine) {
+      console.log(`\n  ⚠️  MISMATCH — the hook used ${c.root}`);
+      console.log(`      this command uses ${mine}`);
+      console.log('      Turning it on here arms a project the hook never reads.');
+    }
+    console.log('');
+  }
 } else {
   console.log(`\n  autopilot: ${state.enabled ? 'ON' : 'off'}`);
   if (state.enabled) {
@@ -76,5 +115,5 @@ if (cmd === 'on') {
   }
   console.log(`  state    : ${stateFile}`);
   console.log(`  log      : ${logFile}`);
-  console.log('\n  nexa-autopilot on [N] | off | log [N]\n');
+  console.log('\n  nexa-autopilot on [N] | off | log [N] | doctor\n');
 }

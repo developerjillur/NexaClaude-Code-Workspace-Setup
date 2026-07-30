@@ -170,6 +170,20 @@ console.log('\n▸ the hook — every gate before the model is reached');
     /no project found/.test(`${homeless.stdout}${homeless.stderr}`));
   for (const d of [path.dirname(path.dirname(cache)), nowhere]) fs.rmSync(d, { recursive: true, force: true });
 
+  // ── the breadcrumb: silence must still be diagnosable ────────────────────
+  //
+  // Every early exit is silent by design, which made "on and nothing happened"
+  // indistinguishable from "the hook never ran". A user hit exactly that: autopilot ON, a
+  // question that passes the veto, stop hooks visibly running, and an empty log.
+  const crumbPath = path.join(home, '.nexa', 'autopilot-last-stop.json');
+  fs.rmSync(crumbPath, { force: true });
+  fire({ last_assistant_message: 'Shall I run the tests?', stop_hook_active: false });
+  const crumb = fs.existsSync(crumbPath) ? JSON.parse(fs.readFileSync(crumbPath, 'utf8')) : null;
+  check('a silent exit still records WHY, at a fixed path', crumb !== null && !!crumb.stage,
+    JSON.stringify(crumb));
+  check('...and names the project it resolved, so a mismatch is visible',
+    crumb?.root === fs.realpathSync(repo) || crumb?.root === repo, crumb?.root);
+
   for (const d of [home, repo]) fs.rmSync(d, { recursive: true, force: true });
 }
 
