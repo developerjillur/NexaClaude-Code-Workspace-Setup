@@ -283,7 +283,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 36 scripts — `scripts/`
+### 37 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
