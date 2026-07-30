@@ -175,7 +175,8 @@ console.log('\n▸ the hook — every gate before the model is reached');
   // Every early exit is silent by design, which made "on and nothing happened"
   // indistinguishable from "the hook never ran". A user hit exactly that: autopilot ON, a
   // question that passes the veto, stop hooks visibly running, and an empty log.
-  const crumbPath = path.join(home, '.nexa', 'autopilot-last-stop.json');
+  // Per-project: the global path is only used when NO project could be resolved.
+  const crumbPath = path.join(path.dirname(logPath), 'autopilot-last-stop.json');
   fs.rmSync(crumbPath, { force: true });
   fire({ last_assistant_message: 'Shall I run the tests?', stop_hook_active: false });
   const crumb = fs.existsSync(crumbPath) ? JSON.parse(fs.readFileSync(crumbPath, 'utf8')) : null;
@@ -183,6 +184,20 @@ console.log('\n▸ the hook — every gate before the model is reached');
     JSON.stringify(crumb));
   check('...and names the project it resolved, so a mismatch is visible',
     crumb?.root === fs.realpathSync(repo) || crumb?.root === repo, crumb?.root);
+
+  // **Per project, not global.** One shared file means every project overwrites every other's,
+  // so doctor in project A reads project B's crumb and reports a MISMATCH that is nothing but
+  // "you have two projects". Shipped that way and it fired a false alarm within ten minutes.
+  // Cleared first: the recursion-guard case earlier in this block legitimately writes globally,
+  // because it exits before any project is resolved. What must not happen is a RESOLVABLE run
+  // writing there — that is what poisons every other project's doctor.
+  const globalCrumb = path.join(home, '.nexa', 'autopilot-last-stop.json');
+  fs.rmSync(globalCrumb, { force: true });
+  fire({ last_assistant_message: 'Shall I run the tests?', stop_hook_active: false });
+  check('a resolvable project writes its crumb PER PROJECT, not to the shared path',
+    !fs.existsSync(globalCrumb), 'a global crumb would alarm every other project');
+  check('...and it lands inside that project\'s own directory',
+    fs.existsSync(path.join(path.dirname(logPath), 'autopilot-last-stop.json')));
 
   for (const d of [home, repo]) fs.rmSync(d, { recursive: true, force: true });
 }
