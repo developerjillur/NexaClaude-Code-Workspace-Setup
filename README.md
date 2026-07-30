@@ -115,6 +115,12 @@ ln -s ../NexaClaude-Code-Workspace-Setup/CLAUDE.md CLAUDE.md
 cp -r ../NexaClaude-Code-Workspace-Setup/code/.claude .     # then fix ../WORKSPACE inside it
 ```
 
+> **Option B and the plugin disagree, and the plugin wins.** With the plugin enabled, hooks
+> take their project from `CLAUDE_PROJECT_DIR` — so running Claude Code inside `my-app` finds
+> *my-app*, not the sibling board. Nothing on disk distinguishes that from loading the plugin
+> with `--plugin-dir` while working in an unrelated repo, so one of the two had to lose.
+> **Start Claude Code in the workspace, or export `CLAUDE_PROJECT_DIR` pointing at it.**
+
 **Link, never copy.** Two copies of a contract drift, and the drift is silent — the original
 project shipped a duplicated pricing table that showed a customer **$6.05 for a call the
 database recorded at $1.92**.

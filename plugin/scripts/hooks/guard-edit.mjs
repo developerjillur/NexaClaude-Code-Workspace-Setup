@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
 
 // Two roots, and this one is the *project* — board, config, code directories. `roots.mjs` holds
 // the evidence; the short version is that a single root computed from this file's own location
@@ -211,9 +211,17 @@ if (input?.tool_name === 'Bash') {
   // So there is a marker file, which the hook CAN see. It is **consumed on use** — deleted the
   // moment it is honoured — so it cannot be created once and left on, which is what an
   // environment variable in a shell profile becomes.
+  // **Consumed only when it is actually used, and only in a workspace we were invited into.**
+  //
+  // This block used to run before `sawDiscard` was consulted, so *any* Bash command deleted the
+  // marker — `ls` burned the user's one-shot override, and it did so in repositories the
+  // bootstrap had explicitly declined to adopt, which is a write into somebody else's tree by
+  // the one hook that is supposed to be read-only until it refuses. Found by a second-model
+  // review, which noticed that guarding the four document writers had left the fifth writer
+  // — this one — unguarded.
   const flag = path.join(ROOT, '.nexa-allow-discard');
   let allowed = process.env.NEXA_ALLOW_DISCARD === '1';
-  if (!allowed && fs.existsSync(flag)) {
+  if (sawDiscard && !allowed && isAdoptedWorkspace(ROOT) && fs.existsSync(flag)) {
     try { fs.rmSync(flag); } catch { /* honoured anyway; the warning below is the record */ }
     console.error('⚠ .nexa-allow-discard was present — honoured once, and removed.');
     allowed = true;

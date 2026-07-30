@@ -39,7 +39,14 @@ if (boot.created?.length) {
   out.push(boot.created.map((f) => `- \`${path.relative(ROOT, f)}\``).join('\n'));
   out.push(`Settings went to \`${boot.settings?.where}\`.` +
     (boot.settings?.conflicts?.length ? ` Yours were kept where they differed: ${boot.settings.conflicts.join('; ')}.` : ''));
-  out.push('Nothing that already existed was modified. To undo all of it, run `/nexa-workspace:remove`.');
+  // Worded precisely, because the previous wording was false: a settings.local.json that
+  // already existed IS modified by the merge. Saying otherwise is the "nothing invented"
+  // defect committed in a banner, where the user is most likely to believe it.
+  out.push(/merged/.test(boot.settings?.where ?? '')
+    ? 'Everything above was created. One file that already existed, `.claude/settings.local.json`,'
+      + ' was merged into — a copy was saved first. `/nexa-workspace:remove` deletes what was'
+      + ' created and restores that file to the bytes it had.'
+    : 'Nothing that already existed was modified. To undo all of it, run `/nexa-workspace:remove`.');
   // model is read once at session start — documented, and the one thing hot-reload cannot fix.
   out.push('**One caveat:** `model` is read at startup, so this session is still on your default' +
     ' model. Permission rules and hooks are live now; the model applies from your next session.');

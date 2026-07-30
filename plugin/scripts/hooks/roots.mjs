@@ -83,16 +83,17 @@ function workspaceAbove(start) {
 /**
  * The tree the hook is deciding *about*: board, config, code directories, docs, markers.
  *
- * **The order is deliberate and the first rung is not the obvious one.** Preferring
- * `CLAUDE_PROJECT_DIR` unconditionally would have been the tidy answer and it silently changes
- * behaviour that works today: the workspace is often a sibling of the product repo (README
- * Option B), so `CLAUDE_PROJECT_DIR` names the *code* while the board lives in the workspace.
- * The existing suite runs the hooks from this directory with the real environment inherited, so
- * that same reordering would have pointed every fixture at the wrong tree while still passing.
+ * **The order, and it has been wrong in both directions.**
  *
- * So: if the scripts are sitting in a workspace, that workspace is the answer — which is every
- * deployment that works today. `CLAUDE_PROJECT_DIR` is consulted only when they are not, which
- * is exactly the packaged case.
+ *   1. the scripts are themselves sitting in a workspace  — the old single-root clone
+ *   2. `CLAUDE_PROJECT_DIR`                               — authoritative; Claude Code said so
+ *   3. a workspace above the plugin                        — `<workspace>/plugin/` in-repo layout
+ *   4. the working directory                               — gate scripts only, never hooks
+ *
+ * Rung 3 was once above rung 2 and that broke `--plugin-dir` from another repository. Rung 2
+ * above rung 3 costs README Option B, where the workspace is a sibling and you `cd my-app`.
+ * Nothing on disk separates those two cases, so this is a choice rather than a deduction, and
+ * the body says which way it went and why.
  *
  * @returns {{root: string, source: string, trusted: boolean}} `trusted: false` means the
  *   project could not be located. Callers that refuse must **not** treat that as "nothing to
@@ -134,9 +135,18 @@ export function projectRoot({ cwdFallback = false } = {}) {
   // Found by 5-verify, not by any unit test: the fixtures put the plugin and the project in the
   // same tree, so the two roots agreed and the ordering never mattered.
   //
-  // Nothing is lost by preferring the environment. In every clone deployment Claude Code is
-  // started *in* the workspace, so `CLAUDE_PROJECT_DIR` and the walk-up name the same directory;
-  // they diverge only in the dev-mode case above, where the environment is the correct answer.
+  // **A trade-off, not a free win — and the comment that used to sit here was false.** It said
+  // every clone deployment starts Claude Code *in* the workspace. README Option B does not: the
+  // workspace is a SIBLING of the product repo and the instructions say `cd my-app`. There the
+  // environment names the code while the board lives next door, and this ordering ignores it.
+  //
+  // No predicate separates that from the `--plugin-dir` case: in both, the environment names a
+  // directory that is not a workspace while a workspace sits above the plugin. Same shape, so
+  // one of them must lose.
+  //
+  // The environment wins — a hook that obeys beats a hook that guesses. Option B keeps working
+  // by starting Claude Code in the workspace, or by pointing CLAUDE_PROJECT_DIR at it, and the
+  // README says so now rather than this comment pretending there is no conflict.
   const env = process.env.CLAUDE_PROJECT_DIR;
   if (env && isDir(env)) {
     return { root: path.resolve(env), source: 'CLAUDE_PROJECT_DIR', trusted: true };

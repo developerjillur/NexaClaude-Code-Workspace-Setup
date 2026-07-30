@@ -183,8 +183,13 @@ console.log('\n▸ the settings ladder — the merge is the last resort, not the
   check('...their model choice wins over ours', after.model === 'sonnet');
   check('...and the conflict is reported rather than swallowed',
     res.settings.conflicts.some((c) => c.startsWith('model:')), JSON.stringify(res.settings.conflicts));
-  check('...a one-time backup of their file exists',
-    fs.existsSync(path.join(r, '.claude', 'settings.local.json.pre-nexa')));
+  // The backup deliberately lives OUTSIDE the repository. Keeping it beside the file meant a
+  // stale .pre-nexa from an earlier run was later restored over live settings — a second-model
+  // review's worst finding, and the reason this assertion changed rather than the code.
+  check('...a backup of their file exists, outside the repository',
+    res.modified?.length === 1 && fs.existsSync(res.modified[0].backup)
+      && !res.modified[0].backup.startsWith(fs.realpathSync(r)),
+    JSON.stringify(res.modified));
 }
 {
   // The merge must be pure: it may not mutate what it was handed.
@@ -259,7 +264,7 @@ console.log('\n▸ the merge must not quietly overrule the user');
     fs.readFileSync(path.join(r, '.claude', 'settings.local.json'), 'utf8') === original,
     fs.readFileSync(path.join(r, '.claude', 'settings.local.json'), 'utf8').slice(0, 100));
   check('...and says which files it restored', rm.restored?.length > 0);
-  check('...leaving no .pre-nexa backup behind',
+  check('...leaving no backup file behind anywhere',
     !fs.existsSync(path.join(r, '.claude', 'settings.local.json.pre-nexa')));
 }
 

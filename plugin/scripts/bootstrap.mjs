@@ -42,6 +42,7 @@ const git = (dir, args) => {
 export const dataDir = () =>
   process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.nexa');
 
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const keyFor = (root) => crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
 export const manifestPath = (root) => path.join(dataDir(), 'manifests', `${keyFor(root)}.json`);
 export const tombstonePath = (root) => path.join(dataDir(), 'tombstones', `${keyFor(root)}`);
@@ -140,6 +141,26 @@ export function mergeSettings(theirs, ours) {
   // when they are trying to work out why something was blocked.
   const norm = (r) => String(r).replace(/:\*\)$/, ' *)').replace(/\s+/g, ' ').trim();
 
+  // `Read(./code/**)` -> {tool:'Read', path:'./code/**'}. Anything unparseable yields null and
+  // is compared by string only, which is the conservative direction: an unrecognised shape is
+  // never treated as covering something.
+  const parse = (r) => {
+    const m = String(r).match(/^(\w+)\((.*)\)$/);
+    return m ? { tool: m[1], pat: m[2].trim() } : null;
+  };
+  /** Does rule `a` (an allow) cover rule `b` (a deny we would add)? */
+  const covers = (a, b) => {
+    if (norm(a) === norm(b)) return true;
+    const pa = parse(a); const pb = parse(b);
+    if (!pa || !pb || pa.tool !== pb.tool) return false;
+    // Only the trailing-glob case, which is the one that actually occurs. A prefix ending in
+    // `**` or `*` covers any path beneath it.
+    const m = pa.pat.match(/^(.*?)\*\*?$/);
+    if (!m) return false;
+    const prefix = m[1];
+    return pb.pat.startsWith(prefix);
+  };
+
   for (const list of ['deny', 'ask']) {
     const mine = ours.permissions?.[list] ?? [];
     if (!mine.length) continue;
@@ -152,7 +173,11 @@ export function mergeSettings(theirs, ours) {
       // evaluated before allow, so appending a deny for something they explicitly allowed
       // leaves their rule textually present and completely ineffective — the file still reads
       // as though it were honoured. Skip ours and say so.
-      if (list === 'deny' && allow.some((a) => norm(a) === norm(rule))) {
+      // **Overlap, not equality.** `allow: ["Read(./code/**)"]` is broader than our
+      // `Read(./code/.env)`; deny is evaluated first, so appending ours narrows a permission
+      // the user deliberately granted — and string equality never sees it. Compare the paths
+      // the rules name: if theirs covers ours, theirs wins and we say so.
+      if (list === 'deny' && allow.some((a) => covers(a, rule))) {
         conflicts.push(`${rule}: you allow it, so our deny was NOT added`);
         continue;
       }
@@ -211,15 +236,30 @@ function writeSettings(root, payload, created, modified) {
   catch { return { where: 'none', conflicts: ['settings.local.json does not parse — left untouched'] }; }
 
   const { merged, conflicts } = mergeSettings(theirs, payload);
-  const backup = `${local}.pre-nexa`;
-  if (!fs.existsSync(backup)) fs.copyFileSync(local, backup);
-  atomicWrite(local, `${JSON.stringify(merged, null, 2)}\n`);
+
+  // **The backup goes OUTSIDE the repository, and is never reused.**
+  //
+  // It was `${local}.pre-nexa`, created only when absent. A second-model review found what
+  // that does on the second run: an existing `.pre-nexa` — left by an earlier version, another
+  // tool, or a previous adoption — is recorded as *this* run's backup, and removal then copies
+  // that unrelated file over live settings. Restoring somebody's settings from a stranger's
+  // snapshot is worse than not restoring them, because it looks like it worked.
+  const before = fs.readFileSync(local, 'utf8');
+  const backup = path.join(dataDir(), 'backups', keyFor(root), 'settings.local.json');
+  atomicWrite(backup, before);
+
+  const bytes = `${JSON.stringify(merged, null, 2)}\n`;
+  atomicWrite(local, bytes);
   // **Recorded as MODIFIED, not created — the distinction is the whole of undo.** This file
   // existed before us; deleting it on removal would take the user's own settings with it, and
   // leaving it alone (which is what happened until a second-model review found it) leaves our
   // deny rules, model and env behind while the banner promises "to undo all of it". Neither is
   // acceptable, so the pre-existing bytes are restored from the backup instead.
-  modified.push({ file: local, backup });
+  // The hash of what WE wrote. Removal compares it against what is on disk: if they differ the
+  // user has edited the file since, and restoring the backup would throw their work away. That
+  // was the second failure path in the same review — "removal blindly copies the original over
+  // the current file."
+  modified.push({ file: local, backup, wroteHash: sha(bytes) });
   return { where: 'settings.local.json (merged)', conflicts };
 }
 
@@ -297,14 +337,21 @@ export function remove(root) {
   const { created = [], modified = [] } = JSON.parse(fs.readFileSync(mf, 'utf8'));
   const removed = [];
   const restored = [];
+  const keptBack = [];
   // Restore before deleting: a modified file must go back to the bytes it had, not vanish.
   for (const m of modified) {
     try {
-      if (fs.existsSync(m.backup)) {
-        fs.copyFileSync(m.backup, m.file);
-        fs.rmSync(m.backup, { force: true });
-        restored.push(m.file);
+      if (!fs.existsSync(m.backup)) continue;
+      // Has the user edited it since we wrote it? If so their edits are newer than our backup
+      // and restoring would delete them. Leave it, and SAY so — a silent skip here reads as a
+      // successful undo.
+      if (m.wroteHash && fs.existsSync(m.file) && sha(fs.readFileSync(m.file, 'utf8')) !== m.wroteHash) {
+        keptBack.push(m.file);
+        continue;
       }
+      fs.copyFileSync(m.backup, m.file);
+      fs.rmSync(m.backup, { force: true });
+      restored.push(m.file);
     } catch { /* leave it rather than make it worse */ }
   }
   // Deepest first, so a directory is empty by the time we reach it.
@@ -315,5 +362,5 @@ export function remove(root) {
   }
   atomicWrite(tombstonePath(root), `${new Date().toISOString()}\n`);
   fs.rmSync(mf, { force: true });
-  return { removed, restored, reason: 'removed and tombstoned' };
+  return { removed, restored, keptBack, reason: 'removed and tombstoned' };
 }

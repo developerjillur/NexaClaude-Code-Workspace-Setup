@@ -123,4 +123,4 @@ if (fail) {
   console.log('\n  A plugin that only works from its own checkout is not packaged.\n');
   process.exit(1);
 }
-console.log('\n  Shippable: nothing here depends on being run from this directory.\n');
+console.log('\n  Packaging invariants hold for this checkout. NOT proven here: a real marketplace\n  install, which copies into a cache. nexa-verify-install covers that.\n');
