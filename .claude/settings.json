@@ -23,9 +23,7 @@
       "Read(./code/.env.*)",
       "Read(./code/data/**)",
       "Edit(./plan/**)",
-      "Write(./plan/**)",
-      "Edit(./board/6-done/**)",
-      "Write(./board/6-done/**)"
+      "Edit(./board/6-done/**)"
     ],
     "ask": [
       "Bash(npm run test:live:*)",

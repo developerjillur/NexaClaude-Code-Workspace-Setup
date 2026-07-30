@@ -169,6 +169,21 @@ console.log('\n▸ a clean repository root — the only case that writes');
     path.basename(home) === projectId(fs.realpathSync(r)), path.basename(home));
   check('the contract it wrote is the real one, not a stub',
     fs.readFileSync(path.join(r, 'AGENTS.md'), 'utf8').includes('The contract every coding agent works under'));
+  // ── a deny rule the tool ignores is not a deny rule ───────────────────────
+  //
+  // A live session printed, twice: "Write(./plan/**) is not matched by file permission checks —
+  // only Edit(path) rules are." So every Write(...) deny we wrote was INERT, and the two paths
+  // §8 calls boundaries an agent must not touch were guarded by nothing. The warning only
+  // appears in a running session, which is why no unit test ever saw it.
+  {
+    const deny = JSON.parse(fs.readFileSync(path.join(r, '.claude', 'settings.json'), 'utf8'))
+      .permissions?.deny ?? [];
+    check('no Write(path) deny rules — Claude Code ignores them',
+      !deny.some((d) => /^Write\(\.\//.test(d)), deny.filter((d) => /^Write\(/.test(d)).join(', '));
+    check('...and the boundaries are covered by Edit(), which applies to every editing tool',
+      deny.includes('Edit(./plan/**)') && deny.includes('Edit(./board/6-done/**)'), deny.join(', '));
+  }
+
   check('the settings it wrote carry the deny rules',
     JSON.parse(fs.readFileSync(path.join(r, '.claude', 'settings.json'), 'utf8'))
       .permissions.deny.includes('Read(./code/.env)'));
