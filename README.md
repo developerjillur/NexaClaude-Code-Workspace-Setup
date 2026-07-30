@@ -10,6 +10,7 @@ No special commands to memorise — Claude Code loads what it needs, when the si
 ```bash
 claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
 claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+claude plugin marketplace add developerjillur/all-cli-council # → all-cli-council
 claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
 claude plugin install nexa-workspace@nexa
 ```
@@ -106,9 +107,10 @@ rules are there. No init command, no `setup.sh`, no copying files.
 ### The four commands
 
 ```bash
-# 1 · the two marketplaces Claude Code does not know by default
+# 1 · the three marketplaces Claude Code does not know by default
 claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
 claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+claude plugin marketplace add developerjillur/all-cli-council # → all-cli-council
 
 # 2 · this workspace
 claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
@@ -117,8 +119,8 @@ claude plugin install nexa-workspace@nexa
 
 Then open Claude Code in the repository you want to work in. That is it.
 
-**Why step 1 exists, and why it cannot be automated.** `nexa-workspace` depends on eight
-plugins. Six live in `claude-plugins-official`, which Claude Code registers for you. Two do
+**Why step 1 exists, and why it cannot be automated.** `nexa-workspace` depends on nine
+plugins. Six live in `claude-plugins-official`, which Claude Code registers for you. Three do
 not — and **no plugin manifest can register a marketplace on your behalf.** Adding a plugin
 source is a trust decision that belongs to the person typing it, so the dependency resolves
 only after you have added the source yourself. Skip step 1 and the install reports
@@ -128,7 +130,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 
 | | |
 |---|---|
-| **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
+| **9 plugins**, resolved automatically | `all-cli-council` (`/council`), `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
 | **16 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |

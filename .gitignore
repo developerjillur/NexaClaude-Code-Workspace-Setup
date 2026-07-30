@@ -43,3 +43,12 @@ docs/.prompt-check-state.json
 
 # The one-shot discard override — never committed, consumed on use.
 .nexa-allow-discard
+
+# The council is a PLUGIN DEPENDENCY (all-cli-council), not vendored content.
+# `council-sync.mjs` still links it into the clone workflow, and those links point at
+# gitignored .council-src — so committing them ships dangling symlinks that an install
+# silently skips, taking /council, the council skill and its scripts with them.
+plugin/commands/council.md
+plugin/commands/council-custom.md
+plugin/scripts/council
+plugin/skills/council

@@ -1,1 +1,0 @@
-../../.council-src/commands/council-custom.md
