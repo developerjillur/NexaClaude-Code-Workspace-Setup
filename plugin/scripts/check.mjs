@@ -154,7 +154,8 @@ for (const s of realDirs(skillDir)) {
     // yet, and the answer is setup, not a missing file. On a fresh clone this fired as a
     // hard failure and pointed at the wrong thing entirely.
     if (s === 'council' && !fs.existsSync(path.join(ROOT, '.council-src'))) {
-      soft('the council skill arrives with the council', 'npm run council:sync');
+      soft('the council skill arrives with the council',
+        'installed: it comes with the all-cli-council plugin. Cloned: npm run council:sync');
     } else bad(`skill ${s} has no SKILL.md`, 'the directory alone does nothing');
     continue;
   }
@@ -363,8 +364,42 @@ for (const [label, p] of sides) {
   // the `gemini` CLI already did, refusing this account outright ("no longer supported for
   // individuals"), which is why Gemini is reached through Antigravity instead. A council that
   // silently shrinks to three still returns a confident answer, so absence must be loud.
-  const membersFile = path.join(ROOT, 'scripts', 'council', 'members.json');
-  if (fs.existsSync(membersFile)) {
+  // ── where the council actually is ──────────────────────────────────────────
+  //
+  // **The council is a core feature and it now arrives two different ways**, so looking in one
+  // place makes it invisible in the other. Cloned, it is vendored at `scripts/council` by
+  // `council-sync`. Installed, it is the `all-cli-council` PLUGIN — a declared dependency of
+  // this one — and lives in Claude Code's plugin cache, nowhere near the project.
+  //
+  // Checking only the vendored path told every installed user their council was missing and
+  // handed them `npm run council:sync`, a command their layout does not have. A check that
+  // reports absence where there is none is worse than no check: it teaches people to ignore it.
+  const councilHome = () => {
+    const vendored = path.join(ROOT, 'scripts', 'council');
+    if (fs.existsSync(path.join(vendored, 'members.json'))) return { at: vendored, how: 'vendored' };
+    const cache = path.join(process.env.HOME ?? '', '.claude', 'plugins', 'cache');
+    try {
+      for (const market of fs.readdirSync(cache)) {
+        const plug = path.join(cache, market, 'all-cli-council');
+        if (!fs.existsSync(plug)) continue;
+        for (const version of fs.readdirSync(plug)) {
+          for (const sub of ['scripts', '.']) {
+            const cand = path.join(plug, version, sub);
+            if (fs.existsSync(path.join(cand, 'members.json'))) return { at: cand, how: 'plugin' };
+          }
+        }
+      }
+    } catch { /* no cache on this machine */ }
+    return null;
+  };
+
+  const council = councilHome();
+  if (!council) {
+    soft('the council is not here — /council will not work',
+      'claude plugin marketplace add developerjillur/all-cli-council, or npm run council:sync in a clone');
+  }
+  const membersFile = council ? path.join(council.at, 'members.json') : null;
+  if (membersFile && fs.existsSync(membersFile)) {
     const cfg = JSON.parse(fs.readFileSync(membersFile, 'utf8'));
     const dirs = [`${process.env.HOME}/.local/bin`, `${process.env.HOME}/.npm-global/bin`,
       '/usr/local/bin', '/opt/homebrew/bin', ...(process.env.PATH ?? '').split(':')];
@@ -373,7 +408,7 @@ for (const [label, p] of sides) {
     if (missing.length) {
       soft(`council: ${missing.join(', ')} not found`,
         `${cfg.members.length} members declared; a council that quietly shrinks still answers confidently`);
-    } else ok(`council: all ${cfg.members.length} members reachable`);
+    } else ok(`council: all ${cfg.members.length} members reachable (${council.how})`);
   }
 
   const codexCfg = path.join(process.env.HOME ?? '', '.codex', 'config.toml');

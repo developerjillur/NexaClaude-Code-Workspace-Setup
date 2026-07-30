@@ -9,15 +9,49 @@
   "homepage": "https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup",
   "repository": "https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup",
   "license": "MIT",
-  "keywords": ["workflow", "hooks", "code-review", "kanban", "guardrails"],
+  "keywords": [
+    "workflow",
+    "hooks",
+    "code-review",
+    "kanban",
+    "guardrails"
+  ],
   "dependencies": [
-    { "name": "codex", "marketplace": "openai-codex" },
-    { "name": "ponytail", "marketplace": "ponytail" },
-    { "name": "code-review", "marketplace": "claude-plugins-official" },
-    { "name": "feature-dev", "marketplace": "claude-plugins-official" },
-    { "name": "github", "marketplace": "claude-plugins-official" },
-    { "name": "code-simplifier", "marketplace": "claude-plugins-official" },
-    { "name": "security-guidance", "marketplace": "claude-plugins-official" },
-    { "name": "typescript-lsp", "marketplace": "claude-plugins-official" }
+    {
+      "name": "all-cli-council",
+      "marketplace": "all-cli-council"
+    },
+    {
+      "name": "codex",
+      "marketplace": "openai-codex"
+    },
+    {
+      "name": "ponytail",
+      "marketplace": "ponytail"
+    },
+    {
+      "name": "code-review",
+      "marketplace": "claude-plugins-official"
+    },
+    {
+      "name": "feature-dev",
+      "marketplace": "claude-plugins-official"
+    },
+    {
+      "name": "github",
+      "marketplace": "claude-plugins-official"
+    },
+    {
+      "name": "code-simplifier",
+      "marketplace": "claude-plugins-official"
+    },
+    {
+      "name": "security-guidance",
+      "marketplace": "claude-plugins-official"
+    },
+    {
+      "name": "typescript-lsp",
+      "marketplace": "claude-plugins-official"
+    }
   ]
 }

@@ -442,5 +442,37 @@ and no one else. The two independent findings of the same defect (5-verify saw `
 reviewer read the branch) is the argument for §10 stated as a measurement rather than a
 principle.
 
-<!-- reflected-at: ff9e207 -->
+## Every reviewer checked whether a thing was *intended*. A user checked whether it was *there*
+
+The packaging test asserted that four symlinks escaping `plugin/` were **deliberate** — that
+they pointed at gitignored, fetched content. They were deliberate. They were also tracked in
+git, so a fresh clone got four dangling links and an install skipped every one, silently
+removing `/council`, `/council-custom`, the council skill and the council's scripts.
+
+Four defences read that code and none of them saw it:
+
+- two second-model reviews, one of which read the packaging test line by line
+- twenty-one parallel agents attacking the same files
+- a test written specifically to prove the plugin was shippable
+- `check.mjs`, which counts commands and was satisfied — it counts *tracked files*, and the
+  broken links are tracked files
+
+**The owner found it by looking at the plugin and counting.** *"I can see a missing slash
+command there."*
+
+The common shape: every check asked a question about the code's intent — is this link
+deliberate, is this count consistent, is this rule tested. **Nobody asked the user's question,
+which is "is it there after I install it."** That question has a different subject: not the
+repository, but the artefact the repository produces.
+
+> **A test written by the author of a thing tends to test the thing the author was thinking
+> about.** The packaging test was written *because* a reviewer said the packaging proof was
+> missing — and it still encoded the author's mental model, one level up.
+
+The corrected assertion is three lines and would have caught it on the day it was introduced:
+nothing git tracks inside `plugin/` may be a symlink that escapes `plugin/`. The council is a
+declared dependency now, which is what it should always have been — it is a published plugin
+with its own manifest, and vendoring links to it was never the shape.
+
+<!-- reflected-at: aaa28dc -->
 

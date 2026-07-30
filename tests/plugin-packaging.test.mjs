@@ -89,13 +89,32 @@ console.log('\n▸ symlinks inside plugin/ — one that escapes is skipped on in
   check(`no symlink escapes the plugin (${links.length} link(s) found)`,
     escaped.length === 0, escaped.map((p) => path.relative(ROOT, p)).join(', '));
 
-  const council = links.filter(isCouncil);
-  for (const p of council) {
-    const rel = path.relative(ROOT, p);
-    const ignored = spawnSync('git', ['check-ignore', '-q', path.relative(ROOT, fs.readlinkSync(p).startsWith('/')
-      ? fs.readlinkSync(p) : path.resolve(path.dirname(p), fs.readlinkSync(p)))], { cwd: ROOT }).status === 0;
-    check(`the one allowed escape, ${rel}, points at gitignored fetched content`, ignored);
-  }
+  // **The assertion that actually matters, and the one that was missing.**
+  //
+  // The earlier version checked that the escaping council links were *intentional* — that they
+  // pointed at gitignored fetched content. They were intentional and they were still wrong:
+  // being tracked in git, a fresh clone got four dangling links, and an install skipped all
+  // four, silently removing /council, /council-custom, the council skill and its scripts. A
+  // user noticed the missing command before any test did.
+  //
+  // So the question is not "is this link deliberate" but "does this file exist for somebody who
+  // installs the plugin". Anything git tracks inside plugin/ must be a real file, or a link that
+  // resolves inside plugin/. The council is a DEPENDENCY now; its links live only in a clone and
+  // are gitignored.
+  const tracked = spawnSync('git', ['ls-files', '-s', 'plugin'], { cwd: ROOT, encoding: 'utf8' })
+    .stdout.trim().split('\n').filter(Boolean)
+    .map((l) => ({ mode: l.split(/\s+/)[0], file: l.split('\t')[1] }));
+  const trackedLinks = tracked.filter((t) => t.mode === '120000');
+  const trackedEscapes = trackedLinks.filter((t) => !inside(path.join(ROOT, t.file)));
+  check(`nothing git tracks inside plugin/ is a symlink that escapes it (${tracked.length} tracked)`,
+    trackedEscapes.length === 0,
+    `${trackedEscapes.map((t) => t.file).join(', ')} — these vanish on install`);
+
+  // And the commands specifically, because that is where it was noticed.
+  const cmds = tracked.filter((t) => t.file.startsWith('plugin/commands/'));
+  check(`every tracked command is a real file that survives installation (${cmds.length})`,
+    cmds.every((t) => t.mode !== '120000'),
+    cmds.filter((t) => t.mode === '120000').map((t) => t.file).join(', '));
 }
 
 // ── the manifest promises components that exist ──────────────────────────────

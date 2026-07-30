@@ -1,0 +1,9 @@
+# Auto-written by continuum. Transient / page-derived data — do not commit.
+# The chain (chain/, STATE.md) and comms/config.json are intentionally tracked.
+verification/
+runs/
+uploads/
+screenshots/
+.env-provenance.json
+comms/*
+!comms/config.json
