@@ -22,12 +22,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, statePath, paths } from './roots.mjs';
 import { execSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT } = projectRoot();
-// Same consent rule as the other writers — it persists docs/.prompt-check-state.json.
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
+// Same consent rule as the other writers — it persists a remembered count (see statePath).
 if (!isAdoptedWorkspace(ROOT)) process.exit(0);
 const notes = [];
 
@@ -38,7 +40,7 @@ const run = (cmd, cwd = ROOT) => {
 
 try {
   // 1 · WIP. The rule most often broken by accident, and cheapest to check.
-  const buildDir = path.join(ROOT, 'board', '3-build');
+  const buildDir = path.join(P.board, '3-build');
   const inBuild = fs.existsSync(buildDir)
     ? fs.readdirSync(buildDir).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
   if (inBuild.length > 1) {
@@ -63,22 +65,30 @@ try {
   //
   // So the last reported count is remembered, and only meaningful growth speaks. A standing 45
   // is silent; 45 → 70 is not.
-  const stateFile = path.join(ROOT, 'docs', '.prompt-check-state.json');
-  let prev = {};
-  try { prev = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
-  const now = {};
+  //
+  // Outside the repository since 2026-07-30 — see stateRoot in roots.mjs. **Without the memory
+  // this check has to stay silent, not speak.** With no remembered count every prompt sees
+  // `was === undefined`, which is the "first run" branch, which reports — so a null state root
+  // would turn the one check designed to be quiet into the noisiest thing in the session. The
+  // whole section is therefore skipped rather than run without its state.
+  const stateFile = statePath(ROOT, '.prompt-check-state.json');
+  if (stateFile) {
+    let prev = {};
+    try { prev = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
+    const now = {};
 
-  for (const [label, dir] of [['workspace', ROOT], ['code/', path.join(ROOT, 'code')]]) {
-    const s = run('git status --porcelain', dir);
-    if (s === null) continue;
-    const n = s.split('\n').filter(Boolean).length;
-    now[label] = n;
-    const was = prev[label];
-    if (n >= 25 && (was === undefined || n >= was + 15)) {
-      notes.push(`**${n} uncommitted files in ${label}**${was !== undefined ? ` (was ${was})` : ''} — a diff this size stops being reviewable.`);
+    for (const [label, dir] of [['workspace', ROOT], ['code/', path.join(ROOT, 'code')]]) {
+      const s = run('git status --porcelain', dir);
+      if (s === null) continue;
+      const n = s.split('\n').filter(Boolean).length;
+      now[label] = n;
+      const was = prev[label];
+      if (n >= 25 && (was === undefined || n >= was + 15)) {
+        notes.push(`**${n} uncommitted files in ${label}**${was !== undefined ? ` (was ${was})` : ''} — a diff this size stops being reviewable.`);
+      }
     }
+    try { fs.writeFileSync(stateFile, JSON.stringify(now)); } catch { /* not worth failing over */ }
   }
-  try { fs.writeFileSync(stateFile, JSON.stringify(now)); } catch { /* not worth failing over */ }
 } catch { /* a state check must never be the reason a prompt fails */ }
 
 // Silent when there is nothing to say. That is most of the time, and it is the point.

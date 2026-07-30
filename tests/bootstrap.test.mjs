@@ -22,8 +22,20 @@ const TEMPLATES = path.join(ROOT, 'plugin', 'templates');
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-data-'));
 process.env.CLAUDE_PLUGIN_DATA = DATA;
 
-const { decide, bootstrap, remove, mergeSettings, manifestPath, tombstonePath } =
+// **And neither must the project directories themselves.** Since 2026-07-30 the scaffold is
+// written to ~/.nexa/projects/<id>/ rather than into the repository, so every fixture here would
+// otherwise create a directory in the developer's real home — which is precisely what happened
+// the first time and is now asserted against in hooks.test.mjs. HOME is redirected rather than
+// NEXA_STATE_DIR set, because a single NEXA_STATE_DIR would make all the fixtures share one
+// directory and quietly destroy the isolation between them.
+const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-home-'));
+process.env.HOME = HOME;
+process.env.USERPROFILE = HOME;
+
+const { decide, bootstrap, remove, mergeSettings, manifestPath, tombstonePath,
+  migratable, migrateIntoHome, detectCodeDirs } =
   await import(path.join(ROOT, 'plugin', 'scripts', 'bootstrap.mjs'));
+const { stateRoot, projectId } = await import(path.join(ROOT, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
 
 let pass = 0; let fail = 0;
 const check = (label, ok, detail = '') => {
@@ -106,13 +118,42 @@ console.log('\n▸ a clean repository root — the only case that writes');
   const r = repo();
   const res = boot(r);
   check('it acts', res.act === true, res.reason);
+  // ── the repository gets three things, and that is the point of card 003 ─────
+  //
+  // Adopting used to write fourteen files into somebody else's project. The contract now is:
+  // `.nexa`, `AGENTS.md`, `CLAUDE.md` — plus `.claudeignore` and `.claude/settings.json`, which
+  // Claude Code only reads from the tree and so have nowhere else to live.
+  //
+  // Asserted as an EXACT set rather than a series of existence checks, because the failure
+  // being guarded is a file reappearing in the repository, and an existence check cannot see
+  // something it was not told to look for.
+  const inRepo = fs.readdirSync(r).filter((f) => f !== '.git' && !f.startsWith('._')).sort();
+  check('the repository receives exactly the files that cannot live anywhere else',
+    JSON.stringify(inRepo) === JSON.stringify(
+      ['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+    inRepo.join(', '));
+  check('...and no board/, docs/ or templates/ among them',
+    !inRepo.includes('board') && !inRepo.includes('docs') && !inRepo.includes('templates'));
+  check('...and no workspace.config.json — the config moved out too',
+    !inRepo.includes('workspace.config.json'));
+
+  const home = stateRoot(r);
   const stages = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done', '7-operate'];
-  check('all nine board stages exist', stages.every((s) => fs.existsSync(path.join(r, 'board', s, '.gitkeep'))));
-  for (const f of ['workspace.config.json', '.claudeignore', 'AGENTS.md', 'CLAUDE.md',
+  check('all nine board stages exist, in ~/.nexa',
+    stages.every((s) => fs.existsSync(path.join(home, 'board', s, '.gitkeep'))), home);
+  for (const f of ['config.json', '.nexa-id',
     path.join('docs', 'DECISIONS.md'), path.join('docs', 'LEARNED.md'),
-    path.join('templates', 'CARD.md'), path.join('.claude', 'settings.json')]) {
-    check(`creates ${f}`, fs.existsSync(path.join(r, f)));
+    path.join('templates', 'CARD.md')]) {
+    check(`creates ${f} in the project directory`, fs.existsSync(path.join(home, f)));
   }
+  for (const f of ['.claude/settings.json']) check(`creates ${f} in the repo`, fs.existsSync(path.join(r, f)));
+
+  // The marker and the directory must agree, or a rename cannot be reconciled.
+  check('the marker id and the directory id are the same',
+    JSON.parse(fs.readFileSync(path.join(r, '.nexa'), 'utf8')).nexaId
+      === fs.readFileSync(path.join(home, '.nexa-id'), 'utf8').trim());
+  check('the project directory is named after the repository path',
+    path.basename(home) === projectId(fs.realpathSync(r)), path.basename(home));
   check('the contract it wrote is the real one, not a stub',
     fs.readFileSync(path.join(r, 'AGENTS.md'), 'utf8').includes('The contract every coding agent works under'));
   check('the settings it wrote carry the deny rules',
@@ -141,8 +182,12 @@ console.log('\n▸ create-only — a file that exists is never touched');
     fs.readFileSync(path.join(r, 'AGENTS.md'), 'utf8') === mine);
   check('an existing docs/DECISIONS.md survives too',
     fs.readFileSync(path.join(r, 'docs', 'DECISIONS.md'), 'utf8') === 'mine too\n');
-  check('...and the board was still created alongside them',
-    fs.existsSync(path.join(r, 'board', '3-build')));
+  check('...and the board was still created, in the project directory',
+    fs.existsSync(path.join(stateRoot(r), 'board', '3-build')));
+  // The user already had docs/ in their repo, so that is where docs/ lives for this project —
+  // a second empty DECISIONS.md in ~/.nexa would shadow nothing and confuse everything.
+  check('...and no second DECISIONS.md was created in ~/.nexa beside their own',
+    !fs.existsSync(path.join(stateRoot(r), 'docs', 'DECISIONS.md')));
 }
 
 // ── the settings ladder ──────────────────────────────────────────────────────
@@ -306,9 +351,13 @@ console.log('\n▸ the writing hooks — silent in a repository that was never a
   const yes = repo();
   fs.writeFileSync(path.join(yes, 'workspace.config.json'), '{"codeDirs":["code"]}');
 
+  // A temp state directory, so a fixture repository cannot leave an entry in the developer's
+  // real ~/.nexa. The consent check runs BEFORE the state directory is resolved, so an
+  // unadopted repository still produces nothing anywhere — which is what the next block asserts.
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'adopt-state-'));
   const fire = (script, cwd) => spawnSync('node', [path.join(hooks, script)], {
     input: JSON.stringify({ prompt: 'hello', session_id: 'verify' }),
-    cwd, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd },
+    cwd, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: cwd, NEXA_STATE_DIR: state },
   });
 
   for (const script of ['save-prompt.mjs', 'prompt-check.mjs', 'session-end.mjs']) {
@@ -323,10 +372,18 @@ console.log('\n▸ the writing hooks — silent in a repository that was never a
 
   // THE SILENT CASE — in a workspace that WAS adopted, the log must still be written, or the
   // fix has simply broken the audit trail everywhere instead of leaking it everywhere.
+  //
+  // Since 2026-07-30 it is written to the STATE directory rather than into the repository, so
+  // this asserts the log exists there — and, separately, that the repository stayed clean. Both
+  // halves matter: checking only the first would pass a version that wrote in both places.
   fire('save-prompt.mjs', yes);
   check('...but it still writes in a workspace that was adopted',
-    fs.existsSync(path.join(yes, 'docs', 'prompts')),
-    fs.existsSync(path.join(yes, 'docs')) ? fs.readdirSync(path.join(yes, 'docs')).join(', ') : 'no docs/');
+    fs.existsSync(path.join(state, 'prompts')),
+    fs.existsSync(state) ? fs.readdirSync(state).join(', ') : 'no state dir');
+  check('...and it wrote OUTSIDE the repository, leaving the tree clean',
+    !fs.existsSync(path.join(yes, 'docs')),
+    fs.existsSync(path.join(yes, 'docs')) ? fs.readdirSync(path.join(yes, 'docs')).join(', ') : '');
+  fs.rmSync(state, { recursive: true, force: true });
 }
 
 // ── the bin/ commands ────────────────────────────────────────────────────────
@@ -335,19 +392,118 @@ console.log('\n▸ the writing hooks — silent in a repository that was never a
 // a bare command exists. A wrapper pointing at a script that moved is not a loud failure — it
 // is `command not found` at the moment somebody reaches for a gate, which is exactly when they
 // are least likely to investigate and most likely to carry on without it.
+// ── codeDirs: the field the whole card rule rests on ────────────────────────
+//
+// It defaulted to `['code']` for every repository — right for this workspace's own layout and a
+// **fail-open everywhere else.** Measured before the fix: with `src/` at the repo root,
+// `guard-edit` allowed an edit to `src/app.js` with no card in build while refusing
+// `code/thing.js`. The rule everything else rests on never fired on the user's actual source.
+//
+// Both directions matter here more than usual. Too permissive and the gate is decoration; too
+// strict and it fires on a README and gets switched off within a day. `workspace.config.json`
+// says exactly that about this field, and it shipped wrong in the permissive direction anyway.
+console.log('\n▸ codeDirs — detected from the repo, not assumed to be code/');
+{
+  const r = repo();
+  for (const d of ['src', 'lib', 'docs']) fs.mkdirSync(path.join(r, d), { recursive: true });
+  fs.writeFileSync(path.join(r, 'README.md'), '# x\n');
+  check('real source directories are detected', JSON.stringify(detectCodeDirs(r)) === JSON.stringify(['src', 'lib']),
+    JSON.stringify(detectCodeDirs(r)));
+  check('...and docs/ is NOT among them — a guard that fires on a README gets switched off',
+    !detectCodeDirs(r).includes('docs'));
+
+  const bare = repo();
+  check('a repo with no recognisable source falls back to code/, as before',
+    JSON.stringify(detectCodeDirs(bare)) === JSON.stringify(['code']));
+
+  const legacy = repo();
+  fs.mkdirSync(path.join(legacy, 'code'), { recursive: true });
+  check('...and an existing code/ is still honoured', detectCodeDirs(legacy).includes('code'));
+
+  // The value actually reaches the config the guard reads.
+  boot(r);
+  const cfg = JSON.parse(fs.readFileSync(path.join(stateRoot(r), 'config.json'), 'utf8'));
+  check('the detected value is written into config.json, where guard-edit reads it',
+    JSON.stringify(cfg.codeDirs) === JSON.stringify(['src', 'lib']), JSON.stringify(cfg.codeDirs));
+}
+
+// ── migration: the one operation here that can destroy somebody's work ───────
+//
+// Moving a pre-2026-07-30 in-repo scaffold into ~/.nexa is a tidy-up when the files are ours
+// and a **data-loss bug** when they are not. A board and a DECISIONS.md are meant to be
+// committed — the board is reviewed alongside the diff, the decisions travel with a clone — so
+// the user who did the right thing is exactly the user with the most to lose here.
+//
+// `git ls-files` decides, and a repository git cannot answer for is treated as tracked.
+console.log('\n▸ migration into ~/.nexa — tracked files are the user\'s, not ours');
+{
+  const r = repo();
+  fs.mkdirSync(path.join(r, 'board', '3-build'), { recursive: true });
+  fs.writeFileSync(path.join(r, 'board', '3-build', 'card.md'), 'work in flight\n');
+  fs.mkdirSync(path.join(r, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(r, 'docs', 'DECISIONS.md'), 'weeks of decisions\n');
+  execFileSync('git', ['add', 'docs'], { cwd: r, stdio: 'ignore' });   // docs tracked, board not
+
+  check('git tracking is read, not guessed',
+    migratable(r, 'board') === true && migratable(r, 'docs') === false);
+
+  const res = migrateIntoHome(r);
+  const home = stateRoot(r);
+
+  // THE REFUSAL, and the reason this control exists at all.
+  check('REFUSES to move a tracked docs/ — it stays in the repository',
+    fs.existsSync(path.join(r, 'docs', 'DECISIONS.md')), 'weeks of decisions, silently relocated');
+  check('...and says which, rather than half-migrating quietly',
+    res.kept.some((k) => k.rel === 'docs' && /git tracks it/.test(k.why)), JSON.stringify(res.kept));
+
+  // THE SILENT CASE: an untracked board is ours and must actually move, or migration does
+  // nothing and the litter it was written to clear stays exactly where it was.
+  check('...while an untracked board/ is moved out',
+    !fs.existsSync(path.join(r, 'board')) && fs.existsSync(path.join(home, 'board', '3-build', 'card.md')));
+  check('...and the card survived the move intact',
+    fs.readFileSync(path.join(home, 'board', '3-build', 'card.md'), 'utf8') === 'work in flight\n');
+
+  // Idempotent: a second run must not clobber the destination with a later, emptier attempt.
+  fs.mkdirSync(path.join(r, 'board'), { recursive: true });
+  fs.writeFileSync(path.join(r, 'board', 'stray.md'), 'later junk\n');
+  const again = migrateIntoHome(r);
+  check('a second run refuses rather than overwriting what is already in ~/.nexa',
+    again.kept.some((k) => k.rel === 'board' && /already present/.test(k.why))
+      && fs.readFileSync(path.join(home, 'board', '3-build', 'card.md'), 'utf8') === 'work in flight\n');
+
+  // A directory git cannot answer for is treated as tracked — the safe direction.
+  const notGit = repo({ init: false });
+  fs.mkdirSync(path.join(notGit, 'board'), { recursive: true });
+  check('a non-git directory is treated as tracked, so nothing is moved',
+    migratable(notGit, 'board') === false);
+}
+
 console.log('\n▸ bin/ — every bare command resolves to a script that is actually there');
 {
   const binDir = path.join(ROOT, 'plugin', 'bin');
   const bins = fs.readdirSync(binDir);
   check('there is at least one command', bins.length > 0);
+  // **Nothing delegates outside the plugin any more.** The council is vendored at
+  // scripts/council/, so nexa-council and nexa-council-watch both point at plugin scripts like
+  // every other wrapper. The exemption set is kept, empty, because an exemption that quietly
+  // becomes unnecessary is the shape that hid two defects in this card already — an empty set
+  // states "none, deliberately" where a deleted one states nothing.
+  const DELEGATES = new Set();
   const broken = [];
   const unexecutable = [];
   for (const b of bins) {
     const body = fs.readFileSync(path.join(binDir, b), 'utf8');
-    const m = body.match(/scripts\/([\w.-]+\.mjs)/);
-    if (!m || !fs.existsSync(path.join(ROOT, 'plugin', 'scripts', m[1]))) broken.push(b);
+    if (!DELEGATES.has(b)) {
+      // Subdirectories allowed: the vendored council lives at scripts/council/, so
+      // `nexa-council-watch` points at scripts/council/watch.mjs. The narrower pattern matched
+      // no path with a slash in it and reported a working wrapper as broken.
+      const m = body.match(/scripts\/([\w./-]+\.mjs)/);
+      if (!m || !fs.existsSync(path.join(ROOT, 'plugin', 'scripts', m[1]))) broken.push(b);
+    }
     try { fs.accessSync(path.join(binDir, b), fs.constants.X_OK); } catch { unexecutable.push(b); }
   }
+  check('no wrapper is exempt — every one points at a script inside the plugin',
+    DELEGATES.size === 0);
   check(`all ${bins.length} commands point at a script that exists`, broken.length === 0, broken.join(', '));
   check('...and every one is executable, which git does track', unexecutable.length === 0, unexecutable.join(', '));
 }
@@ -407,7 +563,7 @@ console.log('\n▸ removal — the files this workspace tells you to fill in');
   const r = repo();
   boot(r);
   fs.writeFileSync(path.join(r, 'AGENTS.md'), '# my real contract\n');
-  fs.appendFileSync(path.join(r, 'docs', 'DECISIONS.md'), '\n## a decision I made\n');
+  fs.appendFileSync(path.join(stateRoot(r), 'docs', 'DECISIONS.md'), '\n## a decision I made\n');
   const res = remove(r);
 
   // The hash guard used to cover only the merged settings file. Everything created was deleted
@@ -415,7 +571,7 @@ console.log('\n▸ removal — the files this workspace tells you to fill in');
   check('REFUSES to delete an AGENTS.md the user has written into',
     fs.existsSync(path.join(r, 'AGENTS.md')), 'weeks of contract, unrecoverable');
   check('...and a DECISIONS.md they appended to',
-    fs.existsSync(path.join(r, 'docs', 'DECISIONS.md')));
+    fs.existsSync(path.join(stateRoot(r), 'docs', 'DECISIONS.md')));
   check('...and names them rather than skipping quietly', res.keptBack.length === 2, JSON.stringify(res.keptBack));
   // THE SILENT CASE: untouched files must still go, or removal removes nothing.
   check('...while a file nobody touched is still removed', !fs.existsSync(path.join(r, 'CLAUDE.md')));

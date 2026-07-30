@@ -10,11 +10,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, paths } from './roots.mjs';
 import { execSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT, trusted: TRUSTED } = projectRoot();
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 // A writer with an unlocatable project must write NOTHING. Observed rather than theorised:
 // during the window when these scripts had moved but had not yet been rewired, this hook wrote
 // a shadow prompt log into plugin/docs/prompts/ — the audit trail silently forking in two.
@@ -26,7 +28,7 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 if (!TRUSTED || !isAdoptedWorkspace(ROOT)) process.exit(0);
 
 const cards = (s) => {
-  const d = path.join(ROOT, 'board', s);
+  const d = path.join(P.board, s);
   return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
 };
 

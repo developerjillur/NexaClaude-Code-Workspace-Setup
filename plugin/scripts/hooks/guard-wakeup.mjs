@@ -42,10 +42,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot } from './roots.mjs';
+import { projectRoot, paths } from './roots.mjs';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT } = projectRoot();
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 
 const read = () => new Promise((r) => {
   let s = ''; process.stdin.setEncoding('utf8');
@@ -145,7 +147,7 @@ if (delay > 0 && delay < 1200 && !NAMES_SOMETHING_EXTERNAL.test(hay)) {
 // review — but it is worth saying out loud, because "I will pick it up next tick" is how a
 // card sits in 3-build for a week.
 try {
-  const build = path.join(ROOT, 'board', '3-build');
+  const build = path.join(P.board, '3-build');
   const cards = fs.existsSync(build)
     ? fs.readdirSync(build).filter((f) => f.endsWith('.md') && !f.startsWith('._'))
     : [];

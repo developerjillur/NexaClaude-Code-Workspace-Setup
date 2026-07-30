@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { MARKER, stateRoot, markerId, paths } from './hooks/roots.mjs';
 
 const STAGES = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build',
   '4-review', '5-verify', '6-done', '7-operate'];
@@ -56,10 +57,14 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
  * The repo can then be moved, renamed or copied and still find its own record. Falls back to
  * the old path hash for repositories adopted before this change.
  */
-const idFile = (root) => path.join(root, 'workspace.config.json');
 const keyFor = (root) => {
+  // The `.nexa` marker is the current home of the id; `workspace.config.json` held it for
+  // workspaces adopted before 2026-07-30. Both are read, so an existing repository keeps its
+  // manifest and its backups rather than quietly starting a second record.
+  const fromMarker = markerId(root);
+  if (fromMarker) return fromMarker;
   try {
-    const cfg = JSON.parse(fs.readFileSync(idFile(root), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, 'workspace.config.json'), 'utf8'));
     if (typeof cfg.nexaId === 'string' && cfg.nexaId) return cfg.nexaId;
   } catch { /* not adopted yet, or pre-dates the id */ }
   return crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
@@ -99,13 +104,17 @@ export function decide(root, { allowTemp = false } = {}) {
     return { act: false, level: 'silent', reason: 'removed here before — tombstoned' };
   }
 
-  const cfg = path.join(root, 'workspace.config.json');
-  if (fs.existsSync(cfg)) {
+  // Two markers, two vintages. `.nexa` since 2026-07-30; `workspace.config.json` before it.
+  // Both mean "this user already consented", and missing either would re-scaffold a repository
+  // that is already adopted — which is the one thing idempotence exists to prevent.
+  for (const [name, marker] of [[MARKER, path.join(root, MARKER)],
+    ['workspace.config.json', path.join(root, 'workspace.config.json')]]) {
+    if (!fs.existsSync(marker)) continue;
     try {
-      JSON.parse(fs.readFileSync(cfg, 'utf8'));
+      JSON.parse(fs.readFileSync(marker, 'utf8'));
       return { act: false, level: 'silent', reason: 'already initialised' };
     } catch {
-      return { act: false, level: 'announce', reason: 'workspace.config.json is present but unreadable — nothing was written' };
+      return { act: false, level: 'announce', reason: `${name} is present but unreadable — nothing was written` };
     }
   }
   // A board that is not ours. The fixture for this is a repo whose `board/index.html` is a
@@ -307,6 +316,34 @@ export const SETTINGS = {
   env: { MAX_THINKING_TOKENS: '31999' },
 };
 
+// ── what counts as product code, detected rather than assumed ───────────────
+//
+// `codeDirs` defaulted to `['code']` for every repository, which is right for exactly one
+// layout: this workspace's own, where product code is a `code/` directory or a symlink to a
+// sibling repo. **Adopted into an ordinary project it is a fail-open.** Measured: with `src/` at
+// the repo root, `guard-edit` allowed an edit to `src/app.js` with no card in build (exit 0)
+// while refusing `code/thing.js` (exit 2). The rule everything else here rests on — no product
+// edit without a card — simply never fired on the user's actual source.
+//
+// `workspace.config.json` says a mis-set value in the permissive direction makes the gate
+// decoration, and that "a guard that is off is worse than one that is loose, because everyone
+// still believes in it". That was written about this field and then shipped wrong in that
+// direction.
+//
+// Detection stays deliberately narrow: unmistakable source roots only. Adding `docs/`, `test/`
+// or the repository root would make the guard fire on a README, and a guard that fires on a
+// README is switched off within a day — the failure in the other direction.
+const SOURCE_DIRS = ['code', 'src', 'lib', 'app', 'server', 'api', 'packages', 'services', 'cmd', 'pkg'];
+
+export function detectCodeDirs(root) {
+  const found = SOURCE_DIRS.filter((d) => {
+    try { return fs.statSync(path.join(root, d)).isDirectory(); } catch { return false; }
+  });
+  // Nothing recognisable: keep the old default so a fresh repo behaves as before, and the
+  // banner tells the user to set it. Guessing "everything" here would be the other failure.
+  return found.length ? found : ['code'];
+}
+
 const CONFIG = {
   codeDirs: ['code'],
   depthCheckPaths: [],
@@ -326,6 +363,72 @@ board/6-done/
 `;
 
 const seed = (title, note) => `# ${title}\n\n${note}\n`;
+
+/**
+ * Is this path safe to move out of the repository?
+ *
+ * **The single rule that decides whether this whole design is a tidy-up or a data-loss bug.**
+ *
+ * A workspace adopted before 2026-07-30 has `board/`, `docs/` and `workspace.config.json` in its
+ * repository, and the user has very likely **committed** them — the board is meant to be
+ * reviewed alongside the diff, and `DECISIONS.md` is meant to travel with a clone. Moving a
+ * tracked file out of a repository shows up as a deletion in their next `git status`, breaks
+ * every permalink into it, and rewrites history's meaning. Nothing about tidiness justifies it.
+ *
+ * So: untracked is ours to move, tracked is theirs to keep. `git ls-files` is the authority
+ * rather than a guess, and **a repository git cannot answer for is treated as tracked** — the
+ * safe direction, because the cost of not moving something is clutter and the cost of moving
+ * something is loss.
+ *
+ * @returns {boolean} true only when git is certain nothing here is tracked.
+ */
+export function migratable(root, rel) {
+  try {
+    const out = execFileSync('git', ['ls-files', '--', rel],
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.trim() === '';
+  } catch {
+    return false;   // not a git repo, or git failed: assume tracked and leave it alone
+  }
+}
+
+/**
+ * Move a pre-2026-07-30 in-repo scaffold into `~/.nexa/projects/<id>/`, skipping anything git
+ * tracks. Idempotent, and reports what it declined so the user is never left guessing why half
+ * of it moved.
+ */
+export function migrateIntoHome(root) {
+  const home = stateRoot(root);
+  if (!home) return { moved: [], kept: [], reason: 'no state directory could be resolved' };
+  const moved = []; const kept = [];
+  const jobs = [
+    ['board', 'board'],
+    ['docs', 'docs'],
+    ['templates', 'templates'],
+    ['workspace.config.json', 'config.json'],
+    // Council deliberations. The council writes to `<cwd>/.council/runs`, so anything run before
+    // `council-run.mjs` existed landed in the repository. Same tracked-file rule as the rest:
+    // a run somebody committed on purpose is theirs.
+    ['.council', '.council'],
+  ];
+  for (const [rel, dest] of jobs) {
+    const from = path.join(root, rel);
+    if (!fs.existsSync(from)) continue;
+    const to = path.join(home, dest);
+    if (fs.existsSync(to)) { kept.push({ rel, why: 'already present in ~/.nexa' }); continue; }
+    if (!migratable(root, rel)) { kept.push({ rel, why: 'git tracks it — it is yours' }); continue; }
+    try {
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.renameSync(from, to);
+      moved.push(rel);
+    } catch {
+      // Cross-filesystem rename fails; copy and KEEP the original rather than risk a half-move.
+      try { fs.cpSync(from, to, { recursive: true }); kept.push({ rel, why: 'copied, original left in place' }); }
+      catch { kept.push({ rel, why: 'could not be moved' }); }
+    }
+  }
+  return { moved, kept };
+}
 
 /**
  * Scaffold `root`. Create-only throughout; returns what it did rather than printing, so the
@@ -348,26 +451,70 @@ export function bootstrap(root, templatesDir, opts = {}) {
       // every recorded path points at a directory that no longer exists, so removal deletes
       // nothing and cheerfully reports success. Found by running the rename case rather than
       // reasoning about it.
-      const rel = (p) => path.relative(root, p);
+      // **Two bases, because the scaffold now lives in two places.** Recording a `~/.nexa` file
+      // as a path relative to the repository yields `../../../../.nexa/projects/…`, which
+      // resolves correctly only while the repository stays put — move it and removal deletes
+      // whatever now sits at that offset, or nothing. That is the same class of bug the id fix
+      // was written for, reintroduced by the change of layout.
+      //
+      // So each entry says which base it is relative to, and removal resolves it against that
+      // base recomputed at removal time.
+      const homeNow = stateRoot(root);
+      const rebase = (p) => {
+        if (homeNow && (p === homeNow || p.startsWith(`${homeNow}${path.sep}`))) {
+          return { file: path.relative(homeNow, p), base: 'home' };
+        }
+        return { file: path.relative(root, p), base: 'repo' };
+      };
       atomicWrite(manifestPath(root), `${JSON.stringify({
         root: real(root), at: new Date().toISOString(),
-        created: created.map((c) => ({ ...c, file: rel(c.file) })),
-        modified: modified.map((m) => ({ ...m, file: rel(m.file) })),
+        created: created.map((c) => ({ ...c, ...rebase(c.file) })),
+        modified: modified.map((m) => ({ ...m, ...rebase(m.file) })),
       }, null, 2)}\n`);
     } catch { /* the tree still gets written; losing the record is what we are avoiding */ }
   };
-  for (const s of STAGES) createOnly(path.join(root, 'board', s, '.gitkeep'), '', created);
-  // The id must exist before anything else is recorded, because it names the record.
+  // ── the id, and the marker that carries it ──────────────────────────────────
+  //
+  // Written FIRST, because it names the manifest and it names the project directory's identity.
+  // It lives in the repository so that a rename cannot lose it — see stateRoot in roots.mjs,
+  // which uses it to find and re-label a project directory after the repo moves.
   const nexaId = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
-  createOnly(path.join(root, 'workspace.config.json'),
-    `${JSON.stringify({ ...CONFIG, nexaId }, null, 2)}\n`, created);
-  createOnly(path.join(root, '.claudeignore'), CLAUDEIGNORE, created);
-  createOnly(path.join(root, 'docs', 'DECISIONS.md'),
+  createOnly(path.join(root, MARKER),
+    `${JSON.stringify({ nexaId, adopted: new Date().toISOString() })}\n`, created);
+
+  // ── everything else lands OUTSIDE the repository ────────────────────────────
+  //
+  // The whole scaffold used to be written into the user's tree: nine board stages, a config, a
+  // .claudeignore, two docs, a card template. Adopting a repository therefore showed up as
+  // fourteen unexplained files in `git status`, in somebody else's project, before they had
+  // agreed to any of it.
+  //
+  // Now the repository receives exactly three things — `.nexa`, `AGENTS.md`, `CLAUDE.md` — and
+  // the first is one line. The other two cannot move: `AGENTS.md` at the repository root is the
+  // cross-tool contract 28+ tools read natively, and Claude Code reads project `CLAUDE.md` from
+  // the tree. A contract nothing loads is not a contract.
+  const home = stateRoot(root);
+  if (!home) throw new Error('no state directory could be resolved — set NEXA_STATE_DIR');
+  createOnly(path.join(home, '.nexa-id'), `${nexaId}\n`, created);
+  for (const s of STAGES) createOnly(path.join(home, 'board', s, '.gitkeep'), '', created);
+  const codeDirs = detectCodeDirs(root);
+  createOnly(path.join(home, 'config.json'),
+    `${JSON.stringify({ ...CONFIG, codeDirs, nexaId }, null, 2)}\n`, created);
+  // **`paths()` rather than `home` for these two, and the difference is create-only semantics.**
+  // A repository that already has `docs/DECISIONS.md` — its own, written by a human — must not
+  // get a second empty one in `~/.nexa` that then shadows nothing and confuses everything.
+  // `paths()` answers "where does docs/ live for THIS project", which is the repo when the repo
+  // already has one, so create-only keeps its meaning across both layouts.
+  const P = paths(root);
+  createOnly(path.join(P.docs, 'DECISIONS.md'),
     seed('Decisions', 'One entry per decision that was expensive to reverse. A decision recorded only in chat did not happen.'), created);
-  createOnly(path.join(root, 'docs', 'LEARNED.md'),
+  createOnly(path.join(P.docs, 'LEARNED.md'),
     seed('Learned', 'Patterns across the records that no single record states. Written by `skills/reflect`.'), created);
-  createOnly(path.join(root, 'templates', 'CARD.md'),
+  createOnly(path.join(P.templates, 'CARD.md'),
     fs.readFileSync(path.join(templatesDir, 'CARD.md'), 'utf8'), created);
+  // `.claudeignore` is read by Claude Code from the project tree, so it has nowhere else to be —
+  // but it is only written when the user has no opinion already, like everything else here.
+  createOnly(path.join(root, '.claudeignore'), CLAUDEIGNORE, created);
 
   for (const f of ['AGENTS.md', 'CLAUDE.md']) {
     createOnly(path.join(root, f), fs.readFileSync(path.join(templatesDir, f), 'utf8'), created);
@@ -389,12 +536,18 @@ export function remove(root) {
   const mf = manifestPath(root);
   if (!fs.existsSync(mf)) return { removed: [], reason: 'nothing was recorded for this repository' };
   const raw = JSON.parse(fs.readFileSync(mf, 'utf8'));
-  // Entries are relative to the repository. Older manifests hold absolute paths; path.resolve
-  // leaves those alone, so both shapes work.
-  const abs = (p) => path.resolve(root, p);
+  // Entries carry the base they are relative to: `repo` (the default, and what every manifest
+  // written before 2026-07-30 means) or `home`, the project directory in ~/.nexa. The home base
+  // is recomputed here rather than stored, so a repository that moved since adoption still
+  // resolves to wherever its project directory is NOW.
+  //
+  // Older manifests hold absolute paths; `path.resolve` leaves those alone, so all three shapes
+  // work without a version field.
+  const homeNow = stateRoot(root);
+  const abs = (p, base) => path.resolve(base === 'home' && homeNow ? homeNow : root, p);
   const created = (raw.created ?? []).map((c) => (typeof c === 'string'
-    ? { file: abs(c) } : { ...c, file: abs(c.file) }));
-  const modified = (raw.modified ?? []).map((m) => ({ ...m, file: abs(m.file) }));
+    ? { file: abs(c, 'repo') } : { ...c, file: abs(c.file, c.base) }));
+  const modified = (raw.modified ?? []).map((m) => ({ ...m, file: abs(m.file, m.base) }));
   const removed = [];
   const restored = [];
   const keptBack = [];

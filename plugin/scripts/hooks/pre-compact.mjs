@@ -16,11 +16,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, statePath, paths } from './roots.mjs';
 import { execSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT, trusted: TRUSTED } = projectRoot();
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 // A writer with an unlocatable project must write NOTHING. Observed rather than theorised:
 // during the window when these scripts had moved but had not yet been rewired, this hook wrote
 // a shadow prompt log into plugin/docs/prompts/ — the audit trail silently forking in two.
@@ -31,7 +33,9 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 // through a side door. Caught by 5-verify as `?? docs/` in a repo we had refused to adopt.
 if (!TRUSTED || !isAdoptedWorkspace(ROOT)) process.exit(0);
 
-const OUT = path.join(ROOT, 'docs', 'compactions');
+// Outside the repository since 2026-07-30 — see stateRoot in roots.mjs.
+const OUT = statePath(ROOT, 'compactions');
+if (!OUT) process.exit(0);
 
 const git = (c) => {
   try { return execSync(`git ${c}`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
@@ -48,7 +52,7 @@ try {
 
   // 1 · The card. CLAUDE.md ranks this first: it IS the work, and its acceptance criteria are
   // the thing a summary paraphrases into uselessness.
-  const build = path.join(ROOT, 'board', '3-build');
+  const build = path.join(P.board, '3-build');
   const cards = fs.existsSync(build)
     ? fs.readdirSync(build).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
   if (cards.length) {
@@ -60,7 +64,7 @@ try {
       if (crit.length) lines.push('', ...crit.map((l) => l.trim()), '');
     }
   } else {
-    const spec = path.join(ROOT, 'board', '1-spec');
+    const spec = path.join(P.board, '1-spec');
     const next = fs.existsSync(spec) ? fs.readdirSync(spec).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
     lines.push(`**Nothing in build.** Next in 1-spec: ${next.join(', ') || '(none)'}`);
   }
@@ -76,7 +80,7 @@ try {
 
   // 5 · Decisions. Not re-derivable from code, and the item CLAUDE.md says to write BEFORE
   // compacting rather than after — so this is a prompt to check, not a substitute for doing it.
-  const dec = path.join(ROOT, 'docs', 'DECISIONS.md');
+  const dec = path.join(P.docs, 'DECISIONS.md');
   const latest = fs.existsSync(dec)
     ? (fs.readFileSync(dec, 'utf8').match(/^### (?!.*YYYY-MM-DD).+$/m) ?? [])[0] : null;
   if (latest) lines.push(`\n**Last decision recorded:** ${latest.replace(/^###\s*/, '')}`);
@@ -100,7 +104,9 @@ complete. If you took a number this session, write it into the card yourself.
   fs.appendFileSync(file, lines.join('\n') + '\n');
 
   // The model is mid-compaction and this is the last thing it reliably sees.
-  console.log(`[pre-compact] state written to docs/compactions/${path.basename(file)} — `
+  // The full path, not a repo-relative one: the file is no longer inside the repository, and a
+  // message naming a directory the reader cannot find is worse than no message.
+  console.log(`[pre-compact] state written to ${file} — `
     + 'the card, the tree, and the last decision. Item 4 (measurements) is yours to write.');
 } catch {
   // Silent and allowing: losing a note is recoverable, breaking compaction is not.

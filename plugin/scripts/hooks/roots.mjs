@@ -29,6 +29,7 @@
 // its own evidence in comments instead of a summary.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,9 +41,17 @@ export const PLUGIN_ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(
 
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-/** A tree that has a board or a config is a workspace someone set up on purpose. */
+/**
+ * A tree that carries any adoption marker is a workspace someone set up on purpose.
+ *
+ * Three markers, because there are now three vintages and all of them must be recognised:
+ * `.nexa` (current), `workspace.config.json` (adopted before 2026-07-30), and a `board/`
+ * directory (this repository's own layout, and any workspace adopted before the config existed).
+ */
 const looksLikeWorkspace = (p) =>
-  isDir(path.join(p, 'board')) || fs.existsSync(path.join(p, 'workspace.config.json'));
+  fs.existsSync(path.join(p, MARKER))
+  || fs.existsSync(path.join(p, 'workspace.config.json'))
+  || isDir(path.join(p, 'board'));
 
 /**
  * **May we write into this tree at all?** A stricter question than "where is the project", and
@@ -56,7 +65,8 @@ const looksLikeWorkspace = (p) =>
  *
  * So writing requires the marker the bootstrap itself writes. No config, no writing.
  */
-export const isAdoptedWorkspace = (p) => fs.existsSync(path.join(p, 'workspace.config.json'));
+export const isAdoptedWorkspace = (p) =>
+  fs.existsSync(path.join(p, MARKER)) || fs.existsSync(path.join(p, 'workspace.config.json'));
 
 /**
  * Walk up from `start` looking for a workspace, bounded.
@@ -169,4 +179,285 @@ export function projectRoot({ cwdFallback = false } = {}) {
   }
 
   return { root: PLUGIN_ROOT, source: 'script location (no project found)', trusted: false };
+}
+
+// ── the third root: where session exhaust goes ───────────────────────────────
+//
+// A prompt log, compaction notes and a remembered file count are **not project truth**, and
+// `.gitignore` has said so in prose since they were written. They were nonetheless stored inside
+// the tree, which had two consequences:
+//
+//   · git will not restore what it does not track, so `git clean -xfd` destroyed the only copy
+//     of every prompt ever typed. The guard refuses that command, but a guard is one
+//     `touch .nexa-allow-discard` away and covers one repository on one machine
+//   · prompts here have carried a VPS root password and an OAuth callback code. Inside the tree
+//     they are reachable by an accident — a `git add -f`, a zip, a directory handed to somebody
+//
+// Moving them out does not sanitise them: `save-prompt` still scrubs on write, and the state
+// directory still needs the permissions of a home directory rather than of a repository. This
+// removes an accident path, not the secret.
+
+/**
+ * A stable name for this workspace's state, which must survive nothing at all except this
+ * checkout continuing to exist at this location.
+ *
+ * **The `nexaId` is preferred and the path hash is a fallback, which looks like the mistake
+ * `bootstrap.mjs` already made and is not.** That manifest was keyed by path and broke on a
+ * rename, because it records what to *delete* on removal — it has to find work it did earlier.
+ * State has no such duty: if a project moves, beginning a fresh log is correct, and the old one
+ * is still on disk under the old id rather than lost. So a rename degrades to a new directory
+ * here, where it corrupted an uninstall there.
+ *
+ * `realpathSync` matters for the worktree case — several checkouts of one repository must not
+ * collide, and on this machine they are reached through symlinked paths.
+ */
+export function stateId(root) {
+  let real = root;
+  try { real = fs.realpathSync(root); } catch { /* unresolvable: name what we were given */ }
+  return projectId(real);
+}
+
+/**
+ * A project directory's name, derived from its absolute path.
+ *
+ * `/Users/you/work/my-app` → `-Users-you-work-my-app`
+ *
+ * **Readable on purpose.** The first version keyed by `<basename>-<sha1[0..8]>`, which made
+ * `~/.nexa` a list of names nobody could match to a project without running a hash. This is the
+ * convention Claude Code already uses for `~/.claude/projects/`, so the directory beside ours
+ * reads the same way — `ls ~/.nexa/projects` answers "which project is this" directly.
+ *
+ * Not reversible, and does not need to be: two paths differing only where a separator sits
+ * (`a/b-c` vs `a-b/c`) collide into one name. The consequence is two projects sharing a state
+ * directory, which is visible the moment anyone looks, rather than silent. A hash would trade
+ * that rare collision for permanent unreadability, and unreadable is the failure that happens
+ * every day.
+ *
+ * Characters outside `[A-Za-z0-9._-]` become `-` so the result is a legal directory name on
+ * every filesystem this runs on, including the exFAT volume this repository lives on.
+ */
+export function projectId(absPath) {
+  return path.resolve(absPath).replace(/[^A-Za-z0-9._-]/g, '-');
+}
+
+/** The one marker a repository carries once it has been adopted. Holds its project id. */
+export const MARKER = '.nexa';
+
+/**
+ * **Everything the plugin writes, in one place.**
+ *
+ * Thirty-odd scripts used to build these paths themselves — `path.join(root, 'board')` in a
+ * hook, in a gate, in a test fixture. That is how `board/` and `docs/` came to be scattered
+ * across a user's repository in the first place: there was no single answer to "where does this
+ * go", so every caller invented one.
+ *
+ * ── the legacy fallback, which is the whole compatibility story ───────────────
+ *
+ * A workspace adopted before this change has `board/` and `docs/` **committed** in its
+ * repository. Those must keep working and must never be moved (see `migratable` in
+ * `bootstrap.mjs`): a directory that is in git belongs to the user, not to us. So each location
+ * answers "is the legacy one actually there?" first, and only then points at `~/.nexa`.
+ *
+ * That means a half-migrated workspace resolves each path independently and correctly, rather
+ * than needing all of them to move at once.
+ */
+export function paths(root) {
+  const home = stateRoot(root);
+  const legacy = (rel, ...home_) => {
+    const inRepo = path.join(root, ...rel);
+    if (fs.existsSync(inRepo)) return inRepo;
+    return home ? path.join(home, ...home_) : inRepo;
+  };
+  return {
+    /** `~/.nexa/projects/<id>/`, or null when no home directory could be resolved. */
+    state: home,
+    board: legacy(['board'], 'board'),
+    docs: legacy(['docs'], 'docs'),
+    templates: legacy(['templates'], 'templates'),
+    // The config is a FILE, and the legacy name differs from the new one, so it is spelled out.
+    config: fs.existsSync(path.join(root, 'workspace.config.json'))
+      ? path.join(root, 'workspace.config.json')
+      : (home ? path.join(home, 'config.json') : path.join(root, 'workspace.config.json')),
+    // These three never had an in-repo home worth keeping — card 002 moved them out already.
+    prompts: home && path.join(home, 'prompts'),
+    compactions: home && path.join(home, 'compactions'),
+    backups: home && path.join(home, 'backups'),
+    manifest: home && path.join(home, 'manifest.json'),
+    /** The one-shot discard override. In the repo, because that is where you are told to touch it. */
+    allowDiscard: path.join(root, '.nexa-allow-discard'),
+  };
+}
+
+/**
+ * The council, cloned once and shared by every project.
+ *
+ * It used to be a clone **inside each repository** (`.council-src/`) reached by four symlinks —
+ * which were tracked in git, dangled in a fresh clone, and were skipped on install, silently
+ * removing `/council` and everything behind it. Making it a marketplace dependency fixed that
+ * and cost users a fourth `marketplace add`.
+ *
+ * One clone in `~/.nexa/council/` has neither problem: nothing enters the user's repository,
+ * nothing is vendored into git, and the commands ship as real files that delegate here.
+ *
+ * **The risk this re-accepts, stated plainly.** `council-sync.mjs` documented why the council is
+ * never *copied*: a stale copy once carried a UTF-8 corruption bug that silently damaged every
+ * council answer longer than one pipe buffer. A clone is not a copy — it can be updated and it
+ * reports its own commit — but a clone nobody updates goes stale just as quietly. `check.mjs`
+ * therefore prints its commit on every run, which is the only reason this is safe to do.
+ *
+ * ── SUPERSEDED 2026-07-30: the council now ships INSIDE this plugin ──────────
+ *
+ * Every argument above was about *maintenance*, and none of them was about possibility. A core
+ * feature that needs a second install step is not a core feature — the clone was still a fetch
+ * the user had to run before `/council` existed at all.
+ *
+ * So it is vendored again, at `scripts/council/`, and this is version 1 **without the mistake
+ * that sank it**: the original rewrote every path for this workspace's deeper layout, and the
+ * rewriting is what failed. This copies verbatim. `scripts/council/` reaches nothing outside
+ * itself — measured, not assumed — so there is no moving layout to chase.
+ *
+ * **Staleness is handled by naming it rather than hoping.** `.vendored-from` records the
+ * upstream commit and date, `nexa-council-update` re-vendors and reports drift, and `check.mjs`
+ * prints the pinned commit on every run. A copy whose provenance is written down is a different
+ * thing from a copy nobody can date — the 2026 copy was neither pinned nor dated, which is why
+ * nobody noticed it had been wrong for a week.
+ *
+ * `NEXA_COUNCIL_DIR` still overrides, for running against a working clone during development.
+ */
+export function councilDir() {
+  const env = process.env.NEXA_COUNCIL_DIR;
+  if (env) return path.resolve(env);
+  return path.join(PLUGIN_ROOT, 'scripts', 'council');
+}
+
+/**
+ * The base directory for this workspace's state, or `null` when none can be resolved.
+ *
+ * `~/.nexa/workspaces/<id>/` rather than the `~/.workspace/` originally suggested: an unprefixed
+ * top-level dotdir in a shared home is a collision waiting for the second tool that wants it,
+ * and `.nexa` matches the `NEXA_` prefix every environment variable in this repository uses.
+ *
+ * `NEXA_STATE_DIR` overrides, and `path.resolve` deliberately resolves a relative value against
+ * the working directory rather than the project — an override that silently re-anchored itself
+ * to a tree the caller was not thinking about would be worse than no override.
+ */
+/** `~/.nexa/projects`, or null when there is no home directory to put it in. */
+function projectsBase() {
+  try {
+    const home = os.homedir();
+    return home ? path.join(home, '.nexa', 'projects') : null;
+  } catch { return null; }
+}
+
+/** The stable id a repository carries in its `.nexa` marker, or null if it has none. */
+export function markerId(root) {
+  try {
+    const raw = fs.readFileSync(path.join(root, MARKER), 'utf8');
+    const id = JSON.parse(raw)?.nexaId;
+    return typeof id === 'string' && id ? id : null;
+  } catch { return null; }
+}
+
+/**
+ * Where this project's directory is, reconciling a **moved or renamed repository**.
+ *
+ * ── why this is not simply `projects/<path>` ─────────────────────────────────
+ *
+ * A path-derived name is readable, which is the whole reason for it. It is also **not stable**:
+ * rename the repository and the derived name changes. When only a prompt log lived there that
+ * was acceptable and card 002 said so — a moved project starting a fresh log loses nothing.
+ *
+ * It stopped being acceptable the moment `board/` and `docs/` moved in. A rename would orphan
+ * the user's board, their decision history and their cards, leaving them present on disk under
+ * a name nothing points at any more — which is `bootstrap.mjs`'s original manifest bug, with
+ * more to lose.
+ *
+ * So the readable name is a *label*, and the `.nexa` marker's id is the *identity*. When the
+ * expected directory is missing, the sibling directories are searched for the matching id and
+ * the winner is renamed into place. Self-healing, with no index file to fall out of date — the
+ * failure mode of an index is that it disagrees with the disk, and then you need a third thing
+ * to decide which is right.
+ *
+ * The scan only runs when the expected directory is absent, which is once per move.
+ */
+export function stateRoot(root) {
+  const env = process.env.NEXA_STATE_DIR;
+  if (env) return path.resolve(env);
+  const base = projectsBase();
+  if (!base) return null;
+
+  let real = root;
+  try { real = fs.realpathSync(root); } catch { /* unresolvable: label what we were given */ }
+  const want = path.join(base, projectId(real));
+  if (fs.existsSync(want)) return want;
+
+  const id = markerId(root);
+  if (id) {
+    let found = null;
+    try {
+      for (const e of fs.readdirSync(base, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const dir = path.join(base, e.name);
+        try {
+          if (fs.readFileSync(path.join(dir, '.nexa-id'), 'utf8').trim() === id) { found = dir; break; }
+        } catch { /* not this one */ }
+      }
+    } catch { /* no projects directory yet */ }
+    // A failed rename is not fatal: keep using the directory where it actually is, so a
+    // permission problem costs a tidy name rather than the board.
+    if (found && found !== want) {
+      try { fs.renameSync(found, want); } catch { return found; }
+    }
+  }
+  return want;
+}
+
+/** Where each kind of state used to live, inside the repository. Migrated once, on first use. */
+const LEGACY = {
+  prompts: path.join('docs', 'prompts'),
+  compactions: path.join('docs', 'compactions'),
+  '.prompt-check-state.json': path.join('docs', '.prompt-check-state.json'),
+};
+
+/**
+ * Move the in-repo copy to its new home, once.
+ *
+ * `rename` first because it is atomic and cheap, then `cpSync` because `rename` fails with
+ * EXDEV across filesystems — not an exotic case here, where the repository sits on exFAT and the
+ * home directory does not. **The copy path deliberately leaves the original in place**: deleting
+ * a source we have just copied across a filesystem boundary is the one step in this that could
+ * lose data, and keeping a stale duplicate is the cheaper mistake.
+ */
+function migrate(legacy, target) {
+  try {
+    fs.renameSync(legacy, target);
+  } catch {
+    try { fs.cpSync(legacy, target, { recursive: true }); } catch { /* leave both alone */ }
+  }
+}
+
+/**
+ * Resolve a state path, migrating the legacy in-repo location on first use.
+ *
+ * @returns {string|null} `null` when no state root can be resolved. **Callers must then write
+ *   nothing** — this is the same rule as `trusted: false` in `projectRoot`, for the same reason:
+ *   a writer that cannot say where it is must not guess, or it collects every project it is
+ *   loaded in into one shared directory.
+ */
+export function statePath(root, name) {
+  const base = stateRoot(root);
+  if (!base) return null;
+  const target = path.join(base, name);
+  try {
+    fs.mkdirSync(base, { recursive: true });
+    const legacy = LEGACY[name] && path.join(root, LEGACY[name]);
+    // **Never clobber.** A target that already exists is the live log; a legacy directory beside
+    // it is history somebody kept on purpose. Overwriting the first with the second would be a
+    // data-loss bug of exactly the shape 4-review caught in `bootstrap.mjs`, where a stale
+    // `.pre-nexa` backup was restored over live settings.
+    if (legacy && fs.existsSync(legacy) && !fs.existsSync(target)) migrate(legacy, target);
+  } catch {
+    return null;
+  }
+  return target;
 }

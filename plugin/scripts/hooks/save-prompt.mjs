@@ -21,12 +21,13 @@
 // pasted in good faith while debugging. So the text is scrubbed BEFORE it reaches disk.
 //
 // This is mitigation, not isolation — the same honest framing the product's own
-// src/redact.js carries. A novel secret format will get through. That is why docs/prompts/
-// is gitignored by default: the scrubber is the second line, and not committing is the first.
+// src/redact.js carries. A novel secret format will get through. That is why the log lives
+// OUTSIDE the repository: the scrubber is the second line, and being somewhere a `git add -f`
+// or a zip of the project cannot reach by accident is the first.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, statePath } from './roots.mjs';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT, trusted: TRUSTED } = projectRoot();
@@ -40,7 +41,12 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 // through a side door. Caught by 5-verify as `?? docs/` in a repo we had refused to adopt.
 if (!TRUSTED || !isAdoptedWorkspace(ROOT)) process.exit(0);
 
-const OUT_DIR = path.join(ROOT, 'docs', 'prompts');
+// Outside the repository since 2026-07-30 — see stateRoot in roots.mjs. Being gitignored meant
+// git could not restore it, so the one copy of every prompt ever typed sat one `git clean -xfd`
+// from gone. A null here means no state root could be resolved, and the rule is the same as an
+// untrusted project root: write nothing rather than guess a directory.
+const OUT_DIR = statePath(ROOT, 'prompts');
+if (!OUT_DIR) process.exit(0);
 
 /**
  * Patterns ordered by how specific they are, so a Twilio SID is labelled as one rather than
@@ -89,8 +95,8 @@ try {
 `# Prompts — ${day}
 
 Written by the \`UserPromptSubmit\` hook as each prompt was submitted. Secrets are scrubbed on
-write (\`scripts/hooks/save-prompt.mjs\`) — **mitigation, not isolation.** This directory is
-gitignored; read it before committing any of it.
+write (\`scripts/hooks/save-prompt.mjs\`) — **mitigation, not isolation.** This file lives
+outside the repository; read it before copying any of it back in.
 
 `);
   }

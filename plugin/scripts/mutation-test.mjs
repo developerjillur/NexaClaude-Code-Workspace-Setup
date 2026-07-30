@@ -24,11 +24,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { projectRootFor } from './hooks/roots.mjs';
+import { projectRootFor, paths } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
 const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 if (!ROOT_TRUSTED) {
   console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
   process.exit(2);
@@ -61,7 +63,7 @@ if (!ROOT_TRUSTED) {
 // `testCommand` (default `npm run test:offline`) is what must go red.
 // @rules invariant-survived, mutations-unparseable, mutation-drifted
 const cfg = (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8')); }
+  try { return JSON.parse(fs.readFileSync(P.config, 'utf8')); }
   catch { return {}; }
 })();
 const CODE = path.join(ROOT, (Array.isArray(cfg.codeDirs) && cfg.codeDirs[0]) || 'code');

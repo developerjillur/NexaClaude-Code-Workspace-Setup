@@ -3,7 +3,7 @@
 <!-- contract-meta
 last-verified: <date you last read this end to end>
 verified-at: INITIAL
-cost: ~5188 tokens, loaded every session — `node scripts/check.mjs` recomputes and refuses on drift
+cost: ~5909 tokens, loaded every session — `node scripts/check.mjs` recomputes and refuses on drift
 scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
 -->
 
@@ -199,11 +199,57 @@ Three layers, and they do different jobs. Chat is not one of them.
 
 | Layer | Lives in | Survives |
 |---|---|---|
-| **Project truth** | `AGENTS.md`, `docs/DECISIONS.md` | forever, re-read every session |
-| **What it adds up to** | `docs/LEARNED.md` | consolidated by `skills/reflect` |
-| **Work in flight** | the card in `board/<stage>/` | until the card is done |
-| **What was asked** | `docs/prompts/YYYY-MM-DD.md` | written automatically, per day |
+| **The contract** | `AGENTS.md`, `CLAUDE.md` | **in your repo** — 28+ tools read them from the root |
+| **Project truth** | `<project>/docs/DECISIONS.md` | forever, re-read every session |
+| **What it adds up to** | `<project>/docs/LEARNED.md` | consolidated by `skills/reflect` |
+| **Work in flight** | the card in `<project>/board/<stage>/` | until the card is done |
+| **What was asked** | `<project>/prompts/YYYY-MM-DD.md` | written automatically, per day |
 | **Session** | the conversation | **nothing. Assume it is lost.** |
+
+### Where `<project>` is
+
+```
+~/.nexa/projects/-Users-you-work-my-app/    named after the repository's path
+    config.json  board/  docs/  templates/
+    prompts/  compactions/  backups/  manifest.json
+    .council/runs/                          council deliberations
+```
+
+**Every markdown file this workspace manages lives there** — your cards, your decisions, your
+learned notes, the prompt log, the compaction notes and every council run. Adopting a repo used
+to write fourteen files into it, which is a lot to ask of someone who has not agreed to any of
+it yet.
+
+**Two markdown files stay in your repository, and that limit was measured rather than assumed.**
+`AGENTS.md` and `CLAUDE.md` — plus a one-line `.nexa` marker, `.claudeignore` and
+`.claude/settings.json`, which are not markdown.
+
+A `CLAUDE.md` containing nothing but `@~/.nexa/projects/<id>/AGENTS.md` was tried in a live
+session. **The import was not inlined** — only the literal line reached the model — and the
+target sat outside the session's allowed directories, so reading it was refused as well. The
+absolute-path form failed identically. A contract nothing loads is not a contract, so those two
+stay where every tool already looks for them. That is the entire exception list.
+
+The directory is **named after the path** rather than hashed, so `ls ~/.nexa/projects` tells you
+which project is which. The name is only a label: identity is the id in `.nexa`, so **renaming
+or moving your repository re-labels the directory instead of orphaning your board.**
+
+`NEXA_STATE_DIR` overrides the location; `NEXA_COUNCIL_DIR` overrides the council's.
+`check.mjs` prints both on every run, so *"where did my board go"* is answered by running the
+gate rather than by reading a source file.
+
+**Adopted before this change?** Nothing breaks. Each location is resolved independently, so an
+in-repo `board/` or `docs/` keeps being used exactly where it is.
+
+```bash
+nexa-migrate            # what would move, and what would not — changes nothing
+nexa-migrate --apply    # do it
+```
+
+It **never moves a file git tracks**. A committed board belongs to you, not to this plugin, and
+a tool that relocated weeks of decision history to tidy up would be a worse bug than the mess it
+was cleaning. It is a separate command from `nexa-remove` on purpose: the two touch the same
+files and differ only in whether they are kept.
 
 **Recording is not remembering.** The first four layers only ever grew; nothing read them back.
 `skills/reflect` closes that — `node scripts/reflect.mjs` gathers everything since the last
@@ -230,11 +276,23 @@ the words it was actually asked in, which no card ever quite captures. It exists
 alternative was reconstructing them from `~/.claude/projects/*.jsonl`: outside the repo,
 pruned, and keyed by a session id nobody remembers.
 
-**It is gitignored, and that is a security decision.** Prompts here have carried a VPS root
-password and an OAuth callback code, pasted in good faith while debugging. Secrets are
-scrubbed on write — **mitigation, not isolation**; a novel format will get through. Not
-committing is the first line of defence. To keep a day deliberately: read it, then
-`git add -f docs/prompts/YYYY-MM-DD.md`.
+**It lives outside the repository, and that is a security decision.** Prompts here have carried
+a VPS root password and an OAuth callback code, pasted in good faith while debugging. Secrets
+are scrubbed on write — **mitigation, not isolation**; a novel format will get through.
+
+Gitignoring it was the first answer and it was half of one. An ignored file is not tracked, so
+**git will not restore it** — `git clean -xfd` deleted every prompt ever typed and nothing could
+bring them back — and it was still sitting where a `git add -f`, a `zip -r`, or a directory
+handed to somebody would pick it up. Moving it out removes that reach. It does **not** sanitise
+anything: the state directory needs the permissions of a home directory, and the scrubber is
+still the only thing standing between a pasted password and the disk.
+
+To keep a day deliberately, copy it in on purpose:
+
+```bash
+cp ~/.nexa/workspaces/<id>/prompts/2026-07-30.md docs/prompts/
+git add -f docs/prompts/2026-07-30.md      # read it first
+```
 
 > **If a decision only exists in chat, it does not exist.** Write it to
 > `docs/DECISIONS.md` in the same turn you make it.
@@ -251,6 +309,12 @@ session and hope".
 - `.env`, `data/**`, anything holding credentials
 - `board/6-done/**` — history
 - Anything under `node_modules/`, `graphify-out/` (generated)
+- `~/.nexa/projects/*/backups/` and `manifest.json` — **the undo record.** Edit it and
+  `nexa-remove` either deletes the wrong thing or reports success having deleted nothing
+- `scripts/council/**` — **vendored verbatim, MIT.** Never hand-edit it. The last time this copy
+  was adjusted for local layout it broke three ways in one afternoon, and a later stale copy
+  silently corrupted every council answer longer than a pipe buffer. Change it only with
+  `nexa-council-update`, which repins its provenance
 
 ---
 
