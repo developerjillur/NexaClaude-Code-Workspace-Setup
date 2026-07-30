@@ -276,6 +276,39 @@ console.log('\n▸ the council — a core feature that install has silently drop
   check('...and it absolutises relative arguments first, so --context still resolves',
     /path\.resolve\(process\.cwd\(\)/.test(runnerSrc) && /fs\.existsSync\(abs\)/.test(runnerSrc));
 
+  // ── the council must actually SEE the files it is given ────────────────────
+  //
+  // `council.mjs` uses `process.cwd()` as two things: where `.council/runs/` is written, and the
+  // containment boundary for `--context`. Running it from the state directory to get the first
+  // silently destroyed the second — **a real review of two cards and three source files came
+  // back reading "No context was passed. Every answer below is reasoning about code the members
+  // could not read."** Four models, several minutes, confident analysis of a codebase none of
+  // them had seen, and it looked exactly like a successful run.
+  //
+  // Asserted at the containment layer rather than by running a council, which costs minutes and
+  // tokens. This is the check that actually distinguishes the two roots.
+  {
+    const ctx = await import(path.join(PLUGIN, 'scripts', 'council', 'context.mjs'));
+    const target = path.join(ROOT, 'board', '4-review', '004-autopilot.md');
+    if (fs.existsSync(target)) {
+      const fromProject = ctx.readForContext(target, ROOT);
+      check('a repo file IS readable when the council runs from the project root',
+        !fromProject.skipped, String(fromProject.skipped).slice(0, 70));
+
+      // THE SILENT CASE INVERTED: prove the other root really does refuse, or the assertion
+      // above proves nothing about which root is in use.
+      const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'council-root-'));
+      const fromElsewhere = ctx.readForContext(target, elsewhere);
+      check('...and is REFUSED from any other root, which is why cwd must be the project',
+        !!fromElsewhere.skipped);
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+    check('council-run runs from the project, not the state directory',
+      /const cwd = trusted \? ROOT : process\.cwd\(\)/.test(runnerSrc));
+    check('...and relocates the runs afterwards, so the repo stays clean',
+      /relocateRuns/.test(runnerSrc));
+  }
+
   // ── where the run ACTUALLY lands, not where the message says ───────────────
   //
   // The two assertions above read source text, and source text is exactly what survives the

@@ -41,11 +41,24 @@ if (!fs.existsSync(script)) {
 }
 
 const { root: ROOT, trusted } = projectRootFor(import.meta.url);
-// No project is not a failure: a council asked from a scratch directory should still run. It
-// simply writes where it would have anyway.
 const out = trusted ? stateRoot(ROOT) : null;
-const cwd = out ?? process.cwd();
-if (out) fs.mkdirSync(out, { recursive: true });
+
+// ── run from the PROJECT, then relocate the output ─────────────────────────
+//
+// **`council.mjs` uses `process.cwd()` as two different things**: the directory it writes
+// `.council/runs/` into, and the containment boundary for `--context`. Running it from the
+// state directory to get the first silently destroyed the second — every context file in the
+// user's repository resolved *outside the workspace* and was refused.
+//
+// Observed, not theorised: a real review of two cards and three source files came back with
+// **"No context was passed. Every answer below is reasoning about code the members could not
+// read."** Four models spent minutes producing confident, plausible analysis of a codebase none
+// of them had seen — the most expensive possible way for a review tool to do nothing, and it
+// looked exactly like a successful run.
+//
+// So the council runs from the project, where containment means what it says, and the runs are
+// moved afterwards. Correctness of the review first; tidiness of the output second.
+const cwd = trusted ? ROOT : process.cwd();
 
 const args = process.argv.slice(2).map((a) => {
   if (a.startsWith('-')) return a;                 // a flag, never a path
@@ -55,7 +68,27 @@ const args = process.argv.slice(2).map((a) => {
 });
 
 const r = spawnSync('node', [script, ...args], { cwd, stdio: 'inherit' });
-if (out && r.status === 0) {
-  console.log(`\n  runs: ${path.join(out, '.council', 'runs')}`);
+
+/** Move this run's output out of the repository, without clobbering anything already there. */
+function relocateRuns() {
+  if (!out) return null;
+  const from = path.join(cwd, '.council', 'runs');
+  const to = path.join(out, '.council', 'runs');
+  if (!fs.existsSync(from)) return null;
+  fs.mkdirSync(to, { recursive: true });
+  let moved = 0;
+  for (const f of fs.readdirSync(from)) {
+    const dest = path.join(to, f);
+    if (fs.existsSync(dest)) continue;             // never overwrite an earlier run
+    try { fs.renameSync(path.join(from, f), dest); moved++; }
+    catch { try { fs.cpSync(path.join(from, f), dest); moved++; } catch { /* leave it */ } }
+  }
+  // Only remove what we emptied — a `.council/` holding a BRIEF.md or a roster is the user's.
+  try { if (!fs.readdirSync(from).length) fs.rmdirSync(from); } catch { /* not empty */ }
+  try { if (!fs.readdirSync(path.dirname(from)).length) fs.rmdirSync(path.dirname(from)); } catch { /* not empty */ }
+  return moved ? to : null;
 }
+
+const landed = relocateRuns();
+if (landed) console.log(`\n  runs: ${landed}`);
 process.exit(r.status ?? 1);

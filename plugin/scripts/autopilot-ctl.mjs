@@ -34,7 +34,19 @@ if (cmd === 'on') {
   write({ enabled: true, maxContinues: Number.isFinite(max) && max > 0 ? max : 10, continues: 0,
     since: new Date().toISOString() });
   const s = read();
-  console.log(`\n  autopilot ON — up to ${s.maxContinues} consecutive continues\n`);
+  // ── which project, said out loud ───────────────────────────────────────────
+  //
+  // **It once enabled on a different project than the one you were standing in and said only
+  // "autopilot ON".** `projectRoot` puts `CLAUDE_PROJECT_DIR` above the working directory —
+  // correct for a hook, which is handed its project, and surprising for a bare command run
+  // somewhere else. The environment variable is inherited by any shell launched from a session,
+  // so this is the ordinary case rather than a contrived one.
+  //
+  // The resolution order is not changed: a hook that obeys beats a hook that guesses, and that
+  // ordering is load-bearing elsewhere. What changes is that the answer is no longer implied —
+  // a mode that continues sessions on your behalf must never leave "on where?" to inference.
+  console.log(`\n  autopilot ON for ${ROOT}`);
+  console.log(`  up to ${s.maxContinues} consecutive continues\n`);
   console.log('  It will NOT answer anything about pushing, deploying, deleting, credentials,');
   console.log('  money, contacting people, production, or any question addressed to you.');
   console.log('  Those stop and wait, as they should.\n');
