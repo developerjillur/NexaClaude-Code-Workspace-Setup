@@ -41,6 +41,18 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 // through a side door. Caught by 5-verify as `?? docs/` in a repo we had refused to adopt.
 if (!TRUSTED || !isAdoptedWorkspace(ROOT)) process.exit(0);
 
+// ── autopilot's own thinking is not a design record ─────────────────────────
+//
+// The Stop hook spawns `claude -p` to decide whether to continue. That child inherits the
+// project and the plugin, so THIS hook fired for it and wrote autopilot's internal instructions
+// into the user's prompt log. Measured on a real session: **9 of 17 entries were autopilot
+// talking to itself.**
+//
+// The prompt log exists to hold "the intent behind a change, in the words it was actually asked
+// in". A machine's instructions to another machine are not that, and burying real prompts under
+// them destroys the one thing the log is for.
+if (process.env.NEXA_AUTOPILOT_CHILD === '1') process.exit(0);
+
 // Outside the repository since 2026-07-30 — see stateRoot in roots.mjs. Being gitignored meant
 // git could not restore it, so the one copy of every prompt ever typed sat one `git clean -xfd`
 // from gone. A null here means no state root could be resolved, and the rule is the same as an

@@ -73,22 +73,19 @@ export const VETO = [
   [/\b(merge (into|to) (main|master)|rebase (onto )?(main|master)|squash|rewrite history)\b/i, 'rewriting shared history'],
   [/\b(irreversible|cannot be undone|permanent(ly)?|no way back|destructive)\b/i, 'an irreversible action'],
   [/\b(production|prod\b|live (site|server|system)|customer data)\b/i, 'production'],
-  // ── consent, and choices between named alternatives ───────────────────────
+  // ── what is NOT vetoed, and why ───────────────────────────────────────────
   //
-  // **The first version of these two was one rule and it vetoed every question ever asked** —
-  // `should i|shall i|do you want` matches "Shall I run the test suite?", which is the entire
-  // use case. An autopilot that refuses everything scores full marks on a veto test and is
-  // useless, which is why the suite asserts the allow direction just as hard.
+  // Two rules used to live here: approval-shaped phrasing, and choices between named
+  // alternatives. Both are gone, deliberately.
   //
-  // Split in two, and both are narrow:
-  [/\b(are you sure|please confirm|ok(ay)? to proceed|proceed\?|your call|up to you|do you approve|permission to|go ahead\?)/i,
-    'an approval only you can give'],
-  // A choice between named alternatives is a preference, and preferences are the human's. This
-  // does catch "the reducer or the selector?", which is harmless either way — **a false veto
-  // costs one unattended turn and a false pass costs a force-push**, and that asymmetry is the
-  // whole design.
-  [/\b(which|what|whether|do you want|would you (like|prefer)|should (i|we))\b[^?]{0,90}\bor\b[^?]{0,60}\?/i,
-    'a choice between alternatives'],
+  // **Only destructive decisions belong to the human.** A preference between harmless options —
+  // which file first, dark or light, count the words or not — is not a decision worth stalling
+  // an unattended session for, and treating it as one made autopilot fire almost never. Measured
+  // in a real session: "Should I count the words?" continued, "Would you like me to count the
+  // words?" stopped. Same file, same task, different grammar. That is not a safety boundary,
+  // it is a coin toss dressed as one.
+  //
+  // Everything above this comment stays. Those are the ones that cannot be undone.
 ];
 
 /** @returns {string|null} the reason it is vetoed, or null when autopilot may proceed. */
@@ -113,8 +110,18 @@ export function looksLikeWaiting(text) {
 // `import`ing the module to test `veto()` executed the hook — it read stdin, found none, and
 // exited, so the suite produced no output at all and still exited 0. A test file that silently
 // runs nothing is indistinguishable from one that passes.
-if (process.argv[1] && fs.realpathSync(process.argv[1]) !== fs.realpathSync(fileURLToPath(import.meta.url))) {
-  // imported, not invoked
+// **Invoked, not merely "not imported".** The first version asked whether argv[1] DIFFERED from
+// this file — so with `node -e`, where argv[1] is undefined, it fell through and ran the hook,
+// which then sat waiting on stdin forever. A guard phrased as a negative admits every case
+// nobody thought of; phrased as a positive it admits exactly one.
+const INVOKED_DIRECTLY = (() => {
+  try {
+    return !!process.argv[1]
+      && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+if (!INVOKED_DIRECTLY) {
+  // imported, or evaluated — do nothing
 } else {
 
 // ── the breadcrumb, because silence is undiagnosable ────────────────────────
@@ -231,15 +238,21 @@ if (vetoed) {
 // it, and §9's "top tier always" is about work that can hurt a caller. This one cannot act — its
 // only power is to produce a sentence that a vetted, non-vetoed turn continues with.
 const ask = [
-  'A coding session paused with the message below. Decide if it is waiting on a trivial,',
-  'mechanical next step that any competent engineer would answer the same way.',
+  'A coding session paused with the message below. The human is away and wants the work to',
+  'continue. Your job is to name the obvious next step so it can.',
+  '',
+  '**Anything destructive, irreversible or outward-facing has already been refused before you',
+  'were asked** — pushing, deploying, deleting, credentials, money, contacting people,',
+  'production. You are not the safety check and you do not need to police that. Assume the',
+  'step in front of you is safe.',
   '',
   'Answer with ONE line:',
-  '  CONTINUE: <the instruction to give, imperative, one sentence>',
-  '  or  STOP: <why a human is needed>',
+  '  CONTINUE: <the next step, imperative, one sentence>',
+  '  or  STOP: <why no next step can be determined at all>',
   '',
-  'Say STOP if it asks for a preference, an opinion, an approval, or anything you cannot',
-  'infer with certainty from the message itself.',
+  'A preference between harmless options is yours to make — pick the conventional one and',
+  'CONTINUE. Only STOP when the message names no actionable next step, or when continuing',
+  'would require information nobody has stated.',
   '',
   '--- message ---',
   message.slice(0, 4000),
