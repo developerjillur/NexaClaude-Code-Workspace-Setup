@@ -11,16 +11,37 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
-import { projectRootFor } from './hooks/roots.mjs';
+import { projectRootFor, stateRoot, paths, councilDir, PLUGIN_ROOT } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
 const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 if (!ROOT_TRUSTED) {
   console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
   process.exit(2);
 }
 const STRICT = process.argv.includes('--strict');
+
+// ── which deployment is this? ───────────────────────────────────────────────
+//
+// **Three checks below were written for a CLONE and fail loudly in an INSTALL.** Run against an
+// adopted repository from a plugin cache, this file reported `.claude/skills is missing`,
+// `save-prompt.mjs is missing` and two plugins "not declared" — four failures a user cannot act
+// on, about files that are not supposed to be in their repository at all.
+//
+// That is the same defect this file already fixed twice for the council: **a check that reports
+// absence where there is none is worse than no check, because it teaches people to ignore the
+// ones that matter.** Found by installing the plugin into a cache path and running it against a
+// different repository, which no unit test does.
+// **Outside the project, not merely a different path.** The first version compared the two roots
+// for inequality, which is true in the in-repo layout too — the plugin lives at `<repo>/plugin/`
+// — so this repository classified itself as installed and silently stopped checking
+// `.claude/skills`, the link whose absence makes every skill invisible to Claude Code. Weakening
+// a check while fixing a false positive is the trade this file keeps having to not make.
+const INSTALLED = fs.existsSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'))
+  && !path.resolve(PLUGIN_ROOT).startsWith(`${path.resolve(ROOT)}${path.sep}`);
 
 let fail = 0, warn = 0;
 const ok = (m) => console.log(`  ✅ ${m}`);
@@ -29,11 +50,11 @@ const soft = (m, why) => { warn++; console.log(`  ⚠️  ${m}\n       ${why}`);
 
 const stages = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done', '7-operate'];
 const cardsIn = (s) => {
-  const d = path.join(ROOT, 'board', s);
+  const d = path.join(P.board, s);
   if (!fs.existsSync(d)) return [];
   return fs.readdirSync(d).filter((f) => f.endsWith('.md') && f !== 'README.md' && !f.startsWith('._'));
 };
-const read = (s, f) => fs.readFileSync(path.join(ROOT, 'board', s, f), 'utf8');
+const read = (s, f) => fs.readFileSync(path.join(P.board, s, f), 'utf8');
 
 console.log('\n── The board ──────────────────────────────────────────────');
 
@@ -137,7 +158,14 @@ console.log('\n── The workspace itself ────────────�
 // 4. The skills path bug that shipped in the first version of this workspace: skills
 //    written to .agents/skills are invisible to Claude Code, which reads .claude/skills.
 const skillsLink = path.join(ROOT, '.claude', 'skills');
-if (!fs.existsSync(skillsLink)) {
+if (INSTALLED) {
+  // Installed, the skills come from the plugin and the user's repo is not supposed to have a
+  // .claude/skills at all. Demanding one told installed users to create a link they must not.
+  const n = fs.existsSync(path.join(PLUGIN_ROOT, 'skills'))
+    ? fs.readdirSync(path.join(PLUGIN_ROOT, 'skills')).filter((d) => !d.startsWith('._')).length : 0;
+  if (n) ok(`${n} skills load from the plugin — nothing needed in your repository`);
+  else bad('the plugin ships no skills', `expected them in ${path.join(PLUGIN_ROOT, 'skills')}`);
+} else if (!fs.existsSync(skillsLink)) {
   bad('.claude/skills is missing', 'Claude Code will not load any skill. ln -sfn ../.agents/skills .claude/skills');
 } else ok('.claude/skills resolves — skills are loadable by Claude Code and by the Agent-Skills spec');
 
@@ -150,13 +178,11 @@ const realDirs = (d) => (fs.existsSync(d) ? fs.readdirSync(d) : [])
 for (const s of realDirs(skillDir)) {
   const p = path.join(skillDir, s, 'SKILL.md');
   if (!fs.existsSync(p)) {
-    // A dangling council link is not a broken skill — it is a council nobody has fetched
-    // yet, and the answer is setup, not a missing file. On a fresh clone this fired as a
-    // hard failure and pointed at the wrong thing entirely.
-    if (s === 'council' && !fs.existsSync(path.join(ROOT, '.council-src'))) {
-      soft('the council skill arrives with the council',
-        'installed: it comes with the all-cli-council plugin. Cloned: npm run council:sync');
-    } else bad(`skill ${s} has no SKILL.md`, 'the directory alone does nothing');
+    // The council skill is a REAL file in this plugin as of 2026-07-30, so a missing SKILL.md
+    // here is an ordinary defect again rather than "the council was never fetched". The
+    // exemption that used to live here hid exactly the breakage it was written around: four
+    // tracked symlinks that dangled in a clone and were skipped on install.
+    bad(`skill ${s} has no SKILL.md`, 'the directory alone does nothing');
     continue;
   }
   const head = fs.readFileSync(p, 'utf8').slice(0, 600);
@@ -265,7 +291,7 @@ if (!verifiedAt) {
 }
 
 // 7. Decisions must exist as a file, because a decision that only exists in chat does not.
-const dec = path.join(ROOT, 'docs', 'DECISIONS.md');
+const dec = path.join(P.docs, 'DECISIONS.md');
 if (!fs.existsSync(dec)) bad('docs/DECISIONS.md is missing', 'decisions made in chat are lost by definition');
 else ok('docs/DECISIONS.md exists');
 
@@ -364,39 +390,34 @@ for (const [label, p] of sides) {
   // the `gemini` CLI already did, refusing this account outright ("no longer supported for
   // individuals"), which is why Gemini is reached through Antigravity instead. A council that
   // silently shrinks to three still returns a confident answer, so absence must be loud.
-  // ── where the council actually is ──────────────────────────────────────────
+  // ── the council ships inside the plugin ────────────────────────────────────
   //
-  // **The council is a core feature and it now arrives two different ways**, so looking in one
-  // place makes it invisible in the other. Cloned, it is vendored at `scripts/council` by
-  // `council-sync`. Installed, it is the `all-cli-council` PLUGIN — a declared dependency of
-  // this one — and lives in Claude Code's plugin cache, nowhere near the project.
+  // Its fifth home, and the first that needs no second install step. It has been: vendored with
+  // rewritten paths (broke, and went stale carrying a UTF-8 corruption bug), a per-repo clone
+  // behind symlinks (skipped on install), a marketplace dependency (a fourth `marketplace add`),
+  // and a shared clone in ~/.nexa (still a fetch before a core feature existed).
   //
-  // Checking only the vendored path told every installed user their council was missing and
-  // handed them `npm run council:sync`, a command their layout does not have. A check that
-  // reports absence where there is none is worse than no check: it teaches people to ignore it.
-  const councilHome = () => {
-    const vendored = path.join(ROOT, 'scripts', 'council');
-    if (fs.existsSync(path.join(vendored, 'members.json'))) return { at: vendored, how: 'vendored' };
-    const cache = path.join(process.env.HOME ?? '', '.claude', 'plugins', 'cache');
-    try {
-      for (const market of fs.readdirSync(cache)) {
-        const plug = path.join(cache, market, 'all-cli-council');
-        if (!fs.existsSync(plug)) continue;
-        for (const version of fs.readdirSync(plug)) {
-          for (const sub of ['scripts', '.']) {
-            const cand = path.join(plug, version, sub);
-            if (fs.existsSync(path.join(cand, 'members.json'))) return { at: cand, how: 'plugin' };
-          }
-        }
-      }
-    } catch { /* no cache on this machine */ }
-    return null;
-  };
+  // **Each move broke the check that looked in the previous place**, and one of those breakages
+  // told every installed user their council was missing while handing them a command their
+  // layout did not have. So the location is asked for, never searched for — and absence is now a
+  // packaging defect rather than something the user forgot to run.
+  const council = (() => {
+    const dir = councilDir();
+    return fs.existsSync(path.join(dir, 'members.json')) ? { at: dir } : null;
+  })();
 
-  const council = councilHome();
   if (!council) {
-    soft('the council is not here — /council will not work',
-      'claude plugin marketplace add developerjillur/all-cli-council, or npm run council:sync in a clone');
+    bad('the council is missing from this plugin — /council will not work',
+      `expected members.json in ${councilDir()} — reinstall the plugin`);
+  } else {
+    // **The pin is printed every run, and that is the whole staleness defence.** The copy that
+    // went bad recorded no commit and no date, so nobody could tell by looking that it had been
+    // wrong for a week. `nexa-council-update` compares this against upstream on demand; this
+    // line only has to make the number impossible to not see.
+    let pin = null;
+    try { pin = JSON.parse(fs.readFileSync(path.join(council.at, '.vendored-from'), 'utf8')); } catch { /* unpinned */ }
+    if (pin?.commit) ok(`council vendored at ${pin.commit.slice(0, 7)} (${pin.vendored}) — nexa-council-update checks for drift`);
+    else soft('the vendored council has no .vendored-from', 'its provenance is unknown — run nexa-council-update --apply');
   }
   const membersFile = council ? path.join(council.at, 'members.json') : null;
   if (membersFile && fs.existsSync(membersFile)) {
@@ -408,7 +429,7 @@ for (const [label, p] of sides) {
     if (missing.length) {
       soft(`council: ${missing.join(', ')} not found`,
         `${cfg.members.length} members declared; a council that quietly shrinks still answers confidently`);
-    } else ok(`council: all ${cfg.members.length} members reachable (${council.how})`);
+    } else ok(`council: all ${cfg.members.length} members reachable (vendored)`);
   }
 
   const codexCfg = path.join(process.env.HOME ?? '', '.codex', 'config.toml');
@@ -435,7 +456,19 @@ for (const [label, p] of sides) {
     ['codex@openai-codex', '§10 — how a plan gets reviewed by a model that does not share this one\'s priors'],
   ]) {
     if (on[plugin]) ok(`${plugin} is declared`);
-    else bad(`${plugin} is not declared`, why);
+    // Installed, these are `dependencies` in the plugin manifest and Claude Code resolves them.
+    // A user's own settings.json is not where they belong, and demanding it there reported a
+    // failure whose only fix was to duplicate a declaration the plugin already makes.
+    else if (INSTALLED) {
+      const deps = (() => {
+        try {
+          return (JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8'))
+            .dependencies ?? []).map((d) => `${d.name}@${d.marketplace}`);
+        } catch { return []; }
+      })();
+      if (deps.includes(plugin)) ok(`${plugin} is a declared dependency of this plugin`);
+      else bad(`${plugin} is not declared`, `${why} — and this plugin does not depend on it either`);
+    } else bad(`${plugin} is not declared`, why);
   }
   // A plugin from outside the official marketplace needs its source declared too, or a fresh
   // machine silently has no such plugin rather than failing loudly.
@@ -486,20 +519,37 @@ for (const [tool, why] of [
 
 // 9. Prompts are the design record and are saved as they are typed. Confirm the log is
 // actually being written — a logger nobody has seen produce a line is a logger that is off.
-const promptDir = path.join(ROOT, 'docs', 'prompts');
-if (!fs.existsSync(path.join(ROOT, 'scripts', 'hooks', 'save-prompt.mjs'))) {
+// `stateRoot`, never `statePath` — the latter creates directories and migrates the legacy one,
+// and a check that changes the thing it is checking is not a check. This reads only.
+const STATE = stateRoot(ROOT);
+const promptDir = STATE && path.join(STATE, 'prompts');
+// The hook lives with the SCRIPTS, which is the plugin when installed and the repo in a clone.
+// Looking only in the repo reported it missing on every installed machine — where it is present,
+// wired, and running.
+const savePrompt = [path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'save-prompt.mjs'),
+  path.join(ROOT, 'scripts', 'hooks', 'save-prompt.mjs')].find((p) => fs.existsSync(p));
+if (!savePrompt) {
   bad('save-prompt.mjs is missing', 'prompts would exist only in Claude Code\'s own logs, outside this repo');
+} else if (!promptDir) {
+  // Reported rather than skipped. A writer with no state root writes nothing at all, so silence
+  // here would read as "prompts are being saved" while none were.
+  bad('no state directory could be resolved', 'prompts, compaction notes and the prompt-check memory are all being discarded — set NEXA_STATE_DIR');
 } else {
-  // Deliberately NOT a warning when the directory is empty. docs/prompts/ is gitignored, so
-  // it never exists in CI — warning on that would fail --strict on every clean checkout,
-  // which is the same false-positive-in-a-gate bug this file fixed for CLAUDE.md on the
-  // same day. Whether the hook is *wired* is checked above, on both sides; that is the part
-  // that can actually break. This line only reports what is on disk.
+  // Deliberately NOT a warning when the directory is empty. The log lives outside the
+  // repository, so a fresh clone and every CI runner start with none — warning on that would
+  // fail --strict on every clean checkout, which is the same false-positive-in-a-gate bug this
+  // file fixed for CLAUDE.md on the same day. Whether the hook is *wired* is checked above, on
+  // both sides; that is the part that can actually break. This line only reports what is on disk.
+  //
+  // The location is printed rather than assumed, because it is now derived — from NEXA_STATE_DIR
+  // or from this workspace's id — and "where did my prompts go" must be answerable by running
+  // the check rather than by reading this source.
   const days = fs.existsSync(promptDir)
     ? fs.readdirSync(promptDir).filter((f) => /^\d{4}-\d\d-\d\d\.md$/.test(f)) : [];
+  const where = process.env.NEXA_STATE_DIR ? `${STATE} (NEXA_STATE_DIR)` : STATE;
   ok(days.length
-    ? `prompts are being saved (${days.length} day${days.length > 1 ? 's' : ''} logged locally)`
-    : 'prompt capture is wired (no local log here — expected in CI, gitignored)');
+    ? `prompts are being saved — ${days.length} day${days.length > 1 ? 's' : ''} in ${where}`
+    : `prompt capture is wired (no log yet in ${where} — expected on a fresh clone and in CI)`);
 }
 
 // 10. Recording without reading back is how a workspace accumulates records nobody uses.
@@ -523,7 +573,7 @@ try {
 // It warns forever, though. A workspace that stops mentioning a missing linter has agreed
 // with you that it does not matter.
 {
-  const cfgPath = path.join(ROOT, 'workspace.config.json');
+  const cfgPath = P.config;
   let dirs = ['code'];
   try { dirs = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).codeDirs ?? dirs; } catch { /* default */ }
   const real = dirs.map((d) => path.resolve(ROOT, d)).filter((d) => fs.existsSync(d));
@@ -602,15 +652,16 @@ try {
         ['scripts', real('scripts') + real('scripts/council'), /### (\d+) scripts —/],
         ['council scripts', real('scripts/council'), /\| `council\/\*\.mjs` \| (\d+) files/],
       ] : []),
-      // The council skill arrives with the council, so before setup the count is one short by
-      // design. Counted as if it were there — the README states the complete workspace, and
-      // it is the incomplete state that is temporary.
-      ['skills', (fs.existsSync(path.join(ROOT, '.agents/skills'))
-        ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0)
-        + (councilHere ? 0 : 1),
+      // No compensation any more. The council skill used to arrive with the council, so this
+      // added a phantom +1 for it whenever the council was absent — and once the skill became
+      // a real file in the plugin, that +1 double-counted and demanded a README number one
+      // higher than the truth. **A fudge factor outlives the thing it was compensating for**,
+      // which is why this counts what is on disk and nothing else.
+      ['skills', fs.existsSync(path.join(ROOT, '.agents/skills'))
+        ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0,
         /### (\d+) skills —/],
-      ['board stages', fs.existsSync(path.join(ROOT, 'board'))
-        ? fs.readdirSync(path.join(ROOT, 'board')).filter((d) => !d.startsWith('._')).length : 0, null],
+      ['board stages', fs.existsSync(P.board)
+        ? fs.readdirSync(P.board).filter((d) => !d.startsWith('._')).length : 0, null],
     ];
     let drift = 0;
     for (const [label, actual, re] of counts) {
@@ -689,20 +740,10 @@ try {
   }
 }
 
-// ── the council is fetched, not vendored ─────────────────────────────────────
-//
-// It used to be copied in, and twice in a week the copy went stale — the second time with a
-// silent UTF-8 corruption bug that every review in this repo had gone through. So it is a
-// clone now, linked into place, and this checks it is actually there and reasonably current.
-//
-// soft(), because a missing council removes a capability rather than corrupting anything —
-// but it does not stop mentioning it, and `./setup.sh` or `npm run council:sync` fixes it.
-{
-  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'council-sync.mjs'), '--check'], { encoding: 'utf8' });
-  const line = (r.stdout ?? '').trim().split('\n').pop() ?? '';
-  if (r.status === 0) ok(line.trim() || 'the council is present and current');
-  else soft(line.trim() || 'the council is not fetched', 'npm run council:sync');
-}
+// The council's presence and its pinned commit are checked where the members are, above.
+// This block used to shell out to council-sync --check; that script is gone, and a check that
+// spawns a missing file reports "not fetched" forever — absence where there is none, which is
+// how a check teaches people to ignore it.
 
 // ── every control tested in both directions ──────────────────────────────────
 //

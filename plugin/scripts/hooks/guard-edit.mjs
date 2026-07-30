@@ -15,13 +15,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, paths } from './roots.mjs';
 
 // Two roots, and this one is the *project* — board, config, code directories. `roots.mjs` holds
 // the evidence; the short version is that a single root computed from this file's own location
 // is correct only while the scripts sit inside the workspace they guard. Packaged, they do not,
 // and every check below silently answers about the wrong tree.
 const { root: ROOT, source: ROOT_SOURCE, trusted: ROOT_TRUSTED } = projectRoot();
+// Every plugin-written location comes from one module — see paths() in roots.mjs.
+const P = paths(ROOT);
 
 // ── which paths are product code ─────────────────────────────────────────────
 //
@@ -31,7 +33,7 @@ const { root: ROOT, source: ROOT_SOURCE, trusted: ROOT_TRUSTED } = projectRoot()
 // config makes the gate quieter rather than turning the whole workspace into product code.
 function codeDirs() {
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'workspace.config.json'), 'utf8'));
+    const cfg = JSON.parse(fs.readFileSync(P.config, 'utf8'));
     const dirs = Array.isArray(cfg.codeDirs) ? cfg.codeDirs.filter((d) => typeof d === 'string' && d) : [];
     return dirs.length ? dirs : ['code'];
   } catch { return ['code']; }
@@ -184,9 +186,26 @@ if (input?.tool_name === 'Bash') {
     // discard working-tree state and must stay silent.
     /(?:^|[\s;&|])git\s+(?:-[^\s]+\s+)*stash\s*(?:push|save|-[^\s;&|]+)?\s*(?:$|[;&|])/,
   ];
+  // ── a dry run destroys nothing, and refusing one teaches the wrong reflex ────
+  //
+  // `git clean -n` / `--dry-run` PRINTS what it would remove and deletes not one byte, but the
+  // pattern above sees the `f`/`d`/`x` and refuses it identically to the real command. Found by
+  // this guard refusing `git clean -xfdn` while somebody was checking what was at risk — the
+  // exact question the guard wants people to ask.
+  //
+  // **The cost of a false refusal is not friction, it is the override.** A guard that fires on a
+  // read-only command is how `touch .nexa-allow-discard` becomes a reflex, and the next real
+  // refusal is then waved through without being read.
+  //
+  // Each `git clean` is judged on its own arguments, so a genuine one chained after a dry run is
+  // still caught. Non-letters after the dash are not considered, so a path named `-n…` cannot
+  // pass as a flag; a combination this misses stays refused, which is the safe direction.
+  const scanned = cmd.replace(/((?:^|[\s;&|]))(git\s+(?:-[^\s]+\s+)*clean\b[^;&|]*)/g,
+    (whole, lead, seg) => (/--dry-run\b|\s-[a-zA-Z]*n[a-zA-Z]*(?:\s|$)/.test(seg) ? lead : whole));
+
   const discardPaths = new Set();
   let sawDiscard = false;
-  for (const re of WHOLE_TREE) if (re.test(cmd)) sawDiscard = true;   // no path — check it all
+  for (const re of WHOLE_TREE) if (re.test(scanned)) sawDiscard = true;   // no path — check it all
   for (const re of PATHSPEC) {
     for (const m of cmd.matchAll(re)) {
       // A token is only a discard if it names something on disk. `git checkout main` and
@@ -391,7 +410,7 @@ if (process.env.NEXA_NO_CARD === '1') {
 
 // ── The rules ────────────────────────────────────────────────────────────────
 
-const buildDir = path.join(ROOT, 'board', '3-build');
+const buildDir = path.join(P.board, '3-build');
 const cards = fs.existsSync(buildDir)
   ? fs.readdirSync(buildDir).filter((f) => f.endsWith('.md') && !f.startsWith('._'))
   : [];
