@@ -42,16 +42,48 @@ export const PLUGIN_ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
 /**
+ * Is `p` adopted — i.e. does it carry a `.nexa` marker **file**?
+ *
+ * ── the bug this exists to kill ─────────────────────────────────────────────
+ *
+ * The check was `fs.existsSync(path.join(p, '.nexa'))`, and **`~/.nexa` is this plugin's own
+ * state directory.** So `existsSync` was true for the user's HOME, and the home directory was
+ * detected as an adopted workspace by every caller of `looksLikeWorkspace` and
+ * `isAdoptedWorkspace`.
+ *
+ * Observed end to end: `nexa-autopilot on`, run from `~/Desktop/Experiment/test`, walked up,
+ * found "a marker" at `$HOME`, printed *"autopilot ON for /Users/jonayedahamed"* and wrote state
+ * to `~/.nexa/projects/-Users-jonayedahamed/`. The Stop hook then resolved a different root,
+ * found no state, and stayed silent — autopilot reported ON and was inert, permanently, from
+ * every directory.
+ *
+ * The wider damage is worse than one broken toggle: `isAdoptedWorkspace` is the CONSENT gate for
+ * every writing hook. A home directory that answers "yes, adopted" is `save-prompt` and
+ * `pre-compact` believing they have permission to write there — kill-condition 1, reached
+ * through a predicate rather than a side door.
+ *
+ * A marker is a file. `bootstrap` writes it with `JSON.stringify`, and nothing else ever should.
+ */
+const hasMarker = (p) => {
+  try { return fs.statSync(path.join(p, MARKER)).isFile(); } catch { return false; }
+};
+
+/**
  * A tree that carries any adoption marker is a workspace someone set up on purpose.
  *
  * Three markers, because there are now three vintages and all of them must be recognised:
  * `.nexa` (current), `workspace.config.json` (adopted before 2026-07-30), and a `board/`
  * directory (this repository's own layout, and any workspace adopted before the config existed).
  */
-const looksLikeWorkspace = (p) =>
-  fs.existsSync(path.join(p, MARKER))
-  || fs.existsSync(path.join(p, 'workspace.config.json'))
-  || isDir(path.join(p, 'board'));
+const looksLikeWorkspace = (p) => {
+  // **Never the home directory.** ~/.nexa lives there, and a home that answers "workspace" makes
+  // every walk-up terminate at it. Defence in depth: hasMarker already refuses the directory
+  // case, and this refuses the whole question.
+  try { if (path.resolve(p) === path.resolve(os.homedir())) return false; } catch { /* no home */ }
+  return hasMarker(p)
+    || fs.existsSync(path.join(p, 'workspace.config.json'))
+    || isDir(path.join(p, 'board'));
+};
 
 /**
  * **May we write into this tree at all?** A stricter question than "where is the project", and
@@ -65,8 +97,10 @@ const looksLikeWorkspace = (p) =>
  *
  * So writing requires the marker the bootstrap itself writes. No config, no writing.
  */
-export const isAdoptedWorkspace = (p) =>
-  fs.existsSync(path.join(p, MARKER)) || fs.existsSync(path.join(p, 'workspace.config.json'));
+export const isAdoptedWorkspace = (p) => {
+  try { if (path.resolve(p) === path.resolve(os.homedir())) return false; } catch { /* no home */ }
+  return hasMarker(p) || fs.existsSync(path.join(p, 'workspace.config.json'));
+};
 
 /**
  * Walk up from `start` looking for a workspace, bounded.

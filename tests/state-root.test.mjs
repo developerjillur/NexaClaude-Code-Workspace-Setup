@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stateRoot, statePath, projectId, markerId } from '../plugin/scripts/hooks/roots.mjs';
+import { stateRoot, statePath, projectId, markerId, isAdoptedWorkspace } from '../plugin/scripts/hooks/roots.mjs';
 
 let pass = 0; let fail = 0;
 const check = (label, ok, detail = '') => {
@@ -85,6 +85,46 @@ console.log('\n▸ identity — two checkouts of one repository must not share a
   check('...and an unreadable marker yields null rather than throwing', markerId(b) === null);
   check('...and a repository with no marker yields null too', markerId(tmp('state-none-')) === null);
   for (const d of [a, b]) fs.rmSync(d, { recursive: true, force: true });
+}
+
+// ── the home directory is not a workspace, however much it looks like one ───
+//
+// `~/.nexa` is this plugin's own state directory, and the marker check was `existsSync`, which
+// is true for a DIRECTORY. So `$HOME` answered "adopted" to every caller.
+//
+// Observed end to end, by a user: `nexa-autopilot on` from `~/Desktop/Experiment/test` walked
+// up, found "a marker" at `$HOME`, printed *"autopilot ON for /Users/jonayedahamed"*, and wrote
+// state to `~/.nexa/projects/-Users-jonayedahamed/`. The Stop hook resolved a different root,
+// found no state there, and stayed silent — **on and inert, from every directory, permanently.**
+//
+// The broken toggle is the small half. `isAdoptedWorkspace` is the CONSENT gate for every
+// writing hook, so a home that answers yes is `save-prompt` and `pre-compact` believing they may
+// write there.
+console.log('\n▸ $HOME is never a workspace — ~/.nexa is ours, not a marker');
+{
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-home-'));
+  fs.mkdirSync(path.join(home, '.nexa', 'projects'), { recursive: true });   // exactly what we create
+  const oldHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    check('a home directory containing ~/.nexa is NOT adopted', !isAdoptedWorkspace(home), home);
+
+    // The marker must be a FILE. A directory named .nexa is our state store, not consent.
+    const decoy = fs.mkdtempSync(path.join(os.tmpdir(), 'decoy-'));
+    fs.mkdirSync(path.join(decoy, '.nexa'));
+    check('...and a DIRECTORY named .nexa anywhere else is not a marker either',
+      !isAdoptedWorkspace(decoy));
+
+    // THE SILENT CASE: a real marker file still works, or this fix has broken adoption entirely.
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'real-'));
+    fs.writeFileSync(path.join(real, '.nexa'), JSON.stringify({ nexaId: 'x' }));
+    check('...while a real .nexa FILE is still adopted', isAdoptedWorkspace(real));
+
+    for (const d of [decoy, real]) fs.rmSync(d, { recursive: true, force: true });
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+  }
+  fs.rmSync(home, { recursive: true, force: true });
 }
 
 // ── a renamed repository must not orphan its own board ───────────────────────
