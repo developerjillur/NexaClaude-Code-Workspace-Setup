@@ -420,6 +420,29 @@ console.log('\n▸ the installed layout — plugin in a cache, project somewhere
   for (const d of [path.dirname(path.dirname(cache)), home, proj, decoy]) fs.rmSync(d, { recursive: true, force: true });
 }
 
+// ── a tool nothing points at is a tool nobody uses ─────────────────────────
+//
+// nexa-image shipped with no skill and no command. Asked for an image, the model reached for a
+// DIFFERENT plugin's media provider, concluded there was no image generator on the machine, and
+// offered to install two — while a working one sat in bin/.
+//
+// Shipping the binary is not shipping the feature.
+console.log('\n▸ every user-facing tool is reachable by the model');
+{
+  const skills = fs.readdirSync(path.join(PLUGIN, 'skills'));
+  const cmds = fs.readdirSync(path.join(PLUGIN, 'commands'));
+  const text = [...skills.map((d) => path.join(PLUGIN, 'skills', d, 'SKILL.md')),
+    ...cmds.map((c) => path.join(PLUGIN, 'commands', c))]
+    .filter((p) => fs.existsSync(p)).map((p) => fs.readFileSync(p, 'utf8')).join('\n');
+
+  for (const tool of ['nexa-image', 'nexa-autopilot', 'nexa-council', 'nexa-init']) {
+    check(`${tool} is named in a skill or command, so the model can find it`,
+      text.includes(tool), 'shipped but invisible');
+  }
+  check('the image skill exists and claims image generation',
+    /description:.*(image|generat)/i.test(fs.readFileSync(path.join(PLUGIN, 'skills', 'generate-image', 'SKILL.md'), 'utf8')));
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A plugin that only works from its own checkout is not packaged.\n');

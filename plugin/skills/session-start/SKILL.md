@@ -53,3 +53,19 @@ said so.
   proposing an architecture that was already rejected, with reasons.
 - **Re-implementing what exists.** `graphify explain` before writing, always.
 - **Trusting a summary over the card.** The card is the record; a summary is a lossy copy.
+
+## If the workspace is not here at all
+
+`check.mjs` saying *"no workspace found"*, or a bare command answering *"no project found"*,
+means this repository was never adopted — not that anything is broken.
+
+```bash
+nexa-init            # what would be written, and the codeDirs it detected
+nexa-init --apply    # adopt it now
+```
+
+Adoption otherwise happens only at session start, so a repository created or `git init`-ed
+**during** a session stays un-adopted until Claude Code restarts. `nexa-init` is the way to do
+it without one. It shares the same refusal ladder as the hook, so it can never adopt something
+the hook would decline — not a git repo, not the repo root, `$HOME`, a temp directory, a
+tombstoned repo, or somebody else's `board/`.
