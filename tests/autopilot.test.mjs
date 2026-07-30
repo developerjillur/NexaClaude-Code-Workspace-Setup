@@ -182,6 +182,14 @@ console.log('\n▸ the hook — every gate before the model is reached');
   const crumb = fs.existsSync(crumbPath) ? JSON.parse(fs.readFileSync(crumbPath, 'utf8')) : null;
   check('a silent exit still records WHY, at a fixed path', crumb !== null && !!crumb.stage,
     JSON.stringify(crumb));
+  // **Which version actually ran.** Claude Code loads hooks once at session start and the cache
+  // keeps every version side by side, so a session can run 1.3.0 while the CLI on PATH is 1.4.1.
+  // From outside the session that is indistinguishable from a real bug — and it cost several
+  // rounds of "it still does not work" against a hook already fixed twice.
+  check('the breadcrumb records which plugin version actually ran',
+    typeof crumb?.hookVersion === 'string' && /^\d+\.\d+\.\d+$/.test(crumb.hookVersion),
+    crumb?.hookVersion);
+
   check('...and names the project it resolved, so a mismatch is visible',
     crumb?.root === fs.realpathSync(repo) || crumb?.root === repo, crumb?.root);
 
