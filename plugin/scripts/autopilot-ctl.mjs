@@ -78,7 +78,11 @@ if (cmd === 'on') {
   // never ran". This reads the breadcrumb the hook drops before any gate, and compares what the
   // hook resolved against what this CLI resolves. **A mismatch between those two is the failure
   // mode**, and it is invisible from either side alone.
-  const crumb = path.join(os.homedir(), '.nexa', 'autopilot-last-stop.json');
+  // Per-project first. The global file is only written when NO project could be resolved, so a
+  // root that differs there is information, not an alarm — the first version compared them
+  // blindly and reported a MISMATCH that was only "you have more than one project".
+  const perProject = statePath(ROOT, 'autopilot-last-stop.json');
+  const globalCrumb = path.join(os.homedir(), '.nexa', 'autopilot-last-stop.json');
   console.log('\n  ── what this command sees ───────────────────────────────');
   console.log(`  project      ${ROOT}`);
   console.log(`  state file   ${stateFile}`);
@@ -87,11 +91,31 @@ if (cmd === 'on') {
 
   console.log('\n  ── what the Stop hook last saw ──────────────────────────');
   let c = null;
-  try { c = JSON.parse(fs.readFileSync(crumb, 'utf8')); } catch { /* never run */ }
+  let scope = 'this project';
+  try { c = JSON.parse(fs.readFileSync(perProject, 'utf8')); } catch { /* try the global one */ }
   if (!c) {
-    console.log('  The hook has never run on this machine.');
-    console.log('  → the plugin was installed or updated after this session started.');
-    console.log('    Restart Claude Code; hooks are loaded once, at session start.\n');
+    try { c = JSON.parse(fs.readFileSync(globalCrumb, 'utf8')); scope = 'no project resolved'; }
+    catch { /* never run */ }
+  }
+  if (!c) {
+    // **The log is independent evidence.** A breadcrumb is missing either because the hook never
+    // ran, or because it ran before breadcrumbs existed (1.3.1) — and telling a user "never ran"
+    // when their own log shows decisions is worse than saying nothing.
+    let last = null;
+    try {
+      const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean);
+      if (lines.length) last = JSON.parse(lines[lines.length - 1]);
+    } catch { /* no log either */ }
+    if (last) {
+      console.log('  No breadcrumb — but the LOG shows the hook has run here:');
+      console.log(`    ${last.at}  ${last.decision}  ${last.instruction ?? last.why ?? ''}`);
+      console.log('  → breadcrumbs arrived in 1.3.1. Restart Claude Code and the next turn');
+      console.log('    will record one.\n');
+    } else {
+      console.log('  The hook has never run for this project.');
+      console.log('  → the plugin was installed or updated after this session started.');
+      console.log('    Restart Claude Code; hooks are loaded once, at session start.\n');
+    }
   } else {
     console.log(`  at           ${c.at}`);
     console.log(`  outcome      ${c.stage}`);
@@ -100,7 +124,13 @@ if (cmd === 'on') {
       console.log(`  ${k.padEnd(12)} ${v}`);
     }
     const mine = path.resolve(ROOT);
-    if (c.root && path.resolve(c.root) !== mine) {
+    if (scope !== 'this project') {
+      console.log('\n  ⚠️  This is the GLOBAL breadcrumb — the hook ran somewhere it could not');
+      console.log('      resolve a project, so it had nowhere project-specific to write.');
+      if (c.root && path.resolve(c.root) !== mine) {
+        console.log(`      It resolved ${c.root}, not ${mine}.`);
+      }
+    } else if (c.root && path.resolve(c.root) !== mine) {
       console.log(`\n  ⚠️  MISMATCH — the hook used ${c.root}`);
       console.log(`      this command uses ${mine}`);
       console.log('      Turning it on here arms a project the hook never reads.');

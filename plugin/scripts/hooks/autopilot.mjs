@@ -112,14 +112,24 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) !== fs.realpathSync(file
 // So one line goes to a FIXED path on every invocation, before any gate. It is the only thing
 // here that runs unconditionally, it is ~200 bytes, and `nexa-autopilot doctor` reads it back.
 // A diagnostic that only exists when the thing already works is not a diagnostic.
+// **Per project, not global — the first version was global and that was a bug.** One shared
+// file means every project's hook overwrites every other's, so `doctor` in project A reads a
+// crumb from project B and reports a MISMATCH that is nothing but two projects existing. It did
+// exactly that within ten minutes of shipping: a run in one repo overwrote the crumb another
+// repo's doctor then alarmed about.
+//
+// The global path is kept for the ONE case that has no project to write to — "no project found"
+// — which is precisely when a breadcrumb is most needed and least placeable.
 function breadcrumb(stage, extra = {}) {
   try {
     const home = os.homedir();
     if (!home) return;
+    const line = `${JSON.stringify({ at: new Date().toISOString(), stage, ...extra }, null, 2)}\n`;
+    const perProject = extra.root ? statePath(extra.root, 'autopilot-last-stop.json') : null;
+    if (perProject) { fs.writeFileSync(perProject, line); return; }
     const dir = path.join(home, '.nexa');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'autopilot-last-stop.json'),
-      `${JSON.stringify({ at: new Date().toISOString(), stage, ...extra }, null, 2)}\n`);
+    fs.writeFileSync(path.join(dir, 'autopilot-last-stop.json'), line);
   } catch { /* a breadcrumb that fails must never be the reason a turn breaks */ }
 }
 
@@ -249,6 +259,7 @@ if (instructionVeto) {
 state.continues = (state.continues ?? 0) + 1;
 save();
 log({ decision: 'continue', instruction, n: state.continues, of: max });
+breadcrumb('CONTINUED the turn', { root: ROOT, instruction, n: state.continues, of: max });
 
 console.log(JSON.stringify({
   decision: 'block',
