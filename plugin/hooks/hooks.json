@@ -61,7 +61,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/session-end.mjs\""
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hooks/autopilot.mjs\"",
+            "timeout": 180
           }
         ]
       }

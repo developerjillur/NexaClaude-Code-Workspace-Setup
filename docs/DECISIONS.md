@@ -651,3 +651,394 @@ fixtures, which it had never had at all.
 `mutate-controls` would have caught and `kill-audit` does not, the deletion was premature and
 the answer is a mutation in `kill-audit`, not a resurrection. The coverage table above is what
 makes that checkable.
+
+---
+
+## 2026-07-30 · Session state moves out of the repository
+
+### The state that git would not restore
+
+Three paths held the only copy of things nobody can reconstruct, and all three were gitignored:
+`docs/prompts/`, `docs/compactions/`, `docs/.prompt-check-state.json`.
+
+**Gitignored was the wrong half of the answer.** It stopped them being committed, which was the
+security goal, and in doing so guaranteed git could never bring them back. `git clean -xfd`
+deletes all of it. The guard refuses that command, but a guard is one `touch .nexa-allow-discard`
+away and covers one repository on one machine. Measured on the working tree the day of this
+change: **17 paths git could not restore.**
+
+The second half is reach. The prompt log has carried a VPS root password and an OAuth callback
+code. Inside the tree it is reachable by an accident that is not even careless — a `git add -f`,
+a `zip -r` of the project, a directory handed to a colleague.
+
+**Decided:** state moves to `~/.nexa/workspaces/<id>/`, overridable with `NEXA_STATE_DIR`.
+`stateRoot`/`statePath` live in `scripts/hooks/roots.mjs` beside the two resolvers they belong
+with, because a fourth root resolver in a fourth file is the bug that module exists to prevent.
+
+**What this does NOT do.** It does not sanitise a secret. The scrubber is still the only thing
+between a pasted password and the disk, and the state directory needs a home directory's
+permissions. This removes an accident path, not the exposure — the same honest framing
+`save-prompt.mjs` already carried about its own scrubber.
+
+### `~/.nexa/workspaces/`, not `~/.workspace/`
+
+`~/.workspace` was the shape originally suggested. Rejected: an unprefixed top-level dotdir in a
+shared home is a collision waiting for the second tool that wants the name, and every
+environment variable this repo defines is already `NEXA_`-prefixed.
+
+### What deliberately did NOT move
+
+**`docs/DECISIONS.md`, `docs/LEARNED.md`, `AGENTS.md`, `CLAUDE.md`, `board/`.** These are
+committed on purpose. §7 calls the first two *"project truth — survives forever"*, and in a home
+directory they would become machine-local: a clone would get nothing and a wipe would lose both.
+A card belongs beside the diff it justifies.
+
+**`.council/runs/` and `.council-src/`.** Written by the council *dependency*
+(`.council-src/scripts/council.mjs:65`), not by this repository's code. Moving them means
+patching a dependency we do not own. Named here so the next reader knows they were considered
+rather than missed.
+
+### The keying decision, which looks like a mistake already made
+
+State is keyed by `nexaId` when the workspace was bootstrapped, and by
+`<basename>-<sha1(realpath)[0..8]>` otherwise. `bootstrap.mjs` learned in `4-review` that a
+path-keyed manifest breaks on a rename — so a path hash here needs its difference stated.
+
+That manifest records **what to delete on removal**: it must find work it did earlier, and a
+rename corrupted an uninstall. State has no such duty. If a project moves, starting a fresh log
+is correct behaviour and the old one is still on disk under the old id, not lost. The failure
+modes are not the same shape, so the same key is not required.
+
+`realpathSync` is used deliberately: several worktrees of one repository reach it through
+symlinked paths, and they must not share a log.
+
+### A false refusal was fixed in the same card
+
+`git clean -n` was always allowed — it carries no `f`/`d`/`x` for the pattern to match. **The
+combined form was not**: `git clean -xfdn` is how anyone actually asks *"what would this
+remove"*, and it was refused identically to the real command. Found when the guard blocked
+exactly that question being asked of it, while investigating this card.
+
+**A false refusal costs more than friction.** It is how `touch .nexa-allow-discard` becomes a
+reflex, and the next genuine refusal gets waved through unread. Each `git clean` is now judged
+on its own arguments, so a real one chained after a dry run is still caught, and a combination
+the exemption does not recognise stays refused — the safe direction.
+
+### How we would know this was wrong
+
+If somebody loses a prompt log because it was somewhere they did not think to back up, the move
+traded one loss mode for another and the answer is to make `check.mjs` louder about the path,
+not to move it back. If two checkouts are ever found sharing a log, the id is wrong.
+
+---
+
+## 2026-07-30 · The repository gets three files; everything else lives in ~/.nexa
+
+### What adopting used to cost somebody
+
+Fourteen files, written into a repository that had not agreed to any of them: nine board stage
+directories, `workspace.config.json`, `.claudeignore`, two docs, a card template, and the
+contract. Card 002 moved three runtime paths out. This moves the rest.
+
+**Decided:** an adopted repository receives `AGENTS.md`, `CLAUDE.md`, a one-line `.nexa` marker,
+and — because Claude Code reads them only from the tree — `.claudeignore` and
+`.claude/settings.json`. Nothing else. `board/`, `docs/`, `templates/`, the config, prompts,
+compaction notes, backups and the manifest all live in `~/.nexa/projects/<id>/`.
+
+`AGENTS.md` and `CLAUDE.md` were considered and cannot move: 28+ tools read `AGENTS.md` from the
+repository root and Claude Code reads project `CLAUDE.md` from the tree. A contract nothing loads
+is not a contract.
+
+### Named by path, not by hash — and why that needed a second mechanism
+
+`~/.nexa/projects/-Users-you-work-my-app/`. The first version keyed by
+`<basename>-<sha1[0..8]>`, which made the directory a list of names nobody could match to a
+project without running a hash. This is the convention Claude Code already uses for
+`~/.claude/projects/`.
+
+**A readable name is not a stable one**, and that only became a problem here. When card 002 put
+just a prompt log in the directory, a rename starting a fresh log lost nothing. With `board/` and
+`docs/` in it, a rename would orphan the user's cards and decision history under a name nothing
+points at — `bootstrap.mjs`'s original manifest bug, with more to lose.
+
+So the readable name is a **label** and the id in `.nexa` is the **identity**: when the expected
+directory is missing, sibling directories are searched for a matching `.nexa-id` and the winner
+is renamed into place. Self-healing, and no index file — an index's failure mode is disagreeing
+with the disk, which then needs a third thing to adjudicate.
+
+Two collisions are accepted knowingly: paths differing only in where a separator sits
+(`a/b-c` and `a-b/c`) produce one name. The consequence is two projects sharing a directory,
+which is visible the moment anyone looks. A hash trades that rare collision for permanent
+unreadability, and unreadable is the failure that happens every day.
+
+### The rule that decides whether this is a tidy-up or a data-loss bug
+
+**Migration never moves a file git tracks.** A board is meant to be reviewed alongside the diff
+and `DECISIONS.md` is meant to travel with a clone, so the user who committed them did the right
+thing — and is exactly the user with the most to lose. `git ls-files` is the authority, and a
+repository git cannot answer for is treated as tracked: the cost of not moving something is
+clutter, the cost of moving it is loss.
+
+`nexa-migrate` is **dry-run by default and is deliberately not a flag on `nexa-remove`.** The two
+touch the same files and differ only in whether they are kept; sharing a CLI would put "tidy this
+up" one typo away from "delete this".
+
+Watched failing: with the rule inverted, a committed `DECISIONS.md` was relocated out of the
+repository with no error and no output.
+
+### The council's fourth home
+
+`~/.nexa/council`, one clone shared by every project. Its previous three each cost something:
+
+| Home | What it cost |
+|---|---|
+| vendored into the repo | a stale copy carried a **silent UTF-8 corruption bug** — every council answer longer than one pipe buffer was damaged, and every review had gone through it |
+| a per-repo clone behind symlinks | four **tracked** links into gitignored content: dangling in a fresh clone, **skipped on install**, silently removing `/council`, `/council-custom`, the skill and the scripts |
+| a marketplace dependency | correct, and a fourth `marketplace add` before the plugin worked |
+
+The commands and the skill are **real files in the plugin** that delegate to the clone, so
+nothing can be skipped on install again. Install is now two marketplaces instead of three.
+
+**The risk this re-accepts:** a clone nobody updates goes stale as quietly as a copy did. The
+difference is that a clone knows its own commit, so `check.mjs` prints it every run and
+`nexa-council` refuses with an instruction when the clone is absent. Staleness that announces
+itself is a different thing from staleness that does not.
+
+### A fudge factor outliving its cause
+
+`check.mjs` added a phantom `+1` to the skill count whenever the council was absent, because the
+council skill used to arrive separately. Once the skill became a real plugin file, that `+1`
+double-counted and demanded a README number one higher than the truth — and the README was duly
+"corrected" to 17 skills when there are 16. Removed. **A compensation outlives the thing it
+compensated for, and then it is just a lie with a comment above it.**
+
+### How we would know this was wrong
+
+If a user loses a board because their repository moved in a way the reconciliation did not catch,
+the identity mechanism is insufficient and the answer is to make `check.mjs` print the resolved
+project directory more loudly, not to move the board back into the repo. If two projects are ever
+found sharing a directory, the label needs disambiguating.
+
+---
+
+## 2026-07-30 · The council ships inside the plugin, and the contract does not move
+
+### One plugin, or an inconsistency dressed up as caution
+
+The council was a shared clone at `~/.nexa/council` and `nexa-council-home` fetched it. That is
+"one plugin" with an asterisk, and the asterisk was the whole feature: **a core feature that
+needs a second install step is not a core feature.**
+
+Every argument for keeping it outside was about *maintenance*, and none of them was about
+possibility. It is MIT, 324 KB, 19 files, and `scripts/` references nothing outside itself —
+checked, not assumed. So it is vendored at `plugin/scripts/council/`.
+
+**This is version 1 without the mistake that sank version 1.** The 2026 vendoring *rewrote every
+path* for this workspace's deeper layout, and the rewriting is what failed: a regex that fired on
+its own output and doubled a path segment, a join no regex reached, and a suite that ended up
+auditing this workspace's files against the council's flag list. Copying verbatim has none of
+that, because there is no layout to chase.
+
+**And the staleness argument was never an argument against copying — it was an argument against
+copying without provenance.** The copy that carried the silent UTF-8 corruption bug recorded no
+commit and no date, so nobody could tell by looking that it had been wrong for a week. Now:
+`.vendored-from` pins the upstream commit, `check.mjs` prints it every run, `nexa-council-update`
+reports drift against GitHub and re-vendors on `--apply`, and it **refuses a copy with no
+provenance** rather than assuming it is current.
+
+Install is two marketplaces. `/council`, `/council-custom`, the skill, the reading doctrine and
+15 scripts all arrive with the plugin.
+
+### Every managed markdown file is in ~/.nexa — with two exceptions, and they were measured
+
+Cards, decisions, learned notes, prompt log, compaction notes and **council runs** all live under
+`~/.nexa/projects/<path-named-dir>/`. Council runs were the last hold-out: `council.mjs` does
+`ROOT = process.cwd()`, so `council-run.mjs` runs it *from* the project directory and rewrites
+relative `--context` paths to absolute first, so they still resolve. No dependency patch.
+
+**`AGENTS.md` and `CLAUDE.md` stay in the repository, and this is the measurement rather than an
+opinion.** A `CLAUDE.md` containing only `@~/.nexa/projects/<id>/AGENTS.md` was put in a fresh
+repo and a live headless session was asked for a canary string in the imported file:
+
+> *"That import was **not** inlined into my context (I only got the literal import line), and
+> reading it directly is blocked: paths outside `repo/` are outside this session's allowed
+> working directories."*
+
+The absolute-path form failed the same way. So the contract cannot be relocated behind an
+import: it would silently stop loading, which is the worst failure mode this workspace has —
+a control that looks present and does nothing.
+
+### A false claim I shipped, found by being asked a direct question
+
+The `/council` command told users their runs were at `~/.nexa/council-runs/<slug>.md`. **That
+path was true of nothing.** It is the `verify-claims` failure shape — a plausible path nobody
+opened — written into a shipped file by the same hand that maintains the checker for it.
+`verify-claims` follows citations in *cards*, not in command documentation, which is a real gap
+in the net rather than an excuse.
+
+### And a guard of my own that had silently stopped guarding
+
+`hooks.test.mjs` gained a check that no suite may leave fixtures in the real `~/.nexa`. It
+watched `~/.nexa/workspaces`. Card 003 renamed that directory to `projects` — so it compared
+`''` to `''`, **passed on every run, and 32 fixture directories accumulated in the developer's
+home.** It now derives the path from `stateRoot()` rather than naming it, so the next rename
+takes the guard with it.
+
+**A guard that names a path independently of the code it guards stops guarding the moment that
+path moves, and says nothing when it does.** That is the same class as the `+1` skill-count fudge
+and the two stale `bin/` exemptions removed in this card: compensations and exemptions outlive
+their reasons, and nothing in the suite notices.
+
+---
+
+## 2026-07-30 · What a full verification pass found, after everything was "green"
+
+Five suites and every gate were passing. Then the work was actually verified, and four defects
+came out — each one invisible to the thing that was supposed to catch it.
+
+### 1 · Seven files were untracked, including the whole council runner
+
+`nexa-council`, `nexa-council-update`, `nexa-council-watch`, `nexa-migrate`, `council-run.mjs`,
+`council-update.mjs`, `migrate.mjs`. Reconstructing a clone from git proved `/council` and
+`nexa-migrate` would simply not exist for anybody else.
+
+`plugin-packaging.test.mjs` had four assertions about symlinks that vanish on install and **not
+one asking whether a file was tracked at all** — every check interrogated the *already-tracked*
+list, which can only ever confirm what is already there. It now walks the **disk** and asks git
+about each of 98 shipped files. Watched failing with a planted file.
+
+### 2 · `check.mjs` gave installed users four failures they could not fix
+
+Run from a plugin cache against a foreign repo it reported `.claude/skills is missing`,
+`save-prompt.mjs is missing`, and two plugins "not declared" — all about files that must *not*
+be in a user's repository. The same "absence where there is none" defect this file had already
+fixed twice for the council, in a layout no test exercised.
+
+Fixed, and **the fix was briefly worse than the bug**: the first predicate compared the two roots
+for inequality, which is true of the in-repo layout too, so this repository classified itself as
+installed and silently stopped checking `.claude/skills`. Weakening a check while fixing a false
+positive is the trade that keeps presenting itself here.
+
+### 3 · `kill-audit` left controls disarmed when killed — twice
+
+A session teardown killed it mid-run and `depth-check.mjs` kept its empty-catch rule returning
+`null`. Later, `guard-edit.mjs` kept its discard guard rewritten to `if (false)` — **the
+workspace's one blocking control, switched off, in a file that read as ordinary.** The only
+symptom either time was a couple of unexplained test failures.
+
+**Signal handlers cannot fix this, and that was measured rather than assumed.** SIGTERM and
+SIGHUP handlers were added and a probe still found `guard-edit.mjs` mutated after signalling:
+this process blocks inside `spawnSync` for minutes, and a JavaScript handler cannot run during a
+synchronous call, so the signal queues behind a block that outlasts the shell that sent it.
+SIGKILL skips handlers outright.
+
+So the original bytes now go to a **journal on disk before the file is touched**, and the next
+run repairs from it — a mechanism that does not require this process to be alive. Proven against
+SIGKILL end to end: mutation observed live, process killed, control confirmed disarmed, next run
+repaired it and said so.
+
+**A tool whose purpose is proving the controls work must not be the thing that switches one off.**
+
+### 4 · A probe that passed without testing anything
+
+The first SIGTERM probe printed `✅ RESTORED`. It had never printed `during: a mutation is live`
+— it signalled *between* mutations, so "restored" was true without the condition ever occurring.
+It watched four hand-picked canaries and `kill-audit` mutates `guard-edit.mjs` first, which none
+of them covered.
+
+Rewritten to hash every file the audit can touch and to exit **2 — inconclusive** when no
+mutation is observed. **A probe that can pass without its condition occurring is worse than no
+probe**, because it converts an open question into a false answer.
+
+### 5 · And an over-determined assertion, caught by the audit
+
+`kill-audit` reported `26 caught, 1 SURVIVED`. The survivor was `council-provenance`, and the
+fault was the test, not the control: it asserted `status === 1`, and an unpinned council exits 1
+down two different paths — the provenance refusal, and the drift check immediately after it. So
+deleting the provenance guard changed nothing the test could see.
+
+That is exactly the failure `guard-edit` carries rule ids to prevent, committed by the same hand
+that maintains the warning. **One bit cannot say which rule fired**, so the assertion now reads
+the reason. Re-run: `27 caught, 0 survived, 0 unresolved`.
+
+### What this run says about the ones it cannot see
+
+`kill-audit` prints its own scope honestly: **12 of 19 refusing controls carry mutations.** Seven
+do not, and this run says nothing about them — `ci-code-paths`, `mutation-test`, `nexa-remove`,
+`no-product-leakage`, `reflect`, `verify-install`, and `kill-audit` itself. Reading `0 survived`
+as "everything is proven" would be the same error as reading a green suite as a correct one.
+
+---
+
+## 2026-07-31 · Autopilot, and the part of it that cannot be built
+
+### What was asked, and what the CLI actually allows
+
+The request: on every response, analyse it; if it is waiting on the user and no input arrives
+within a minute, decide for them and continue.
+
+**The mechanism is real and better than expected.** A probe `Stop` hook against the live CLI
+returns `last_assistant_message` (the response as text), `transcript_path`, `stop_hook_active`,
+`permission_mode`, `cwd`, `session_id`. Returning `{"decision":"block","reason":X}` makes **X the
+next instruction**. Codex ships a `Stop` hook at a 900 s timeout, so a model call inside one is
+affordable.
+
+**The one-minute wait cannot be built, and this is measured rather than assumed.** `Stop` fires
+the instant the turn ends — *before* the human has had any chance to type. The hook is a
+subprocess with no channel to the terminal, so it cannot observe typing. Sleeping would freeze
+the session for the whole minute with input queued invisibly.
+
+So autopilot is an **explicit mode**, not a timer racing a person. Recorded here so the idea is
+not re-attempted from scratch.
+
+### The veto is rules, not a classifier — and the reason is an asymmetry
+
+The danger was never loops; `stop_hook_active` and a budget handle those. It is **answering a
+question that reached the human because it was theirs**.
+
+A rule list runs *before* any model is consulted, and the model can only downgrade to silence —
+never overturn a veto. **A classifier that is 97% right about "shall I delete this" is 3%
+catastrophic**, which is the wrong shape of tool for a consent decision.
+
+The model's own proposal is vetoed too, not just the question: it could answer "go ahead and
+push" to a message that named nothing forbidden.
+
+### The veto list vetoed every question in existence
+
+The first version had one rule matching `should i|shall i|do you want`. That matches *"Shall I
+run the test suite?"* — the entire use case. **It scored full marks on the refusal half and made
+the feature worth nothing.**
+
+Caught only because the suite asserts the *allow* direction as hard as the refusal direction —
+the same both-directions rule `guard-coverage` enforces on every control here, arriving as a
+live example rather than a principle. Split into two narrow rules: approval-shaped phrasing, and
+choices between named alternatives.
+
+The accepted cost is stated in the tests: *"Which file, the reducer or the selector?"* is vetoed
+too, and that is fine. **A false veto costs one unattended turn; a false pass costs a
+force-push.**
+
+### Three defects the build produced
+
+- **Importing the hook executed it.** The test imported `veto()`, which ran the hook body, which
+  read stdin, found none, and exited — the suite printed nothing and exited 0. **A test file that
+  silently runs nothing is indistinguishable from one that passes**, and it is the third time
+  this session that a green result meant "nothing happened".
+- **The hook spawns `claude -p`, and an installed plugin loads this same `Stop` hook in that
+  child** — which would spawn another, forever. `NEXA_AUTOPILOT_CHILD=1` makes a marked child
+  leave immediately. Not obvious until the recursion is drawn.
+- **The CLI's refusal is unreachable from a clone**: the workspace sits directly above the
+  plugin, so `projectRoot` always resolves and "no project found" cannot happen. Its fixture had
+  to be the installed layout — a test that could not produce the condition it was testing.
+
+### Failing safe was observed, not designed for on paper
+
+During the watched failure the Sonnet child hit `Not logged in` (HOME was redirected). The hook
+logged `model declined` and exited 0, leaving the session untouched. Every failure path in this
+file ends in exit 0 for that reason: **a broken autopilot must never break a session.**
+
+### How we would know this was wrong
+
+If autopilot ever answers something consequential, the response is to delete the feature rather
+than tune the list. The audit log exists to make that judgement possible after the fact — every
+decision is recorded with its reason, including the refusals.
