@@ -86,6 +86,19 @@ const check = (name, ok, detail = '') => {
  * used it and reported a false failure against NEXA_NO_CARD — the test was wrong, not the
  * hook, which is its own small argument for testing the tests.
  */
+/**
+ * Copy a gate script into a fixture tree, together with the module it now imports.
+ *
+ * The gate scripts moved into the plugin and share one root-resolution module. A fixture that
+ * carries the script without it exercises a crash rather than the control — which would still
+ * be a non-zero exit, and would therefore have looked like the refusal it was asserting.
+ */
+function installScript(dest, name) {
+  fs.mkdirSync(path.join(dest, 'scripts', 'hooks'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'scripts', name), path.join(dest, 'scripts', name));
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(dest, 'scripts', 'hooks', 'roots.mjs'));
+}
+
 function run(script, input = {}, env = {}) {
   const r = spawnSync('node', [script], {
     input: JSON.stringify(input),
@@ -814,7 +827,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const mk = ({ graph = 'fresh', dirty = false, extra = false, behind = false } = {}) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gf-'));
     fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
-    fs.copyFileSync(script, path.join(root, 'scripts', 'graph-fresh.mjs'));
+    installScript(root, 'graph-fresh.mjs');
     fs.writeFileSync(path.join(root, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
     const code = path.join(root, 'code');
     fs.mkdirSync(path.join(code, 'src'), { recursive: true });
@@ -1066,7 +1079,7 @@ console.log(`\n${'─'.repeat(72)}`);
   check('council-sync --check refuses when the council is absent', (() => {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'nocouncil-'));
     fs.mkdirSync(path.join(t, 'scripts'), { recursive: true });
-    fs.copyFileSync(sync, path.join(t, 'scripts', 'council-sync.mjs'));
+    installScript(t, 'council-sync.mjs');
     try {
       return spawnSync('node', [path.join(t, 'scripts', 'council-sync.mjs'), '--check'],
         { cwd: t, encoding: 'utf8' }).status === 1;
@@ -1225,7 +1238,7 @@ console.log(`\n${'─'.repeat(72)}`);
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'killaudit-'));
     fs.mkdirSync(path.join(d, 'tests'), { recursive: true });
     fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
-    fs.copyFileSync(audit, path.join(d, 'scripts', 'kill-audit.mjs'));
+    installScript(d, 'kill-audit.mjs');
     fs.writeFileSync(path.join(d, 'scripts', 'check.mjs'), 'process.exit(0);\n');
     fs.writeFileSync(path.join(d, 'scripts', 'fake-control.mjs'),
       "const a = process.argv[2] ?? '';\n"
@@ -1333,7 +1346,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const repo = (files, then) => {
     const d = fs.mkdtempSync(path.join(tmp, 'r-'));
     fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
-    fs.copyFileSync(src, path.join(d, 'scripts', 'scan-secrets.mjs'));
+    installScript(d, 'scan-secrets.mjs');
     const g = (c) => spawnSync('sh', ['-c', c], { cwd: d, encoding: 'utf8' });
     g('git init -q . && git config user.email t@t && git config user.name t');
     for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b);
@@ -1563,7 +1576,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const scratch = (cfg, files = {}, env = {}, emptyDirs = []) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cipaths-'));
     fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
-    fs.copyFileSync(cp, path.join(d, 'scripts', 'ci-code-paths.mjs'));
+    installScript(d, 'ci-code-paths.mjs');
     fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify(cfg));
     for (const [f, body] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
@@ -1616,7 +1629,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const scratch = (files) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'leak-'));
     fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
-    fs.copyFileSync(leak, path.join(d, 'scripts', 'no-product-leakage.mjs'));
+    installScript(d, 'no-product-leakage.mjs');
     for (const [f, body] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true });
       fs.writeFileSync(path.join(d, f), body);
@@ -1682,7 +1695,7 @@ console.log(`\n${'─'.repeat(72)}`);
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'muttest-'));
     fs.mkdirSync(path.join(d, 'scripts'), { recursive: true });
     fs.mkdirSync(path.join(d, 'code'), { recursive: true });
-    fs.copyFileSync(mt, path.join(d, 'scripts', 'mutation-test.mjs'));
+    installScript(d, 'mutation-test.mjs');
     fs.writeFileSync(path.join(d, 'workspace.config.json'),
       JSON.stringify({ codeDirs: ['code'], mutationTestCommand: 'node ./suite.mjs' }));
     fs.writeFileSync(path.join(d, 'code', 'guard.js'), 'const ID_RE = /^[a-z]+$/;\nexport default ID_RE;\n');
@@ -1792,6 +1805,70 @@ console.log(`\n${'─'.repeat(72)}`);
   check('every `node <script>` the README instructs exists in a bare clone', gone.length === 0, gone.join(', '));
   check('...and the ones that do not are the fetched ones, which the README says so about',
     [...new Set(files)].filter((f) => fetched(f)).every(() => /FETCHED, not vendored/.test(readme)));
+}
+
+// ── the packaged deployment: hooks that no longer live in the tree they guard ─
+//
+// Fail-open number four, caught before it shipped. Package these scripts as a plugin and they
+// run from `~/.claude/plugins/cache/…`, three dirnames above which is the cache — not the
+// user's repository. Every path check then compares the user's file against a tree it cannot
+// be in, `isCode()` says "not product code", and `if (!isProductCode) allow()` exits 0.
+//
+// The single-root version of guard-edit passes every other test in this file while doing that,
+// which is the whole point: the suite ran in the one configuration where the two roots
+// coincide. This block builds the configuration where they do not.
+console.log('\n▸ guard-edit from a plugin cache — the root it guards is not the root it lives in');
+{
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-cache-'));
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-project-'));
+  try {
+    // A cache looks like a plugin: scripts, and nothing else. No board, no config.
+    fs.mkdirSync(path.join(cache, 'scripts', 'hooks'), { recursive: true });
+    for (const f of ['guard-edit.mjs', 'roots.mjs']) {
+      fs.copyFileSync(path.join(HOOKS, f), path.join(cache, 'scripts', 'hooks', f));
+    }
+    const guard = path.join(cache, 'scripts', 'hooks', 'guard-edit.mjs');
+
+    // A user's repository, with product code in it and no board at all.
+    fs.mkdirSync(path.join(project, 'code', 'src'), { recursive: true });
+    const target = path.join(project, 'code', 'src', 'auth.ts');
+    fs.writeFileSync(target, 'export const x = 1;\n');
+    const noProject = { CLAUDE_PROJECT_DIR: '' };
+
+    // WATCHED FAILING — the exact input the council named. Single-root: exit 0, silent.
+    const edit = run(guard, { tool_name: 'Edit', tool_input: { file_path: target } }, noProject);
+    check('refuses an absolute product-code edit when the project cannot be located',
+      edit.code === 2, `exit ${edit.code} — a silent allow here is the whole fail-open`);
+    check('...and says which rule refused, not merely that something did',
+      /refused: project-root-unknown/.test(edit.stderr), edit.stderr.slice(0, 120));
+
+    // The Bash redirect takes the same path and was named separately.
+    const bash = run(guard, {
+      tool_name: 'Bash', cwd: project,
+      tool_input: { command: 'printf x > code/src/auth.ts' },
+    }, noProject);
+    check('...and the Bash redirect variant of the same edit', bash.code === 2, `exit ${bash.code}`);
+
+    // THE SILENT CASE — the direction that gets a guard switched off when it is wrong.
+    // Point it at a real, initialised project: the guard must find that project's board and
+    // behave exactly as it does from a clone, refusing on the card rule rather than on the root.
+    fs.mkdirSync(path.join(project, 'board', '3-build'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    const located = run(guard, { tool_name: 'Edit', tool_input: { file_path: target } },
+      { CLAUDE_PROJECT_DIR: project });
+    check('locates the project through CLAUDE_PROJECT_DIR once one exists',
+      !/project-root-unknown/.test(located.stderr), located.stderr.slice(0, 120));
+    check('...and then refuses on the card rule, which is the pre-packaging behaviour',
+      located.code === 2 && /refused: no-card-in-build/.test(located.stderr), located.stderr.slice(0, 120));
+
+    // And it must still be quiet about a file that is nobody's product code.
+    const docs = run(guard, { tool_name: 'Edit', tool_input: { file_path: path.join(project, 'README.md') } },
+      { CLAUDE_PROJECT_DIR: project });
+    check('...and stays silent on a doc edit in that same project', docs.code === 0, `exit ${docs.code}`);
+  } finally {
+    fs.rmSync(cache, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
 }
 
 console.log(`  ${pass} passed, ${fail} failed`);
