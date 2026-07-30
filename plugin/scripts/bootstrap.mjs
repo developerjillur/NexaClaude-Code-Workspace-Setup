@@ -307,8 +307,22 @@ export const SETTINGS = {
   permissions: {
     deny: [
       'Read(./code/.env)', 'Read(./code/.env.*)', 'Read(./code/data/**)',
-      'Edit(./plan/**)', 'Write(./plan/**)',
-      'Edit(./board/6-done/**)', 'Write(./board/6-done/**)',
+      // ── `Write(path)` deny rules do nothing, and Claude Code says so out loud ──
+      //
+      // Running a real session against a freshly adopted repo printed, twice:
+      //
+      //   Permission deny rule (.claude/settings.json): Write(./plan/**) is not matched by file
+      //   permission checks — only Edit(path) rules are. Use Edit(./plan/**) instead
+      //   (Edit rules cover all file-editing tools).
+      //
+      // So every `Write(...)` line here was inert. `plan/**` and `board/6-done/**` — the two
+      // paths §8 of the contract calls boundaries an agent must not touch — were protected by a
+      // rule the tool ignores, and the warning only appears in a live session, which is why
+      // months of unit tests never saw it.
+      //
+      // `Edit(path)` covers every file-editing tool, so one rule is both correct and enough.
+      'Edit(./plan/**)',
+      'Edit(./board/6-done/**)',
     ],
     ask: ['Bash(npm run test:live:*)', 'Bash(codex exec:*)', 'Bash(git push:*)'],
   },
