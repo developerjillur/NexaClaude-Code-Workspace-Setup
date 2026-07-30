@@ -43,7 +43,27 @@ export const dataDir = () =>
   process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.nexa');
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
-const keyFor = (root) => crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
+/**
+ * The manifest id.
+ *
+ * **It used to be a hash of the repository's realpath, which is a mutable name.** Rename or
+ * move the repo and `remove()` looked in the wrong place, reported "nothing was recorded", and
+ * exited 0 — leaving the whole scaffold behind permanently, because `decide()` then answers
+ * "already initialised" and never writes a manifest again. Worse, a second repo adopted at the
+ * first one's old path overwrote its manifest *and* its backups.
+ *
+ * So the id is generated once and written inside the repository, in `workspace.config.json`.
+ * The repo can then be moved, renamed or copied and still find its own record. Falls back to
+ * the old path hash for repositories adopted before this change.
+ */
+const idFile = (root) => path.join(root, 'workspace.config.json');
+const keyFor = (root) => {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(idFile(root), 'utf8'));
+    if (typeof cfg.nexaId === 'string' && cfg.nexaId) return cfg.nexaId;
+  } catch { /* not adopted yet, or pre-dates the id */ }
+  return crypto.createHash('sha256').update(real(root)).digest('hex').slice(0, 16);
+};
 export const manifestPath = (root) => path.join(dataDir(), 'manifests', `${keyFor(root)}.json`);
 export const tombstonePath = (root) => path.join(dataDir(), 'tombstones', `${keyFor(root)}`);
 
@@ -110,11 +130,20 @@ function atomicWrite(file, content) {
   fs.renameSync(tmp, file);
 }
 
-/** Create-only. Returns true when it wrote, false when something was already there. */
+/**
+ * Create-only, and **it records what it wrote so removal can tell whether you changed it.**
+ *
+ * The hash guard used to protect only the merged settings file. Everything on the `created`
+ * list was deleted unconditionally — including `AGENTS.md`, `CLAUDE.md` and
+ * `docs/DECISIONS.md`, the three files this workspace explicitly tells the user to fill in.
+ * Reproduced: adopt a repo, write your real contract into AGENTS.md, add a decision, remove —
+ * and both were gone, with `restored: []` and `keptBack: []`. Same data-loss class as the
+ * settings defect, on the other list, found by a parallel reader that ran it rather than read it.
+ */
 function createOnly(file, content, created) {
   if (fs.existsSync(file)) return false;
   atomicWrite(file, content);
-  created.push(file);
+  created.push({ file, wroteHash: sha(content) });
   return true;
 }
 
@@ -221,14 +250,15 @@ function writeSettings(root, payload, created, modified) {
   const shared = path.join(dir, 'settings.json');
   const local = path.join(dir, 'settings.local.json');
 
+  const fresh = `${JSON.stringify(payload, null, 2)}\n`;
   if (!fs.existsSync(shared)) {
-    atomicWrite(shared, `${JSON.stringify(payload, null, 2)}\n`);
-    created.push(shared);
+    atomicWrite(shared, fresh);
+    created.push({ file: shared, wroteHash: sha(fresh) });
     return { where: 'settings.json', conflicts: [] };
   }
   if (!fs.existsSync(local)) {
-    atomicWrite(local, `${JSON.stringify(payload, null, 2)}\n`);
-    created.push(local);
+    atomicWrite(local, fresh);
+    created.push({ file: local, wroteHash: sha(fresh) });
     return { where: 'settings.local.json', conflicts: [] };
   }
   let theirs;
@@ -307,8 +337,30 @@ export function bootstrap(root, templatesDir, opts = {}) {
 
   const created = [];
   const modified = [];
+  // **Written before anything lands, and rewritten as it goes.** It used to be written last,
+  // so any throw in between — an unwritable backup directory was the reproduced case — left a
+  // fully scaffolded repository with no undo record at all, and `session-start` died before
+  // printing the banner, so the user was not even told what had appeared. Reproduced end to
+  // end with the real hook.
+  const flush = () => {
+    try {
+      // **Relative paths.** Absolute ones survive the id fix and still break: after a rename
+      // every recorded path points at a directory that no longer exists, so removal deletes
+      // nothing and cheerfully reports success. Found by running the rename case rather than
+      // reasoning about it.
+      const rel = (p) => path.relative(root, p);
+      atomicWrite(manifestPath(root), `${JSON.stringify({
+        root: real(root), at: new Date().toISOString(),
+        created: created.map((c) => ({ ...c, file: rel(c.file) })),
+        modified: modified.map((m) => ({ ...m, file: rel(m.file) })),
+      }, null, 2)}\n`);
+    } catch { /* the tree still gets written; losing the record is what we are avoiding */ }
+  };
   for (const s of STAGES) createOnly(path.join(root, 'board', s, '.gitkeep'), '', created);
-  createOnly(path.join(root, 'workspace.config.json'), `${JSON.stringify(CONFIG, null, 2)}\n`, created);
+  // The id must exist before anything else is recorded, because it names the record.
+  const nexaId = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  createOnly(path.join(root, 'workspace.config.json'),
+    `${JSON.stringify({ ...CONFIG, nexaId }, null, 2)}\n`, created);
   createOnly(path.join(root, '.claudeignore'), CLAUDEIGNORE, created);
   createOnly(path.join(root, 'docs', 'DECISIONS.md'),
     seed('Decisions', 'One entry per decision that was expensive to reverse. A decision recorded only in chat did not happen.'), created);
@@ -321,11 +373,13 @@ export function bootstrap(root, templatesDir, opts = {}) {
     createOnly(path.join(root, f), fs.readFileSync(path.join(templatesDir, f), 'utf8'), created);
   }
 
-  const settings = writeSettings(root, SETTINGS, created, modified);
-
-  atomicWrite(manifestPath(root), `${JSON.stringify({
-    root: real(root), created, modified, settings: settings.where, at: new Date().toISOString(),
-  }, null, 2)}\n`);
+  flush();                       // the files above are already on disk — record them now
+  let settings;
+  try {
+    settings = writeSettings(root, SETTINGS, created, modified);
+  } finally {
+    flush();                     // and again, whatever happened in there
+  }
 
   return { ...verdict, created, modified, settings };
 }
@@ -334,7 +388,13 @@ export function bootstrap(root, templatesDir, opts = {}) {
 export function remove(root) {
   const mf = manifestPath(root);
   if (!fs.existsSync(mf)) return { removed: [], reason: 'nothing was recorded for this repository' };
-  const { created = [], modified = [] } = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  // Entries are relative to the repository. Older manifests hold absolute paths; path.resolve
+  // leaves those alone, so both shapes work.
+  const abs = (p) => path.resolve(root, p);
+  const created = (raw.created ?? []).map((c) => (typeof c === 'string'
+    ? { file: abs(c) } : { ...c, file: abs(c.file) }));
+  const modified = (raw.modified ?? []).map((m) => ({ ...m, file: abs(m.file) }));
   const removed = [];
   const restored = [];
   const keptBack = [];
@@ -354,11 +414,30 @@ export function remove(root) {
       restored.push(m.file);
     } catch { /* leave it rather than make it worse */ }
   }
-  // Deepest first, so a directory is empty by the time we reach it.
-  for (const f of [...created].sort((a, b) => b.length - a.length)) {
-    try { fs.rmSync(f, { force: true }); removed.push(f); } catch { /* already gone */ }
-    const dir = path.dirname(f);
-    try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* not empty, keep */ }
+  // Deepest first, so a directory is empty by the time we reach it. Entries from an older
+  // manifest are bare strings with no hash; those are deleted as before, because there is
+  // nothing to compare against and refusing would make removal useless for them.
+  const entries = created.map((c) => (typeof c === 'string' ? { file: c } : c));
+  for (const c of entries.sort((a, b) => b.file.length - a.file.length)) {
+    try {
+      // **Never delete a file the user has edited since we wrote it.** This is the same rule
+      // the settings path already had; it simply was not applied here.
+      if (c.wroteHash && fs.existsSync(c.file)
+          && sha(fs.readFileSync(c.file, 'utf8')) !== c.wroteHash) {
+        keptBack.push(c.file);
+        continue;
+      }
+      fs.rmSync(c.file, { force: true });
+      removed.push(c.file);
+    } catch { /* already gone */ }
+    // Prune empty parents upward, stopping at the repository root. Removing only the immediate
+    // directory left `board/` standing after its nine stages had gone — an empty husk that
+    // makes "removed" look partial, and makes decide() see a board that is not ours next time.
+    let dir = path.dirname(c.file);
+    while (dir.startsWith(root) && dir !== root) {
+      try { if (fs.readdirSync(dir).length) break; fs.rmdirSync(dir); } catch { break; }
+      dir = path.dirname(dir);
+    }
   }
   atomicWrite(tombstonePath(root), `${new Date().toISOString()}\n`);
   fs.rmSync(mf, { force: true });

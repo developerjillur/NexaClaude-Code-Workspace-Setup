@@ -398,6 +398,47 @@ console.log('\n▸ nexa-remove — the CLI wrapper, not just the function');
     /Cannot tell which project/.test(refused.stderr), refused.stderr.slice(0, 140));
 }
 
+// ── removal must not delete work, and must still find its record ─────────────
+//
+// Four parallel readers attacked the undo path and three defects survived refutation, each
+// reproduced by running it rather than reading it. These are those reproductions.
+console.log('\n▸ removal — the files this workspace tells you to fill in');
+{
+  const r = repo();
+  boot(r);
+  fs.writeFileSync(path.join(r, 'AGENTS.md'), '# my real contract\n');
+  fs.appendFileSync(path.join(r, 'docs', 'DECISIONS.md'), '\n## a decision I made\n');
+  const res = remove(r);
+
+  // The hash guard used to cover only the merged settings file. Everything created was deleted
+  // unconditionally — including the three files whose templates say "replace this".
+  check('REFUSES to delete an AGENTS.md the user has written into',
+    fs.existsSync(path.join(r, 'AGENTS.md')), 'weeks of contract, unrecoverable');
+  check('...and a DECISIONS.md they appended to',
+    fs.existsSync(path.join(r, 'docs', 'DECISIONS.md')));
+  check('...and names them rather than skipping quietly', res.keptBack.length === 2, JSON.stringify(res.keptBack));
+  // THE SILENT CASE: untouched files must still go, or removal removes nothing.
+  check('...while a file nobody touched is still removed', !fs.existsSync(path.join(r, 'CLAUDE.md')));
+}
+{
+  // The manifest was keyed by the repository's realpath — a mutable name. Renaming the repo
+  // orphaned the record permanently, because decide() then answers "already initialised" and
+  // never writes another one.
+  const r = repo();
+  boot(r);
+  const moved = `${r}-renamed`;
+  fs.renameSync(r, moved);
+  trash.push(moved);
+  const res = remove(moved);
+  check('a renamed repository still finds its own record',
+    res.reason === 'removed and tombstoned', res.reason);
+  check('...and is actually emptied, not just reported',
+    fs.readdirSync(moved).filter((x) => x !== '.git').length === 0,
+    fs.readdirSync(moved).join(', '));
+  check('...which needs relative paths in the manifest, not absolute ones',
+    res.removed.length > 10, `${res.removed.length} removed`);
+}
+
 // ── verify-install: the harness that must refuse to report ───────────────────
 //
 // Its two arms need a live authenticated session, so they are run by hand. What is testable —

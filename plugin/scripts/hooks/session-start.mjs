@@ -25,7 +25,18 @@ const { root: ROOT, trusted: TRUSTED } = projectRoot();
 // **Announced, always.** Writing into a working tree unasked is defensible only if the user is
 // told exactly what appeared and how to undo it. Silence here would be the same failure as a
 // guard that passes quietly.
-const boot = TRUSTED ? bootstrap(ROOT, path.join(PLUGIN_ROOT, 'templates')) : { act: false, level: 'silent' };
+// **Never let a bootstrap failure silence the banner.** When it threw — an unwritable backup
+// directory was the reproduced case — this hook died before printing anything, so a user
+// whose tree had just been half-scaffolded was told nothing at all. The state report is the
+// one thing that has to survive, because it is how they find out what appeared.
+let boot = { act: false, level: 'silent' };
+if (TRUSTED) {
+  try {
+    boot = bootstrap(ROOT, path.join(PLUGIN_ROOT, 'templates'));
+  } catch (e) {
+    boot = { act: false, level: 'announce', created: [], failed: String(e?.message ?? e) };
+  }
+}
 const cards = (s) => {
   const d = path.join(ROOT, 'board', s);
   return fs.existsSync(d) ? fs.readdirSync(d).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
@@ -50,6 +61,10 @@ if (boot.created?.length) {
   // model is read once at session start — documented, and the one thing hot-reload cannot fix.
   out.push('**One caveat:** `model` is read at startup, so this session is still on your default' +
     ' model. Permission rules and hooks are live now; the model applies from your next session.');
+} else if (boot.failed) {
+  out.push(`\n**⚠ Setting this repository up FAILED part-way: ${boot.failed}**`);
+  out.push('Some files may already have been created. `/nexa-workspace:remove --dry-run'
+    + '` lists exactly which, and `/nexa-workspace:remove` undoes them.');
 } else if (boot.level === 'announce' && boot.act === false) {
   out.push(`\n**Not set up here:** ${boot.reason}`);
 }
