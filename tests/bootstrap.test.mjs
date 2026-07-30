@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -52,6 +52,19 @@ function repo({ init = true } = {}) {
   }
   return d;
 }
+// nexa-init resolves its target from CLAUDE_PROJECT_DIR, and needs a decoy TMPDIR so decide()
+// does not refuse the fixture for being in a temp directory — the same trick the installed-layout
+// tests use, for the same reason.
+const DECOY = fs.mkdtempSync(path.join(os.tmpdir(), 'init-decoy-'));
+trash.push(DECOY);
+function spawnSyncNode(script, args, cwd) {
+  const r = spawnSync('node', [script, ...args], {
+    cwd, encoding: 'utf8',
+    env: { ...process.env, HOME, USERPROFILE: HOME, TMPDIR: DECOY, CLAUDE_PROJECT_DIR: cwd },
+  });
+  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
 const OPTS = { allowTemp: true };
 const boot = (d) => bootstrap(d, TEMPLATES, OPTS);
 
@@ -392,6 +405,46 @@ console.log('\n▸ the writing hooks — silent in a repository that was never a
 // a bare command exists. A wrapper pointing at a script that moved is not a loud failure — it
 // is `command not found` at the moment somebody reaches for a gate, which is exactly when they
 // are least likely to investigate and most likely to carry on without it.
+// ── nexa-init: adoption you can ask for, instead of waiting for a restart ───
+//
+// Adoption ran only from `SessionStart`. `git init` a directory mid-session and nothing happens
+// until Claude Code restarts, and nothing on screen says so. A user hit this twice in one
+// sitting: `nexa-autopilot on` in a fresh directory answered "no project found" — correct, and
+// with no visible way forward.
+//
+// It shares `decide()` with the hook, so it is a different TRIGGER and not a different policy:
+// it can never adopt something the hook would refuse.
+console.log('\n▸ nexa-init — same policy as the hook, different trigger');
+{
+  const init = path.join(ROOT, 'plugin', 'scripts', 'init.mjs');
+  const run = (cwd, args = []) => spawnSyncNode(init, args, cwd);
+
+  const notGit = repo({ init: false });
+  const r1 = run(notGit);
+  check('nexa-init REFUSES a directory that is not a git repository', r1.status === 1, `exit ${r1.status}`);
+  check('...and names the fix rather than only the fault', /git init/.test(r1.out));
+
+  // Dry run by default — a command that writes into your repository on sight is the behaviour
+  // this workspace was reorganised to stop.
+  const fresh = repo();
+  fs.mkdirSync(path.join(fresh, 'src'), { recursive: true });
+  const dry = run(fresh);
+  check('a bare nexa-init ALLOWS inspection and changes nothing, exit 0',
+    dry.status === 0 && fs.readdirSync(fresh).filter((f) => f !== '.git' && f !== 'src').length === 0,
+    fs.readdirSync(fresh).join(', '));
+  check('...and reports the codeDirs it detected, before writing anything',
+    /"src"/.test(dry.out), dry.out.slice(0, 120));
+
+  const applied = run(fresh, ['--apply']);
+  check('--apply adopts it', applied.status === 0 && fs.existsSync(path.join(fresh, '.nexa')));
+  check('...writing only what cannot live elsewhere',
+    JSON.stringify(fs.readdirSync(fresh).filter((f) => f !== '.git' && f !== 'src').sort())
+      === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+    fs.readdirSync(fresh).join(', '));
+  check('...and a second run is a no-op that says so',
+    /Already adopted/.test(run(fresh).out));
+}
+
 // ── codeDirs: the field the whole card rule rests on ────────────────────────
 //
 // It defaulted to `['code']` for every repository — right for this workspace's own layout and a
