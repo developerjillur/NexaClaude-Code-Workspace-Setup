@@ -4,16 +4,19 @@
 Kanban pipeline with WIP=1, fifteen skills, three subagents, seven commands, and a five-model
 council that reviews your decisions across four vendors.**
 
-Clone it, point it at your code, and the process runs itself. No special commands to memorise —
-**Claude Code loads what it needs, when the situation matches.**
+**Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
+No special commands to memorise — Claude Code loads what it needs, when the situation matches.
 
 ```bash
-git clone https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git
-cd NexaClaude-Code-Workspace-Setup
-./setup.sh --check                 # what is missing; changes nothing
-./setup.sh --code ../my-app        # tools, plugins, config, then RUNS THE GATE
-node scripts/check.mjs        # 19 checks; should say "All checks pass"
+claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
 ```
+
+The first two lines are separate because **no plugin can register a marketplace on your
+behalf** — see [Install](#install). The clone-and-`setup.sh` workflow still works and is
+documented below.
 
 ---
 
@@ -95,6 +98,78 @@ started counting the files instead.
 ---
 
 ## Install
+
+**The workspace is a Claude Code plugin. Installing it is the whole of setup** — open Claude
+Code in a repository afterwards and the board, the contract, the config and the permission
+rules are there. No init command, no `setup.sh`, no copying files.
+
+### The four commands
+
+```bash
+# 1 · the two marketplaces Claude Code does not know by default
+claude plugin marketplace add openai/codex-plugin-cc          # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail         # → ponytail
+
+# 2 · this workspace
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
+```
+
+Then open Claude Code in the repository you want to work in. That is it.
+
+**Why step 1 exists, and why it cannot be automated.** `nexa-workspace` depends on eight
+plugins. Six live in `claude-plugins-official`, which Claude Code registers for you. Two do
+not — and **no plugin manifest can register a marketplace on your behalf.** Adding a plugin
+source is a trust decision that belongs to the person typing it, so the dependency resolves
+only after you have added the source yourself. Skip step 1 and the install reports
+`dependency-unsatisfied` and names the command — loudly, rather than loading half a workspace.
+
+### What arrives with it
+
+| | |
+|---|---|
+| **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
+| **16 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
+| **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
+| **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
+| **6 hook events** | including the one that refuses: no product edit without a card in build |
+| **15 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`… on your `PATH` |
+
+### The first session, and one thing it cannot do
+
+Opening Claude Code in a **clean repository root** creates the workspace and prints every path
+it wrote, plus how to undo it. Opening it anywhere else does nothing: it refuses a repository
+that is not a git root, a linked worktree, your home directory, a temp directory, a repo whose
+`board/` is not ours, and any repo you have removed it from before.
+
+**`model` is read once at startup.** Permission rules and hooks are live in the first session —
+[measured](plugin/scripts/measure-settings-race.mjs), not assumed — but `model: opus` applies
+from your *next* session. The banner says so rather than leaving you to notice.
+
+### Undoing it
+
+```bash
+/nexa-workspace:remove --dry-run     # lists exactly what would go
+/nexa-workspace:remove               # removes it, and does not come back
+```
+
+It deletes only what it created, and **only files you have not edited since**. Write your real
+contract into `AGENTS.md` and removal leaves it alone and tells you it did. A copy of any file
+it merged into is kept outside the repository and restored.
+
+### Adding your own plugins
+
+`plugin/.claude-plugin/plugin.json` lists dependencies as `{ "name", "marketplace" }`. Add
+yours there — the SDK you call, the host you deploy to. Nothing stack-specific ships enabled,
+because a plugin declared for somebody else's product is a dependency nobody here asked for.
+
+Cross-marketplace dependencies need the target named in `allowCrossMarketplaceDependenciesOn`
+in `.claude-plugin/marketplace.json` at the repo root; the three foreign ones are already there.
+
+### The clone workflow still works
+
+Everything below this line predates the plugin and is unchanged. Use it if you want the
+workspace as a repository rather than an installation.
 
 ### Option A — your code lives inside the workspace
 
