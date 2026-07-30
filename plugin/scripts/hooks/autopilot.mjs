@@ -38,7 +38,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { projectRoot, statePath } from './roots.mjs';
+import { projectRoot, statePath, PLUGIN_ROOT } from './roots.mjs';
+
+/**
+ * The version of the plugin THIS FILE belongs to.
+ *
+ * **Claude Code loads hooks once, at session start**, and the plugin cache keeps every version
+ * side by side. So a running session can be executing 1.3.0 while `nexa-autopilot` on PATH is
+ * 1.4.0 — and from outside the session there is no way to tell. That gap cost several rounds of
+ * "it still does not work" against a hook that had already been fixed twice.
+ *
+ * Recording it here makes the question answerable: the breadcrumb carries the version that
+ * actually ran, and `doctor` compares it with its own.
+ */
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(
+      path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version ?? 'unknown';
+  } catch { return 'unknown'; }
+})();
 
 /**
  * Questions autopilot must never answer, whatever a model thinks.
@@ -124,7 +142,7 @@ function breadcrumb(stage, extra = {}) {
   try {
     const home = os.homedir();
     if (!home) return;
-    const line = `${JSON.stringify({ at: new Date().toISOString(), stage, ...extra }, null, 2)}\n`;
+    const line = `${JSON.stringify({ at: new Date().toISOString(), hookVersion: PLUGIN_VERSION, stage, ...extra }, null, 2)}\n`;
     const perProject = extra.root ? statePath(extra.root, 'autopilot-last-stop.json') : null;
     if (perProject) { fs.writeFileSync(perProject, line); return; }
     const dir = path.join(home, '.nexa');

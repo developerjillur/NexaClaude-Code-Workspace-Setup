@@ -13,7 +13,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { projectRootFor, statePath } from './hooks/roots.mjs';
+import { projectRootFor, statePath, PLUGIN_ROOT } from './hooks/roots.mjs';
+
+const MY_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(
+      path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version ?? 'unknown';
+  } catch { return 'unknown'; }
+})();
 
 const { root: ROOT, trusted } = projectRootFor(import.meta.url);
 if (!trusted) {
@@ -83,7 +90,7 @@ if (cmd === 'on') {
   // blindly and reported a MISMATCH that was only "you have more than one project".
   const perProject = statePath(ROOT, 'autopilot-last-stop.json');
   const globalCrumb = path.join(os.homedir(), '.nexa', 'autopilot-last-stop.json');
-  console.log('\n  ── what this command sees ───────────────────────────────');
+  console.log(`\n  ── what this command sees ─────────────────────────────── (v${MY_VERSION})`);
   console.log(`  project      ${ROOT}`);
   console.log(`  state file   ${stateFile}`);
   console.log(`  enabled      ${state.enabled ? `yes (${state.continues ?? 0}/${state.maxContinues ?? 10} used)` : 'NO'}`);
@@ -118,11 +125,26 @@ if (cmd === 'on') {
     }
   } else {
     console.log(`  at           ${c.at}`);
+    console.log(`  hook version ${c.hookVersion ?? 'before 1.4.1 — did not record one'}`);
     console.log(`  outcome      ${c.stage}`);
     for (const [k, v] of Object.entries(c)) {
-      if (k === 'at' || k === 'stage') continue;
+      if (k === 'at' || k === 'stage' || k === 'hookVersion') continue;
       console.log(`  ${k.padEnd(12)} ${v}`);
     }
+    // **The question that took several rounds to become answerable.** Claude Code loads hooks
+    // once, at session start, and the cache keeps every version side by side — so a session can
+    // be running an old hook while the CLI on PATH is new, and nothing distinguishes that from
+    // a genuine bug. It is checked before anything else, because if it is true nothing else
+    // here means what it appears to.
+    if (c.hookVersion && c.hookVersion !== MY_VERSION) {
+      console.log(`\n  ⚠️  VERSION MISMATCH — the running session loaded ${c.hookVersion}`);
+      console.log(`      this command is ${MY_VERSION}`);
+      console.log('      Hooks load once, at session start. QUIT AND REOPEN Claude Code.');
+    } else if (!c.hookVersion) {
+      console.log(`\n  ⚠️  The hook that ran predates 1.4.1, so it did not record its version.`);
+      console.log(`      This command is ${MY_VERSION}. If they differ, quit and reopen Claude Code.`);
+    }
+
     const mine = path.resolve(ROOT);
     if (scope !== 'this project') {
       console.log('\n  ⚠️  This is the GLOBAL breadcrumb — the hook ran somewhere it could not');
