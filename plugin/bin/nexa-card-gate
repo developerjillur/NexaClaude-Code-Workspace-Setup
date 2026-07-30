@@ -1,0 +1,4 @@
+#!/bin/sh
+# nexa-card-gate — bare command for scripts/card-gate.mjs, added to PATH while this plugin is enabled.
+# Resolves relative to itself so it works from the plugin cache and from a clone alike.
+exec node "$(dirname "$0")/../scripts/card-gate.mjs" "$@"

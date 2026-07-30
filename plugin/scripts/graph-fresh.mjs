@@ -32,7 +32,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { projectRootFor } from './hooks/roots.mjs';
 
 // @rules absent, unreadable, no-commit-marker, dangling-commit, behind-head, uncommitted, not-indexed
 //
@@ -40,7 +40,13 @@ import { fileURLToPath } from 'node:url';
 // three ids that appear nowhere, and guard-coverage refused them as declared-but-not-emitted.
 // A rule declared and never emitted is a coverage requirement satisfied by a fixture that can
 // never fire, which is worse than no declaration at all.
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
+// where this script lives once the workspace ships as a plugin.
+const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+if (!ROOT_TRUSTED) {
+  console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
+  process.exit(2);
+}
 const JSON_OUT = process.argv.includes('--json');
 
 const git = (args, cwd) => {

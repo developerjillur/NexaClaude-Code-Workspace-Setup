@@ -316,5 +316,97 @@ The corollary for reviews: **the reviewer cannot be the same context as the writ
 independent models found in one round what this session had missed in a day of its own careful
 work — and their reasoning overlap was 0.07, so it was four arguments, not one repeated.
 
-<!-- reflected-at: 1bde24f -->
+## The path a stranger takes is the one nobody here walks
+
+Five commits closed 2026-07-29, and four of them are the same defect wearing different clothes:
+
+| Commit | What was broken |
+|---|---|
+| `2752c06` | **the first line of the install instructions did not work** |
+| `f92638b` | the suite passed only in the one configuration nobody installs into |
+| `23d0f11` | `setup.sh` called a passing suite a failure, by reading the wrong thing |
+| `ff9e207` | the escape hatch could not be operated, and the refusal insisted on it |
+
+Add the one the README already records — **the first push shipped without `board/` at all**,
+because git does not track empty directories, so the blocking guard found nothing to object to
+and passed silently.
+
+**None of these are reachable from a machine that already works.** Every one lives on the
+first-run path: the first command, the unconfigured clone, the installer's own exit-code
+reading, the documented way out. The in-repo tests never walk it, because by the time they run,
+setup has already happened — which is precisely why they stayed green through all five.
+
+This session produced a sixth instance before doing any work. `SessionStart` reported **"tests
+are RED"**; the real state was that the council had never been fetched, so half the suite did
+not exist. `node scripts/council-sync.mjs` — one command, documented — took it to 270 passed, 0
+failed and 573 more in the council's own suite. **The banner described a broken repository; the
+repository was merely uninstalled.** A status line that cannot distinguish *failing* from
+*absent* reports the wrong emergency.
+
+> **A test that runs after setup cannot test setup.** The only honest check of an install path
+> is a clean directory and a stranger's hands — which is what `tests/` already does for hooks,
+> and does not yet do for the thing hooks are installed by.
+
+## A predicted failure is not a hypothetical, and the proof arrived in four minutes
+
+A council reviewing the plugin packaging named a consequence nobody had asked about: the hooks
+that *write* — `save-prompt`, `session-end`, `pre-compact` — would not merely fail open when
+moved, they would redirect the audit trail into whatever directory they happened to land in.
+
+It was written down as a risk at 10:37. By 10:41 it had happened, in this repository, to the
+person who wrote it down. Moving the scripts into `plugin/` and running the suite *before*
+rewiring their root produced `plugin/docs/prompts/2026-07-30.md` — a second prompt log, valid,
+plausible, and in the wrong tree. It was found by `git status`, not by any test, because
+**nothing about a shadow audit trail is an error**: both files parse, both look right, and the
+only symptom is that the record is now in two places and neither says so.
+
+What made it harmless was luck of timing — the entries were test fixtures, not real prompts.
+That is not a control.
+
+> **The gap between "a review named this" and "we have a mechanism against it" is where the
+> defect lives, and it is usually measured in minutes rather than releases.** A finding written
+> into a card is not a fix; the same session that records it is fully capable of demonstrating
+> it.
+
+The mechanism now: a writing hook whose project root is unresolved writes **nothing**. The
+guard was already fail-closed for refusals; the writers were not, because nobody had thought of
+a writer as something that could fail open. It can — it just fails open into a file instead of
+past a check.
+
+## The improvement that disarmed the thing measuring it
+
+`kill-audit` deletes one real protection at a time and asks whether anything notices. On
+2026-07-30 it reported **19 caught, 0 survived, 4 unresolved**. Nought survived is the headline;
+**four unresolved is the finding**, because an unresolved mutation is one that was never tested
+at all.
+
+All four were already broken at `HEAD`, before this session touched anything, and three broke
+for the same reason. Commit `3639c06` gave every rule a kebab-case id — a real improvement, the
+one that made *"delete rule A while rule B also fires"* detectable. The mutations that delete
+those rules matched them by their **prose labels**:
+
+```
+mutation looked for   ['aws key id',      …]
+the file now says     ['aws-key-id',      …]
+```
+
+Same for `assigned secret` and for the discovery gate's kill-condition. The fourth, `discard`,
+broke at `ff9e207` when the escape hatch moved from an environment variable to a consumed marker
+file — the commit whose own message is *"the escape hatch could not be operated"*.
+
+So: **the commit that made the controls more precise silently disarmed four of the tests that
+prove the controls work**, and the audit went red and stayed red without anyone seeing it,
+because `kill-audit` costs minutes and therefore runs neither in `check.mjs` nor in CI.
+
+> **A test that references its target by name is coupled to that name, and renaming is the most
+> invisible kind of breaking change.** The rename was reviewed; the thing it broke was in a
+> different file, measured by a tool nobody runs on every commit.
+
+Two things follow, and only the first is done. `kill-audit` **did** refuse — exit 1 on
+unresolved, which is exactly the 2026-07-29 decision that a skipped mutation must not pass
+quietly. It worked. Nobody was listening. The missing half is a **cheap** applicability check —
+do all 23 mutations still match their targets? — that costs milliseconds rather than minutes and
+can therefore live in `check.mjs`, where a rename would be refused the same day.
+
+<!-- reflected-at: ff9e207 -->
 

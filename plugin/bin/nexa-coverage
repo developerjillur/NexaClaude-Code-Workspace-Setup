@@ -1,0 +1,4 @@
+#!/bin/sh
+# nexa-coverage — bare command for scripts/guard-coverage.mjs, added to PATH while this plugin is enabled.
+# Resolves relative to itself so it works from the plugin cache and from a clone alike.
+exec node "$(dirname "$0")/../scripts/guard-coverage.mjs" "$@"

@@ -33,9 +33,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { projectRootFor } from './hooks/roots.mjs';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
+// where this script lives once the workspace ships as a plugin.
+const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+if (!ROOT_TRUSTED) {
+  console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
+  process.exit(2);
+}
 const JSON_OUT = process.argv.includes('--json');
 const ONLY = process.argv.find((a) => a.startsWith('--only='))?.slice(7);
 
@@ -58,7 +64,7 @@ const KILLS = [
     to: '\n' },
   { id: 'discard', file: 'scripts/hooks/guard-edit.mjs',
     what: 'guard-edit no longer refuses a git command that destroys uncommitted work',
-    from: '  if (sawDiscard && process.env.NEXA_ALLOW_DISCARD !== \'1\') {',
+    from: '  if (sawDiscard && !allowed) {',
     to: '  if (false) {' },
   { id: 'subdir', file: 'scripts/hooks/guard-edit.mjs',
     what: 'guard-edit only matches a codeDir exactly, so anything INSIDE it is unguarded',
@@ -91,7 +97,7 @@ const KILLS = [
     to: 'const EMPTY = /^(?!)$/;' },
   { id: 'card-stop', file: 'scripts/card-gate.mjs',
     what: 'card-gate stops requiring a kill condition',
-    from: "    ['what would make us stop', /(make us stop|kill condition|would stop)/i, 'the observation that says this was wrong'],",
+    from: "    ['kill-condition', 'what would make us stop', /(make us stop|kill condition|would stop)/i, 'the observation that says this was wrong'],",
     to: '' },
   { id: 'card-errors', file: 'scripts/card-gate.mjs',
     what: 'card-gate lets a card reach 6-done without naming where its errors surface',
@@ -107,11 +113,11 @@ const KILLS = [
   // ── scan-secrets: the deploy gate that reads the whole git history ─────────
   { id: 'secret-aws', file: 'scripts/scan-secrets.mjs',
     what: 'scan-secrets stops recognising an AWS key id',
-    fromRe: /\n\s*\['aws key id',[^\n]*\n/,
+    fromRe: /\n\s*\['aws-key-id',[^\n]*\n/,
     to: '\n' },
   { id: 'secret-assigned', file: 'scripts/scan-secrets.mjs',
     what: 'scan-secrets stops recognising `password = "…"` — the broadest rule it has',
-    fromRe: /\n\s*\['assigned secret',[^\n]*\n/,
+    fromRe: /\n\s*\['assigned-secret',[^\n]*\n/,
     to: '\n' },
   { id: 'secret-history', file: 'scripts/scan-secrets.mjs',
     what: 'scan-secrets stops reading git HISTORY — a rotated key still sits in every clone',

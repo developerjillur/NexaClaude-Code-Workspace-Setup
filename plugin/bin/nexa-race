@@ -1,0 +1,4 @@
+#!/bin/sh
+# nexa-race — bare command for scripts/measure-settings-race.mjs, added to PATH while this plugin is enabled.
+# Resolves relative to itself so it works from the plugin cache and from a clone alike.
+exec node "$(dirname "$0")/../scripts/measure-settings-race.mjs" "$@"

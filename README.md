@@ -140,7 +140,24 @@ Then rewrite `AGENTS.md` §1 and §2. They ship as templates with the questions 
 
 **Nothing here needs a magic phrase.** Three mechanisms, all automatic:
 
-**1 · Hooks fire on events.** Wired in `.claude/settings.json` — **8 scripts across six
+**0 · Install it, and that is all.** The workspace ships as a plugin. Open Claude Code in a
+clean repository root and it scaffolds itself — board, docs, config, contract, permissions — and
+tells you every file it created and how to undo it. It refuses in every other case: not a repo
+root, a linked worktree, your home directory, a repo that already has a `board/` that is not
+ours, or one where you ran `/nexa-workspace:remove` before.
+
+```bash
+claude plugin marketplace add openai/codex-plugin-cc
+claude plugin marketplace add DietrichGebert/ponytail
+claude plugin marketplace add developerjillur/NexaClaude-Code-Workspace-Setup
+claude plugin install nexa-workspace@nexa
+```
+
+**One caveat, stated because it cannot be fixed:** `model` is read once at startup, so the
+first session runs on your default model. Permission rules and hooks are live immediately —
+[measured](scripts/measure-settings-race.mjs), not assumed.
+
+**1 · Hooks fire on events.** Declared in `plugin/hooks/hooks.json` — **8 scripts across six
 events** (`UserPromptSubmit` runs two):
 
 | Event | Script | What it does |
@@ -194,10 +211,11 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 28 scripts — `scripts/`
+### 31 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
+| `measure-settings-race.mjs` | **the measurement the zero-command bootstrap rests on** — does a deny rule written by a `SessionStart` hook protect the session that wrote it? Two arms, and the BASELINE arm exists so a broken harness cannot report success |
 | `council-sync.mjs` | **fetches the council from GitHub** and links it into place — never vendored, because a copy is a dependency with a timer on it |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
@@ -292,6 +310,29 @@ losing the review path:
 `codex@openai-codex` — **load-bearing**: `/codex:review` and a Stop gate that can block a turn ·
 `ponytail@ponytail` · `code-review` · `feature-dev` · `github` · `code-simplifier` ·
 `security-guidance` · `typescript-lsp`
+
+**Installing them — two of these live in marketplaces nobody registers for you.**
+`claude-plugins-official` registers itself the first time you launch Claude Code, so
+`code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance` and
+`typescript-lsp` install straight away. **`codex` and `ponytail` do not** — they are separate
+marketplaces, and *no plugin can add a marketplace on your behalf.* Registering a plugin source
+is a trust decision that stays with whoever clones the repo, which is why it is two commands and
+not a dependency line:
+
+```bash
+# 1 · register the two marketplaces that are not known by default
+claude plugin marketplace add openai/codex-plugin-cc       # → openai-codex
+claude plugin marketplace add DietrichGebert/ponytail      # → ponytail
+
+# 2 · install both plugins
+claude plugin install codex@openai-codex                   # the second model — §10
+claude plugin install ponytail@ponytail                    # the laziness ladder — §5
+```
+
+`./setup.sh` does step 2 for every entry in `enabledPlugins`, and step 1 for every entry in
+`extraKnownMarketplaces`. **Only `ponytail` is listed there today, so run the `openai-codex`
+line by hand first** — otherwise setup stops on `codex@openai-codex`, which is the one plugin
+the contract calls load-bearing.
 
 **Add your own stack's plugins.** The original carried two more for its telephony and hosting;
 they were removed here because they are not yours.

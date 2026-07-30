@@ -38,9 +38,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { projectRootFor } from './hooks/roots.mjs';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
+// where this script lives once the workspace ships as a plugin.
+const { root: ROOT, trusted: ROOT_TRUSTED, source: ROOT_SOURCE } = projectRootFor(import.meta.url);
+if (!ROOT_TRUSTED) {
+  console.error(`no workspace found (looked from ${ROOT_SOURCE}). Run this inside a project, or set CLAUDE_PROJECT_DIR.`);
+  process.exit(2);
+}
 const REPO = 'https://github.com/developerjillur/all-cli-council.git';
 // ── where the clone lives, and why it may not be here ───────────────────────
 //

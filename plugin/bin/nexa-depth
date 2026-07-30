@@ -1,0 +1,4 @@
+#!/bin/sh
+# nexa-depth — bare command for scripts/depth-check.mjs, added to PATH while this plugin is enabled.
+# Resolves relative to itself so it works from the plugin cache and from a clone alike.
+exec node "$(dirname "$0")/../scripts/depth-check.mjs" "$@"

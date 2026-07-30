@@ -10,6 +10,159 @@ answer feels obvious. It stops feeling obvious in four weeks.
 
 ---
 
+## 2026-07-30 — Zero-command adoption, and the one thing that cannot be zero-command
+
+**Decision.** The owner requires that installing the plugin is the whole of adoption: open Claude
+Code in a repository and the workspace is there. No `/nexa:init`, no second step. This
+supersedes the "components only, `/nexa:init` writes" decision below, which was taken before the
+requirement was stated. `SessionStart` bootstraps.
+
+**What made it safe rather than reckless was one verified fact.** The previous decision assumed
+a written `.claude/settings.json` could not take effect until the next session — which would
+have meant session one running with no permission rules while reporting itself installed. That
+assumption was wrong:
+
+> *"Claude Code watches your settings files and reloads them when they change, so edits to most
+> keys apply to the running session without a restart."* — covering `permissions` and `hooks`,
+> across user, project, local and managed scope, with `ConfigChange` firing per change.
+
+So permissions written at `SessionStart` **arm the session that wrote them**. Two residues, both
+named rather than hidden:
+
+- **`model` is read once at startup.** Session one runs on the user's default model, not
+  `opus`, whatever we write. This is documented and irreducible. It is announced, not hidden.
+- **The reload is watcher-driven**, so "written before the first tool call" was a race. It was
+  the one assumption the whole design rested on. **It has been measured, and it is closed.**
+
+  `scripts/measure-settings-race.mjs`, run 2026-07-30: two live headless sessions against
+  fixture repositories. The RACE arm starts with `permissions.deny` empty, a `SessionStart`
+  hook writes the rule, and the first prompt asks for the denied file. **Refused** —
+  *"File is in a directory that is denied by your permission settings."* The BASELINE arm, with
+  the rule present before startup, also refused, which is what makes the first result mean
+  anything: a harness whose control cannot detect a refusal would report success no matter what.
+
+  It is a measurement of **one version on one machine**, not a guarantee. The harness exits 1
+  if the race ever reopens and 2 if it cannot tell — never 0 by default — so re-running it after
+  a Claude Code upgrade is the cheap way to find out.
+
+**Enforcement therefore does not depend on the file at all.** The plugin's own `hooks.json`
+registers with the plugin, so `guard-edit` is live from plugin load — before anything is
+written. The written `permissions.deny` covers only what a hook structurally cannot see:
+`@file` attachments, Grep, Glob, IDE context. Belt and suspenders, in that order.
+
+**The write ladder only ever creates.** `.claude/settings.json` absent → create it. Present →
+**never touch it**; write `.claude/settings.local.json` instead, which Claude Code gitignores
+itself. Both present → the one real merge: set-union appends to `permissions.deny`/`ask`, our
+keys written only when absent, everything we do not own byte-preserved, temp-file-plus-`rename`
+so a death mid-write leaves the old file or the new one and never a truncated one. The named
+failure this prevents: a shallow `{...theirs, ...ours}` replaces the user's whole `permissions`
+object, their own `deny: ["Read(./prod-creds/**)"]` vanishes, the file stays valid JSON, and
+nothing ever errors.
+
+**Where it must never fire**, all required: git repo root only (`rev-parse --show-toplevel`
+equals `realpath(cwd)`); `.git` is a directory, so linked worktrees and submodules abort; not
+`$HOME`, not under a temp dir; no tombstone in the plugin's own data directory; and both
+`workspace.config.json` and `board/` absent. A `board/` that is not ours aborts with one line —
+the fixture is a repo whose `board/index.html` is a deployed static site.
+
+**The cost we are accepting, stated plainly.** The angriest user is the one who cloned someone
+else's repository to read it: no on-disk predicate distinguishes "my new project" from "a repo I
+am browsing". That is the irreducible price of zero-command. It is *shaped*, not prevented —
+create-only, nothing tracked ever modified, every created path in one manifest, one loud
+announcement listing them, and `/nexa:remove` deleting exactly that set plus a tombstone. The
+sharp edge that remains is their next `git add -A`.
+
+**guard-edit gets three states, not two.** Config present → normal. Deliberately not a workspace
+(no config, no board, no manifest) → allow, silently; a guard that fires on repos that never
+opted in is a guard that gets uninstalled. **Ambiguous — manifest but no config, board but
+unreadable config, no resolvable project root → `ask`, never allow.** All three of this repo's
+shipped fail-opens were the third state collapsing into the second.
+
+**How we would know this was wrong.** Run the race harness: `SessionStart` writes a deny rule,
+the first prompt immediately attempts the denied read. If it is not refused, session one is a
+genuine fail-open window and degraded-announced mode becomes the primary mechanism rather than
+the backstop.
+
+**Provenance.** Council 2026-07-30, 4/4, overlap 0.10. The two strongest answers **disagreed on
+the load-bearing fact** — one held that no in-session settings reload is documented and the
+bootstrap must end with `continue: false` and "reopen Claude Code"; the other had fetched the
+docs that day and found the reload documented. **The minority was right**, verified directly
+against `docs/en/settings` before this entry was written, which is the only reason the ranking
+did not decide it. Run:
+`.council/runs/zero-command-adoption-is-now-a-hard-requirement-not-a-questi-e9e545.md`.
+
+---
+
+## 2026-07-30 — The workspace ships as a plugin of *components*, never of *state*
+
+**Decision.** Package the workspace as a Claude Code plugin, but only the components a plugin
+actually distributes: skills, commands, subagents, hooks, `bin/` executables. **Everything that
+is project state — the contract on disk, the board, `docs/`, `workspace.config.json`,
+`.claudeignore`, and the whole of `.claude/settings.json` — stays a project file and is written
+only by an explicit `/nexa:init`.** Installation writes nothing to the working tree.
+
+**Refused: the plugin `settings.json` `agent` key as the contract's delivery.** It was the
+centrepiece of the first plan and it is wrong four ways, each verified rather than argued:
+
+1. A main-thread agent *"replaces the default Claude Code system prompt **entirely**"*. The
+   contract is 330 lines of project process; it was never written to be a complete operating
+   system prompt, and the difference is unmeasured behavioural loss.
+2. `CLAUDE.md` *"and project memory still load"* afterwards — so in this repo the contract
+   would load **twice**.
+3. Plugin agents are **priority 5, the lowest**. A same-named project or user agent silently
+   wins, so `{"agent":"nexa"}` is neither exclusive nor guaranteed.
+4. It *is* the card's own kill-condition 2: it replaces whatever main-thread agent the user
+   already chose.
+
+And the cost that decided it: the contract is `AGENTS.md` **because 28+ other tools read it
+natively**. `.claude/settings.json` names `codex@openai-codex` load-bearing precisely so
+`4-review` runs on a model that does not share this one's priors. Move the contract inside a
+Claude plugin and **that reviewer becomes contract-blind** — the gate still runs, against
+nothing.
+
+**Refused: replacing `permissions.deny` with a `PreToolUse` hook.** Not an implementation
+problem — structural. Native `Read` rules are applied *"to `@file` mentions in your prompts"*,
+to Grep and Glob, and to IDE-attached context. **A hook never fires for content already attached
+to a user message**, so `@code/.env explain this` passes whatever `permissions.mjs` contains.
+A hook also *fails open on any runtime error*, where a native deny cannot crash. Permissions
+stay in `settings.json`.
+
+**Refused: `userConfig` for `codeDirs`/`planDir`.** `pluginConfigs` are read only from user
+settings, `--settings` and managed settings; **project settings are ignored**. One installation
+cannot carry two projects' code directories.
+
+**Chosen on a split, and the doc decided it.** Two members disagreed on the source layout. The
+top-ranked answer said keep files canonical outside `plugin/` and symlink in — correct for a
+marketplace install, where an intra-marketplace link is dereferenced. But *"for plugins
+installed with `--plugin-dir` or from a local path, only symlinks that resolve within the
+plugin's own directory are preserved"* — so dev-mode testing would silently diverge from what
+users install. The minority answer inverts it: **`plugin/` is canonical, the repo's traditional
+paths are symlinks pointing into it.** Real files ship under both paths, and the drift check
+gets deleted instead of written.
+
+**Prerequisite, and it blocks everything.** All **eight** hook scripts derive their root from
+`import.meta.url`; **none** reads `CLAUDE_PROJECT_DIR`. Run from a plugin cache, `guard-edit`
+resolves `workspace.config.json`, `board/3-build` and `code/` inside the cache, `isCode()`
+returns false for every real file, and `if (!isProductCode) allow()` fires. **The one blocking
+guard becomes a silent no-op** — fail-open number four, in a repo that has shipped three. Worse,
+`save-prompt`, `session-end` and `pre-compact` *write*: they would redirect every project's
+prompt log and session record into one shared cache. Every hook gets an explicit two-root split
+before any packaging work starts.
+
+**How we would know this was wrong.** If a clean-room marketplace install leaves a populated
+tree untouched, blocks an absolute-path `Edit` against the *project's* board, and refuses
+`@code/.env` without the native rules — then the first plan was survivable and this was
+over-caution. The three inputs are written into the card as tests, so it is checkable rather
+than arguable.
+
+**Provenance.** Council 2026-07-30, 4/4 answered, reasoning overlap **0.06** — four arguments,
+not one repeated. Diagnostics flagged verbosity correlation 0.83 and self-enhancement 2/4, so
+the ranking was not used to pick the answer; every claim above was re-verified against the
+source file or the documentation before it was written here. The run is
+`.council/runs/this-plan-repackages-a-claude-code-workspace-a-written-contr-2c0185.md`.
+
+---
+
 ## Format
 
 ```markdown

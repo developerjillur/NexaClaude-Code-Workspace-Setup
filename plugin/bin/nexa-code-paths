@@ -1,0 +1,4 @@
+#!/bin/sh
+# nexa-code-paths — bare command for scripts/ci-code-paths.mjs, added to PATH while this plugin is enabled.
+# Resolves relative to itself so it works from the plugin cache and from a clone alike.
+exec node "$(dirname "$0")/../scripts/ci-code-paths.mjs" "$@"
