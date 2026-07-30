@@ -1,9 +1,9 @@
 #!/bin/sh
-# nexa-council-sync — bare command for scripts/council-sync.mjs, on PATH while this plugin is enabled.
+# nexa-card-gate — bare command for scripts/council/watch.mjs, on PATH while this plugin is enabled.
 #
 # $0 is resolved THROUGH SYMLINKS before taking its directory. A second-model review found the
-# naive form: with /usr/local/bin/nexa-council-sync linked to the plugin copy, "$(dirname "$0")" is
-# /usr/local/bin and the wrapper looks for /usr/local/bin/../scripts/council-sync.mjs, which does not
+# naive form: with /usr/local/bin/nexa-card-gate linked to the plugin copy, "$(dirname "$0")" is
+# /usr/local/bin and the wrapper looks for /usr/local/bin/../scripts/council/watch.mjs, which does not
 # exist. Linking a command into PATH is the ordinary way to install one, so the naive form is
 # broken for the common case rather than an exotic one. Every expansion stays quoted, so a
 # plugin path containing spaces works too.
@@ -17,4 +17,4 @@ while [ -L "$src" ]; do
   esac
 done
 dir=$(cd -P "$(dirname "$src")" > /dev/null && pwd)
-exec node "$dir/../scripts/council-sync.mjs" "$@"
+exec node "$dir/../scripts/council/watch.mjs" "$@"
