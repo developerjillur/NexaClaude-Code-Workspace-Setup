@@ -43,29 +43,30 @@ console.log('\n▸ the refusal list — checked before any model is asked');
     ['Shall I email the client about the delay?', 'contacting'],
     ['I will merge into main and squash, ok?', 'shared history'],
     ['This is irreversible — are you sure?', 'irreversible'],
-    ['Do you want me to use Postgres or MySQL?', 'a choice between alternatives'],
-    ['Would you like the dark theme or the light one?', 'preference'],
-    ['I can do it either way — your call?', 'approval'],
-    // Harmless in itself, and vetoed anyway: it names alternatives, and **a false veto costs
-    // one unattended turn while a false pass costs a force-push.** The asymmetry is deliberate
-    // and this case is here to record that it was chosen, not overlooked.
-    ['Which file would you like me to read first, the reducer or the selector?', 'alternatives'],
   ];
   for (const [msg, why] of mustRefuse) {
     check(`REFUSES: ${msg.slice(0, 46)}`, veto(msg) !== null, `not vetoed (${why})`);
   }
 
-  // ── THE SILENT CASE, and it matters as much as the refusals ───────────────
+  // ── ONLY destructive decisions belong to the human ────────────────────────
   //
-  // **The first veto list vetoed every question that existed.** `should i|shall i|do you want`
-  // matches "Shall I run the test suite?" — the exact case autopilot is for. It scored full
-  // marks on the refusal half and the feature was worth nothing. These assertions are what
-  // caught that, and they are the reason the rule was split into two narrow ones.
+  // Two softer rules used to live here — approval-shaped phrasing, and choices between named
+  // alternatives — and they made autopilot fire almost never. Measured in a real session:
+  // "Should I count the words?" continued; "Would you like me to count the words?" stopped.
+  // Same file, same task, different grammar. **That is a coin toss dressed as a safety
+  // boundary**, and a preference between harmless options is not worth stalling an unattended
+  // run for.
+  //
+  // These are the cases that must now proceed. They are the whole point of the feature.
   const mayProceed = [
     'I have finished the parser. Shall I run the test suite now?',
     'The build succeeded. Want me to continue with the next module?',
     'I have written the types. Let me know if you want the docs updated too.',
     'That module is done. Shall I move on to the next one?',
+    'Would you like me to count the words in notes.md?',
+    'Do you want me to read the reducer or the selector first?',
+    'I can do it either way — your call?',
+    'Would you like the dark theme or the light one?',
   ];
   for (const msg of mayProceed) {
     check(`allows: ${msg.slice(0, 46)}`, veto(msg) === null, `wrongly vetoed: ${veto(msg)}`);

@@ -27,11 +27,11 @@ A rule list vetoes these **before any model is asked**, and the model can only e
 silence — never overturn a veto:
 
 publishing or deploying · destroying data · credentials · money · contacting a person ·
-rewriting shared history · anything irreversible · production · an approval only you can give ·
-a choice between named alternatives
+rewriting shared history · anything irreversible · production
 
-**A false veto costs one unattended turn. A false pass costs a force-push.** The list errs
-heavily one way, on purpose.
+**Only destructive decisions belong to you.** A preference between harmless options — which
+file first, dark or light, count the words or not — is autopiloted: stalling an unattended run
+for those made the feature fire almost never, and a preference is not a safety boundary.
 
 ## What it cannot do, and do not try to add it
 
