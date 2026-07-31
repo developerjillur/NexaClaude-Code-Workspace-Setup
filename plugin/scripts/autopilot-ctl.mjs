@@ -124,22 +124,52 @@ if (cmd === 'on') {
       console.log('    Restart Claude Code; hooks are loaded once, at session start.\n');
     }
   } else {
-    console.log(`  at           ${c.at}`);
+    // ── whose turn was this? ──────────────────────────────────────────────
+    //
+    // A breadcrumb records the last turn that ENDED here — which is very often a session that
+    // has since been closed. This block used to skip that question and announce the crumb's
+    // version as "the running session loaded X". A fresh session on 1.6.0 that had simply not
+    // finished a turn yet therefore got a MISMATCH warning quoting yesterday's 1.5.0, which is
+    // the second time this comparison has cried wolf. See `mine` below for the first.
+    const nowSession = process.env.CLAUDE_CODE_SESSION_ID ?? null;
+    // three states, and they lead to three different sentences: definitely this session,
+    // definitely another one, or not knowable (running outside Claude Code, or a crumb written
+    // before the session id was parsed).
+    const sameSession = nowSession && c.sessionId ? nowSession === c.sessionId : null;
+    const ageMs = Date.parse(c.at ?? '') ? Date.now() - Date.parse(c.at) : null;
+    const age = ageMs == null ? ''
+      : ageMs < 90_000 ? ' (moments ago)'
+        : ageMs < 3_600_000 ? ` (${Math.round(ageMs / 60_000)} min ago)`
+          : ageMs < 86_400_000 ? ` (${Math.round(ageMs / 3_600_000)} h ago)`
+            : ` (${Math.round(ageMs / 86_400_000)} days ago)`;
+
+    console.log(`  at           ${c.at}${age}`);
+    console.log(`  session      ${sameSession === true ? 'THIS session'
+      : sameSession === false ? 'an EARLIER session — not the one you are in now'
+        : 'unknown — the crumb or this shell records no session id'}`);
     console.log(`  hook version ${c.hookVersion ?? 'before 1.4.1 — did not record one'}`);
     console.log(`  outcome      ${c.stage}`);
     for (const [k, v] of Object.entries(c)) {
-      if (k === 'at' || k === 'stage' || k === 'hookVersion') continue;
+      if (['at', 'stage', 'hookVersion', 'sessionId'].includes(k)) continue;
       console.log(`  ${k.padEnd(12)} ${v}`);
     }
-    // **The question that took several rounds to become answerable.** Claude Code loads hooks
-    // once, at session start, and the cache keeps every version side by side — so a session can
-    // be running an old hook while the CLI on PATH is new, and nothing distinguishes that from
-    // a genuine bug. It is checked before anything else, because if it is true nothing else
-    // here means what it appears to.
-    if (c.hookVersion && c.hookVersion !== MY_VERSION) {
-      console.log(`\n  ⚠️  VERSION MISMATCH — the running session loaded ${c.hookVersion}`);
+
+    // Claude Code loads hooks once, at session start, and the cache keeps every version side by
+    // side — so a session really can run an old hook while the CLI on PATH is new. That is worth
+    // shouting about. But it can only be *concluded* from a crumb this session wrote.
+    if (c.hookVersion && c.hookVersion !== MY_VERSION && sameSession === true) {
+      console.log(`\n  ⚠️  VERSION MISMATCH — this session's hook is ${c.hookVersion}`);
       console.log(`      this command is ${MY_VERSION}`);
       console.log('      Hooks load once, at session start. QUIT AND REOPEN Claude Code.');
+    } else if (c.hookVersion && c.hookVersion !== MY_VERSION && sameSession === false) {
+      console.log(`\n  ℹ️  The crumb above is ${c.hookVersion}, this command is ${MY_VERSION} —`);
+      console.log('      but it was written by a session that has since ended, so it says');
+      console.log('      nothing about the hook YOU are running. Nothing is wrong.');
+      console.log('      Finish one turn here and run doctor again to see the live version.');
+    } else if (c.hookVersion && c.hookVersion !== MY_VERSION) {
+      console.log(`\n  ⚠️  The crumb is ${c.hookVersion} and this command is ${MY_VERSION}, and`);
+      console.log('      there is no session id to tell whether it is yours. If it was written');
+      console.log(`      long ago${age ? ` — it was${age}` : ''}, it is an old session, not a fault.`);
     } else if (!c.hookVersion) {
       console.log(`\n  ⚠️  The hook that ran predates 1.4.1, so it did not record its version.`);
       console.log(`      This command is ${MY_VERSION}. If they differ, quit and reopen Claude Code.`);
