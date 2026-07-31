@@ -194,6 +194,37 @@ console.log('\n▸ the hook — every gate before the model is reached');
   check('...and names the project it resolved, so a mismatch is visible',
     crumb?.root === fs.realpathSync(repo) || crumb?.root === repo, crumb?.root);
 
+  // ── whose session wrote it ────────────────────────────────────────────────
+  //
+  // The version above is only meaningful next to an answer to "was this MY session?". A crumb
+  // records the last turn that ENDED here, which is routinely a session closed hours ago —
+  // and doctor announced that version as "the running session loaded X". A fresh session on
+  // 1.6.0 that had simply not finished a turn yet was told it was running 1.5.0 and to restart,
+  // which it had already done. Second false alarm from this same comparison.
+  fs.rmSync(crumbPath, { force: true });
+  fire({ last_assistant_message: 'Shall I run the tests?', stop_hook_active: false, session_id: 'SESSION-A' });
+  const idCrumb = JSON.parse(fs.readFileSync(crumbPath, 'utf8'));
+  check('the breadcrumb records WHICH SESSION wrote it', idCrumb.sessionId === 'SESSION-A',
+    JSON.stringify(idCrumb.sessionId));
+
+  const doctor = (sessionId) => spawnSync('node', [CTL, 'doctor'], {
+    encoding: 'utf8', cwd: repo,
+    env: { ...env, CLAUDE_CODE_SESSION_ID: sessionId },
+  }).stdout ?? '';
+  // Force the version apart, so the comparison has something to find in both directions.
+  fs.writeFileSync(crumbPath, JSON.stringify({ ...idCrumb, hookVersion: '0.0.1-old' }, null, 2));
+
+  const otherSession = doctor('SESSION-B-live-now');
+  check('doctor does NOT cry mismatch over a crumb from an ended session',
+    !/VERSION MISMATCH/.test(otherSession), otherSession.trim().split('\n').slice(-4).join(' | '));
+  check('...it says whose session it was, instead of implying it was yours',
+    /EARLIER session/.test(otherSession));
+
+  const sameSession = doctor('SESSION-A');
+  check('doctor DOES cry mismatch when this very session loaded the older hook',
+    /VERSION MISMATCH/.test(sameSession), sameSession.trim().split('\n').slice(-4).join(' | '));
+  check('...and the alarm claims only what the crumb proves', /this session's hook is 0\.0\.1-old/.test(sameSession));
+
   // **Per project, not global.** One shared file means every project overwrites every other's,
   // so doctor in project A reads project B's crumb and reports a MISMATCH that is nothing but
   // "you have two projects". Shipped that way and it fired a false alarm within ten minutes.

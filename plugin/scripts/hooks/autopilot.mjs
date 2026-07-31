@@ -145,11 +145,21 @@ if (!INVOKED_DIRECTLY) {
 //
 // The global path is kept for the ONE case that has no project to write to — "no project found"
 // — which is precisely when a breadcrumb is most needed and least placeable.
+// **Which session wrote it.** A breadcrumb records the last turn that ENDED here, which may be
+// yesterday's session — and `doctor` used to read that and announce the version "the running
+// session loaded". It was reporting a closed session's hook as the live one, so a fresh session
+// on 1.6.0 that had not yet finished a turn got a MISMATCH warning about 1.5.0.
+// The Stop payload carries `session_id` and Claude Code exports `CLAUDE_CODE_SESSION_ID` to any
+// command it runs, so the two are directly comparable. Written here, compared there.
+let SESSION_ID = null;
+
 function breadcrumb(stage, extra = {}) {
   try {
     const home = os.homedir();
     if (!home) return;
-    const line = `${JSON.stringify({ at: new Date().toISOString(), hookVersion: PLUGIN_VERSION, stage, ...extra }, null, 2)}\n`;
+    const line = `${JSON.stringify({
+      at: new Date().toISOString(), hookVersion: PLUGIN_VERSION, sessionId: SESSION_ID, stage, ...extra,
+    }, null, 2)}\n`;
     const perProject = extra.root ? statePath(extra.root, 'autopilot-last-stop.json') : null;
     if (perProject) { fs.writeFileSync(perProject, line); return; }
     const dir = path.join(home, '.nexa');
@@ -174,6 +184,10 @@ try {
   for await (const chunk of process.stdin) raw += chunk;
   input = JSON.parse(raw || '{}');
 } catch { OFF('stdin was not JSON'); }
+
+// Every breadcrumb from here on can say which session it belongs to. The two exits above cannot,
+// and record `null` — which `doctor` reads as "unknown", never as "yours".
+SESSION_ID = input.session_id ?? null;
 
 // Already inside an auto-continue. Without this, a block triggers a Stop which triggers a block.
 if (input.stop_hook_active) OFF('already inside an auto-continue (stop_hook_active)');
