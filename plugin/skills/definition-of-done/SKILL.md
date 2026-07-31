@@ -59,6 +59,9 @@ failure, because discovery is legitimate and discovery nobody wrote down is not.
 - [ ] **`depth-check` run on the diff** — findings fixed or answered in the card
 - [ ] **`verify-claims` run on the card** — every citation followed, and it resolved
 - [ ] **Card touched a guard? `mutation-test` run** — and every mutation was caught
+- [ ] **`nexa-prove` green** — the invariants ran against a real instance. Every other line on
+      this list is satisfied by reading a document; this one is satisfied by the software
+      working. If the card touched auth, tenancy, money or a schema, it is not optional.
 - [ ] **Acceptance criteria met** — each one, individually, **with the proof beside it**
 - [ ] **Tests pass** — `npm run test:offline` green, all 427+
 - [ ] **The new guard has been watched to fail** — see below
@@ -118,8 +121,13 @@ in ten seconds is "where would I look to disbelieve this", and a bare tick does 
 ## Moving the card
 
 ```bash
-git mv board/5-verify/<card>.md board/6-done/
+nexa-move <NNN> 6-done
 ```
+
+**Never move the file by hand.** `nexa-move` is the transition function: it refuses a move the
+pipeline does not define, runs that transition's guards, and rolls back if one refuses. A manual
+move is refused by `guard-edit`, and on a default adoption the board is outside the repository
+where a git-based move cannot work at all.
 
 **Work that did not move a card did not happen.** The board is the record; chat is not.
 

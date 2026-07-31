@@ -25,6 +25,6 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["**/*.js", "**/*.mjs"],
+  "include": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"],
   "exclude": ["node_modules", "dist", "build", "coverage"]
 }

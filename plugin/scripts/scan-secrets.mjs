@@ -21,7 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { projectRootFor } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
@@ -49,7 +49,36 @@ const PATTERNS = [
   ['private-key-block', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['jwt', /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\./],
   ['oauth-code', /\bcode=ac_[A-Za-z0-9._-]{20,}/],
-  ['assigned-secret', /\b(?:password|passwd|auth[_-]?token|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{12,}["']/i],
+  // ── the credentials a real app actually holds ──────────────────────────────
+  //
+  // Measured 2026-07-31 against realistic values: **8 of 11 walked straight through.** The set
+  // above is the credentials THIS workspace uses — model APIs, git hosts, its own cloud. The
+  // set below is what the applications it is meant to ship actually hold, and a payments app
+  // was the worked example in the objective this repo is judged against.
+  //
+  // `sk_live_` is the one worth staring at: `openai-key` is `\bsk-` with a HYPHEN, Stripe uses
+  // an UNDERSCORE, and the two look identical at a glance. A scanner that catches the key you
+  // will never commit and misses the one that charges customers is a scanner that produces
+  // confidence and nothing else.
+  ['stripe-secret-key', /\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/],
+  ['stripe-webhook-secret', /\bwhsec_[A-Za-z0-9]{16,}/],
+  ['google-oauth-secret', /\bGOCSPX-[A-Za-z0-9_-]{16,}/],
+  ['sendgrid-key', /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/],
+  ['slack-token', /\bxox[baprs]-[A-Za-z0-9-]{10,}/],
+  // A connection string carries the password in the URL, and it is the single most-committed
+  // credential in a web project. Any scheme, because Mongo, Redis, AMQP and Postgres all do it.
+  ['db-url-with-password', /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]{6,}@[^\s/]+/i],
+  // ── and the `.env` line, which the rule below could not match by construction ──
+  //
+  // `assigned-secret` requires the value to be QUOTED. No line in `.env` format is quoted, so
+  // `DB_PASSWORD=correcthorsebatterystaple` — the single most common way a secret is written
+  // down — could never match it, in any file, ever. The quotes are now optional, and an
+  // unquoted value must run to end-of-line so a bare `password:` in prose is not a hit.
+  // The `(?:[A-Za-z0-9]+[_-])?` prefix exists because `\b` does not fire inside `DB_PASSWORD`:
+  // `_` is a word character, so there is no boundary before `PASSWORD` and the commonest
+  // spelling of the commonest secret was unmatchable. Trailing placeholder values are excluded
+  // so `.env.example` files do not need an allowlist entry each.
+  ['assigned-secret', /(?:^|[\s"'`,{[])(?:[A-Za-z0-9]+[_-])?(?:password|passwd|pwd|auth[_-]?token|api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key|secret)\s*[:=]\s*(?!(?:["']?(?:your|my|the|some|a)[_-]|["']?(?:xxx|changeme|placeholder|example|redacted|todo|<)))(?:["'][^"'\s]{12,}["']|[^\s"'#]{12,}$)/im],
 ];
 
 // Known-benign, each with the reason it is benign. A line here is a claim someone can check —
@@ -64,15 +93,49 @@ const ALLOW = [
   // legitimately contains a credential-SHAPED string — and write down why, because a line here
   // is a claim somebody can check, which is the difference between an allowlist and a blindfold.
   { file: 'code/.env.example', why: 'documents key NAMES with empty values' },
+  // Found by the history pass on the first run after it was repaired — `const SECRET =
+  // 'launch-codes.txt'` at b41370c, a FILENAME the settings-race fixture writes and then looks
+  // for. Allowlisted by name with a reason rather than by loosening `assigned-secret`, which is
+  // this file's stated rule: a scanner that gets looser every time it fires stops finding
+  // anything. The rule itself is correct — `SECRET = '<12+ chars>'` is exactly what it should
+  // catch, and it happens to be a path here.
+  { file: 'scripts/measure-settings-race.mjs', why: "SECRET is a fixture FILENAME ('launch-codes.txt'), not a credential — the race probe writes it and checks whether a concurrent write clobbers it" },
 ];
 const allowed = (f) => ALLOW.find((a) => f.endsWith(a.file));
 
+// ── NO SHELL, and the reason is a live regression this caught ───────────────
+//
+// The history pass built `git grep -P <JSON.stringify(pattern)> <commits…>` and handed it to a
+// shell. `JSON.stringify` escapes for JavaScript, not for `/bin/sh`: a **backtick** inside a
+// pattern's character class opened a command substitution, `/bin/sh` died with
+// `unexpected EOF while looking for matching \``, this helper's `catch` swallowed it, and the
+// scan printed `[history-pass] N commits scanned` and `✅ No unexplained credentials.`
+//
+// Measured 2026-07-31: a `DB_PASSWORD=…` committed and then deleted was found in the tree and
+// MISSED ENTIRELY in history — the exact case the header of this file says the whole history
+// pass exists for. The rule it killed was `assigned-secret`, the broadest one.
+//
+// A shell was never needed here. `execFileSync` with an argument array passes the pattern to
+// git verbatim, which removes the quoting bug AND the injection surface in one change.
+const gitArgs = (args, { allowFail = true } = {}) => {
+  try {
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  } catch (e) {
+    // `git grep` exits 1 for "no matches", which is not an error. Anything else IS, and a
+    // scanner that cannot run its own search must not report a clean history.
+    if (allowFail && (e.status === 1)) return '';
+    if (!allowFail) throw e;
+    return '';
+  }
+};
 const git = (c) => {
   try { return execSync(c, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
   catch { return ''; }
 };
 
 const findings = [];
+// A history pass that could not search is a refusal, not a pass — see the gitArgs comment.
+const HISTORY_BROKEN = { broken: false };
 const scan = (where, file, text) => {
   if (allowed(file)) return;
   for (const [what, re] of PATTERNS) {
@@ -126,12 +189,39 @@ const PCRE = process.env.NEXA_SCAN_NO_PCRE === '1' ? false : !/Perl-compatible|n
 const flagUsed = PCRE ? '-P' : '-E (no PCRE — \\b anchors dropped, so this matches MORE)';
 
 if (!treeOnly) {
-  const commits = git('git rev-list --all').split('\n').filter(Boolean);
+  const brokenPatterns = [];
+  const commits = gitArgs(['rev-list', '--all']).split('\n').filter(Boolean);
   for (const [what, re] of PATTERNS) {
     const flag = PCRE ? '-P' : '-E';
+    // ── the flags are part of the pattern, and `.source` throws them away ──────
+    //
+    // `re.source` is the pattern WITHOUT `/i` or `/m`. `git grep` is case-sensitive by
+    // default, so every case-insensitive rule became case-sensitive the moment it crossed
+    // into the history pass — `assigned-secret` is `/im`, and `password` does not match
+    // `DB_PASSWORD`. Measured 2026-07-31: a `DB_PASSWORD=` committed and then deleted was
+    // caught in the working tree and missed in history, with no error and no warning, because
+    // the tree pass uses the regex object and the history pass uses only its text.
+    //
+    // git grep is line-oriented, so `m` needs nothing; `i` has to be passed through.
+    const caseFlag = re.flags.includes('i') ? ['-i'] : [];
     const pattern = PCRE ? re.source : re.source.replace(/\\b/g, '');
     // -I skips binaries. One pass per pattern over every blob in every commit.
-    const out = git(`git grep -I -n ${flag} ${JSON.stringify(pattern)} ${commits.join(' ')} -- 2>/dev/null`);
+    // Argument array: the pattern reaches git exactly as written, backticks and all.
+    let out; let failed = false;
+    try {
+      // `-e` before the pattern: `private-key-block` begins `-----BEGIN`, and without `-e`
+      // git reads the leading dashes as an option — `unknown option \`---BEGIN …'`. The shell
+      // version swallowed that failure too, so the single pattern with no word boundary had
+      // never actually been searched in history.
+      out = execFileSync('git', ['grep', '-I', '-n', flag, ...caseFlag, '-e', pattern, ...commits, '--'],
+        { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      // 1 = no matches, which is the common and correct case. Anything else means the search
+      // did not run, and a search that did not run is not a clean history.
+      if (e.status === 1) out = '';
+      else { failed = true; out = ''; brokenPatterns.push(`${what}: ${(e.stderr || e.message || '').toString().trim().split('\n')[0].slice(0, 90)}`); }
+    }
+    if (failed) continue;
     for (const line of out.split('\n').filter(Boolean)) {
       const m = /^([0-9a-f]{7,40}):([^:]+):/.exec(line);
       if (!m) continue;
@@ -141,7 +231,14 @@ if (!treeOnly) {
       findings.push({ where: `history ${sha.slice(0, 7)}`, file, what, sample: '' });
     }
   }
-  console.log(`  [history-pass]  ${commits.length} commits scanned, via git grep ${flagUsed}`);
+  // **A pattern that could not run is reported, never counted as clean.** The whole defect
+  // above was this line printing a reassuring number while one rule had silently died.
+  if (brokenPatterns.length) {
+    console.error(`\n  ⛔ [history-pass] ${brokenPatterns.length} pattern(s) could not be searched — history is NOT clean, it is UNSCANNED:`);
+    for (const b of brokenPatterns) console.error(`       ${b}`);
+    HISTORY_BROKEN.broken = true;
+  }
+  console.log(`  [history-pass]  ${commits.length} commits scanned, via git grep ${flagUsed}${brokenPatterns.length ? ` — ${brokenPatterns.length} pattern(s) FAILED` : ''}`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────
@@ -153,6 +250,15 @@ if (!findings.length) {
   for (const a of ALLOW) console.log(`    ${a.file.padEnd(34)} ${a.why}`);
   console.log('\n  What this cannot check: a credential in a format nobody has seen, or one that');
   console.log('  looks like ordinary text. A scanner is a floor, never a ceiling.\n');
+  // **No findings is only clean if every pattern actually ran.** A rule that died in the shell
+  // produced zero matches, and zero matches read as success — which is how a `DB_PASSWORD`
+  // committed and deleted was reported clean. "Searched and found nothing" and "could not
+  // search" are different answers and must have different exit codes.
+  if (HISTORY_BROKEN.broken) {
+    console.error('  ⛔ …but the history pass did not complete. Exiting non-zero: an unscanned');
+    console.error('     history is not a clean one.\n');
+    process.exit(1);
+  }
   process.exit(0);
 }
 

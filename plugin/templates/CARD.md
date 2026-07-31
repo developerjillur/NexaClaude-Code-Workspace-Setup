@@ -1,6 +1,17 @@
 # NNN — <short title>
 
-> Stage: 0-backlog · Owner: · Opened:
+> Stage: 0-backlog · Owner: · Opened: · kind: feature
+
+**`kind:` changes what this card owes**, and it was undocumented until now — the exemption
+existed and nobody could find it. Declare it on the line above; it is read wherever it appears.
+
+| kind | What it changes |
+|---|---|
+| `feature` | the default. All five discovery questions are owed |
+| `bug` | somebody already found it — *that* is the evidence. Questions 1–5 waived |
+| `control` | a guard, a test, a check. Questions 1–4 waived; **5 still owed** — a control nobody has watched fire is not a control |
+| `learning` | built to find something out. The finding is the deliverable. Questions 1–3 waived |
+| `migration` | **adds** requirements rather than waiving them: the expand/contract split and mixed-version behaviour at `2-plan`, and how the *data* is restored at `5-verify`. A git tag rolls back code, never rows |
 
 ---
 
@@ -82,7 +93,14 @@ empty, the spec should have been fixed first.
 | Nothing extra | | |
 | Fits the file | | |
 
+**Reviewed by:** _the model and vendor that read this, and how it was run — e.g. `Codex GPT-5.6
+(OpenAI) · /codex:review --effort xhigh`. **Not the model that wrote the code** (§10). A card
+cannot leave `5-verify` without this line._
+
 **Verdict:** PASS / BACK TO BUILD
+
+> `PASS` only moves the card forward. `BACK TO BUILD` returns it to `3-build` — and any axis
+> scored below 3 is a `BACK`, per `skills/review-gate`.
 
 **Security gate** (`skills/security-gate`) — one line per check:
 
@@ -119,3 +137,17 @@ empty, the spec should have been fixed first.
 
 **Where errors surface:** _name where a failure in this code reaches a human. A log nobody
 reads is not monitoring, and `card-gate` refuses `6-done` without it._
+
+---
+
+## 7 · Operate  *(the board ends at 6-done; paying customers start there)*
+
+Filled in **after** it is live, from `skills/operate-after-done`. A card sits here until
+production has told you something — then it is closed, and what production said becomes cards.
+
+**Observed in production:** _what you SAW, not what you expected. What is erroring that was not
+erroring yesterday? What got slower — against the number from before this deploy, not against a
+target? "No errors and latency unchanged over three days" is a complete answer._
+
+**Fed back:** _anything production said that would change what gets built next, as card numbers.
+"Nothing to feed back" is a fine answer; a missing one is not._

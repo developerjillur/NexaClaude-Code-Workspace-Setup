@@ -15,11 +15,19 @@ Before writing, add it up:
 
 | | Cost | How known |
 |---|---|---|
-| **The workspace itself, before any work** | **~7,056 tokens** | `check.mjs` verifies this |
-| ├ `AGENTS.md` | ~5,222 | `bytes/4` — a **proxy**, checked against the header by `check.mjs` |
-| ├ `CLAUDE.md` | ~968 | |
-| ├ 13 skill descriptions (always loaded) | ~746 | this is what a skill costs when unused |
+| **The workspace itself, before any work** | **~8,850 tokens** | measured 2026-07-31; only the `AGENTS.md` row is enforced |
+| ├ `AGENTS.md` | ~6,580 | `bytes/4` — a **proxy**, and the ONE row `check.mjs` refuses on drift |
+| ├ `CLAUDE.md` | ~1,000 | measured, not enforced |
+| ├ 18 skill descriptions (always loaded) | ~1,150 | this is what a skill costs when unused |
 | └ `session-start` output | ~120 | |
+
+> **"`check.mjs` verifies this" was true of one row and printed against all five.** The gate
+> compares `AGENTS.md` against the number in its own header and refuses at 10% drift; nothing
+> checks the total, the skill catalogue or `CLAUDE.md`. The stated total was ~7,056 against a
+> real ~8,850 — 25% low, in a table whose whole purpose is deciding whether a card fits — and
+> it drifted because the row count grew from 13 skills to 18 while the number stayed still.
+> A number attributed to a checker that is not checking it is worse than an unattributed one,
+> because nobody re-measures it.
 | The card's spec | 500–1,500 | |
 | Files you will edit | count them — a 400-line file is ~5,000 | |
 | Files you must read but not edit | the graph should replace most of these | |

@@ -51,7 +51,7 @@ cd code && npm run test:offline    # 427 checks, all of them
 **Never `test:live` here** — it spends subscription tokens and a deploy is not the place to
 discover that.
 
-## 3 · Tag a rollback before building
+## 3 · Tag a rollback before building — **and snapshot the data**
 
 ```bash
 ssh "$DEPLOY_HOST" \
@@ -59,6 +59,52 @@ ssh "$DEPLOY_HOST" \
 ```
 
 **Before**, not after. A rollback tag you meant to create is not a rollback tag.
+
+### 3a · If this release contains a migration, the tag is not a rollback
+
+**A tag restores code. It does not restore rows.** Run the image rollback in step "If anything
+fails" against a database whose schema has moved and the result is not a failed deploy — it is
+corrupted data, written by an old application against a shape it does not understand. This is
+the single most expensive way the rest of this document can be followed correctly and still
+cause an outage.
+
+So a release carrying a schema change owes three things, and the card owes them too — declare
+`kind: migration` and `card-gate` will refuse the card without them:
+
+```bash
+# BEFORE the migration runs, and verified — an untested backup is a hope
+ssh "$DEPLOY_HOST" 'pg_dump -Fc "$DATABASE_URL" > /backups/pre-$(date +%Y%m%d-%H%M).dump'
+ssh "$DEPLOY_HOST" 'pg_restore --list /backups/pre-*.dump | head -1'   # it is readable
+```
+
+1. **Expand, then contract — in two separate releases.** Add the new column, write both, ship.
+   Only once the previous version is gone does the destructive step ship. A rename in one
+   deploy is a migration that cannot be rolled back, and no amount of care at deploy time
+   recovers it.
+2. **Mixed-version operation is the normal state during a rolling deploy**, not an edge case.
+   The previous app version is still serving, and its queued jobs are still in the queue. Both
+   schemas must work until the old version is drained.
+3. **A rehearsed restore**, on a copy, before the deploy — not the first time under pressure.
+
+**If the release is expand-only, the image rollback in "If anything fails" is safe as written.**
+If it is not, roll back the *code* and leave the schema — then fix forward on the data, which is
+the one case where this document's own rule is wrong to follow. Say which of the two applies in
+the card before deploying, because the answer is not discoverable at 3am.
+
+## 3b · Prove the invariants against a running instance
+
+```bash
+nexa-prove          # exits non-zero if any declared invariant is violated
+```
+
+**This is the only step that runs your application rather than reading about it.** A suite
+proves your code behaves as you think; these prove the four things whose failure costs money
+regardless of what you think — a cross-tenant read, a double charge, an open endpoint, and a
+migration the previous release cannot survive.
+
+It exits 2 when nothing is declared, and that is deliberate: *"no invariants declared"* is not
+*"no invariants violated"*. `nexa-prove --list` prints the four and
+`plugin/templates/invariants.example.json` is a worked example.
 
 ## 4 · Build, recreate, and re-run the suite *inside the image*
 
@@ -106,10 +152,17 @@ nothing used.**
 
 ## If anything fails
 
-**Roll back. Do not fix forward on production.**
+**Roll back. Do not fix forward on production** — *unless this release migrated the schema.*
+See §3a: rolling code back onto a migrated database corrupts data rather than restoring service.
+Check that first; it takes ten seconds and it is the difference between an incident and a
+disaster.
 
 ```bash
+# stateless release, or an expand-only migration — safe
 docker tag call-agent:rollback-<stamp> call-agent:live && docker compose up -d --force-recreate
+
+# a release with a destructive migration — the code goes back, the schema does NOT
+# restore from the §3a snapshot only if the data is already wrong; otherwise fix forward
 ```
 
 Then open a card. **A hotfix with no card is how the same bug ships twice.**

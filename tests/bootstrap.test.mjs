@@ -182,6 +182,30 @@ console.log('\n▸ a clean repository root — the only case that writes');
       !deny.some((d) => /^Write\(\.\//.test(d)), deny.filter((d) => /^Write\(/.test(d)).join(', '));
     check('...and the boundaries are covered by Edit(), which applies to every editing tool',
       deny.includes('Edit(./plan/**)') && deny.includes('Edit(./board/6-done/**)'), deny.join(', '));
+
+    // ── the credential rules must name the project's REAL source directories ──
+    //
+    // They were hardcoded to `./code/` while `detectCodeDirs()` writes the project's actual
+    // directories into `config.json` a few lines away. A `src/` project therefore got
+    // `{"codeDirs":["src"]}` alongside `Read(./code/.env)` — a rule guarding a path that does
+    // not exist, so the credential protection covered nothing while looking present.
+    check('.env is denied for READING in every configured code directory',
+      deny.includes('Read(./code/.env)'), deny.join(', '));
+    // §8 lists .env among the files an agent must not touch, and only reading was denied —
+    // so overwriting a credential file was permitted. That destroys a secret rather than
+    // leaking one, which is why nobody thought to check for it.
+    check('...and for WRITING, which Read() alone left open',
+      deny.includes('Edit(./code/.env)'), deny.join(', '));
+
+    // The controls themselves. `ask` rather than `deny`: these are edited legitimately, and a
+    // deny that must be worked around teaches people to work around it. But an agent must not
+    // be able to silently delete the hook registration that constrains it.
+    const ask = JSON.parse(fs.readFileSync(path.join(r, '.claude', 'settings.json'), 'utf8'))
+      .permissions?.ask ?? [];
+    check('editing the hook registration asks a human first',
+      ask.includes('Edit(./.claude/settings.json)'), ask.join(', '));
+    check('...and so does editing the contract itself',
+      ask.includes('Edit(./AGENTS.md)') && ask.includes('Edit(./workspace.config.json)'), ask.join(', '));
   }
 
   check('the settings it wrote carry the deny rules',

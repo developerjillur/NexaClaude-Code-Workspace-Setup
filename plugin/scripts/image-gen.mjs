@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { projectRootFor, statePath } from './hooks/roots.mjs';
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|tiff?|avif)$/i;
@@ -202,7 +203,11 @@ export function pickResult({ out, bases, workdir, before }) {
 }
 
 // ── everything below runs only as a command ─────────────────────────────────
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname)) {
+// `new URL(import.meta.url).pathname` is PERCENT-ENCODED: a repository at
+// `/Volumes/T7 Shield/...` yields `/Volumes/T7%20Shield/...`, and `realpathSync` threw ENOENT
+// on it — taking the whole module down at import time and `tests/hooks.test.mjs` with it.
+// `fileURLToPath` is the decoding form, and `roots.mjs` already imports it for this reason.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const JSON_OUT = argv.includes('--json');
   const flag = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };

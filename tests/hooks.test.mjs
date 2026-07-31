@@ -19,7 +19,27 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const HOOKS = path.join(ROOT, 'scripts', 'hooks');
+
+// ── the plugin's own copy, not the back-link at the repository root ──────────
+//
+// `<repo>/scripts` is a SYMLINK to `<repo>/plugin/scripts`, and Node resolves symlinks in
+// `import.meta.url`, so on a normal checkout the two are the same files and either spelling
+// works. They are not the same on a filesystem without symlinks — exFAT, and Windows without
+// developer mode — where git materialises the link as a real directory, either a copy or a
+// one-line text file holding the target path.
+//
+// That difference is not cosmetic. `roots.mjs` decides which project a hook is talking about
+// by walking up from the script's own location: reached through `<repo>/plugin/scripts/hooks/`
+// the parent is `plugin/`, which is not a workspace, so `CLAUDE_PROJECT_DIR` decides — the
+// production path. Reached through `<repo>/scripts/hooks/` the parent is the repository, which
+// HAS a `board/`, so every fixture silently reported on this repo instead of its own scratch
+// project. Four assertions failed for that reason and none of them was about the code they
+// name.
+//
+// Resolving the plugin explicitly is correct on both, and it is what the symlink means anyway.
+const PLUGIN = [path.join(ROOT, 'plugin'), ROOT]
+  .find((p) => fs.existsSync(path.join(p, 'scripts', 'hooks', 'roots.mjs')));
+const HOOKS = path.join(PLUGIN, 'scripts', 'hooks');
 // ── the product path this suite pokes at ─────────────────────────────────────
 //
 // Read from `workspace.config.json`, exactly as the guard reads it. **It was hardcoded to
@@ -208,7 +228,51 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
     ['sed -i', `sed -i "" "s/a/b/" ${PRODUCT_REL}/tools.js`],
     ['tee', `cat foo | tee ${PRODUCT_REL}/db.js`],
     ['cp', `cp /tmp/x ${PRODUCT_REL}/y.js`],
+    // ── the second thing an agent reaches for, once the first was refused ─────
+    //
+    // Measured 2026-07-31: twenty ordinary write commands fed to this hook, four blocked.
+    // The list above is what somebody tries FIRST; these are what they try next, and that is
+    // the set that matters once the first attempt has been refused. `python3 -c` and `node -e`
+    // were the two most likely of all and neither was seen.
+    ['perl -i', `perl -i -pe "s/a/b/" ${PRODUCT_REL}/auth.js`],
+    ['python3 -c', `python3 -c "open('${PRODUCT_REL}/auth.js','w').write('x')"`],
+    ['node -e', `node -e "require('fs').writeFileSync('${PRODUCT_REL}/auth.js','x')"`],
+    ['truncate', `truncate -s 0 ${PRODUCT_REL}/auth.js`],
+    ['rm', `rm ${PRODUCT_REL}/auth.js`],
+    ['ed', `ed ${PRODUCT_REL}/auth.js`],
+    ['rsync', `rsync /tmp/x ${PRODUCT_REL}/auth.js`],
+    ['patch', `patch ${PRODUCT_REL}/auth.js < /tmp/p.diff`],
   ]) check(`blocks a shell ${what} into product code`, bash(cmd).code === 2, cmd.slice(0, 40));
+
+  // ── board-move-unguarded · a stage change is a transition, not a file move ──
+  //
+  // Measured 2026-07-31: `git mv board/1-spec/001.md board/5-verify/001.md` exited 0 — four
+  // gates skipped with no refusal and no record. The `Edit(./board/6-done/**)` deny rule is no
+  // help, because permission rules never reach Bash.
+  //
+  // The silent cases matter as much: renaming a card WITHIN its stage is not a transition, and
+  // neither is moving anything outside `board/`. A guard that refuses `git mv` generally would
+  // be switched off by lunchtime.
+  check('blocks a git mv that skips four stages',
+    bash('git mv board/1-spec/001-x.md board/5-verify/001-x.md').code === 2);
+  check('...and blocks even a LEGAL-looking one, because the guards live in nexa-move',
+    bash('git mv board/3-build/007-y.md board/4-review/007-y.md').code === 2);
+  check('...attributed to board-move-unguarded',
+    /refused: board-move-unguarded/.test(bash('git mv board/1-spec/001-x.md board/6-done/001-x.md').stderr));
+  check('...but a rename WITHIN a stage is not a transition and stays silent',
+    bash('git mv board/1-spec/001-x.md board/1-spec/001-renamed.md').code === 0);
+  check('...and a git mv outside board/ is nobody’s transition',
+    bash('git mv docs/a.md docs/b.md').code === 0);
+
+  // ── a backslash is the third way to write a path with a space in it ─────────
+  //
+  // The quoted forms were handled; the bare form stopped at the first space. So the spelling
+  // tab-completion produces — `/Volumes/T7\ Shield/…` — walked past a guard that blocked both
+  // other spellings of the identical path. A one-character bypass, on any repository whose
+  // path contains a space.
+  check('blocks an escaped-space path, the spelling tab-completion produces',
+    bash(`sed -i "" s/a/b/ ${path.join(ROOT, PRODUCT_REL, 'auth.js').replace(/ /g, '\\ ')}`).code === 2,
+    'the quoted spelling of the same path was already blocked');
 
   // The allow path matters more here than anywhere else: a guard that blocks `grep` gets
   // switched off within an hour, and then nothing is guarded at all.
@@ -765,12 +829,33 @@ console.log(`\n${'─'.repeat(72)}`);
     '**What breaks for them if this never exists?** ~40 minutes a week, two bookings lost.',
     '**What number moves?** Sunday admin minutes: 40 now, under 10 is success.',
     '**What would make us stop?** She still keeps the paper list a month after launch.',
+    // Required from 5-verify onward, and 6-done inherits it — see REQUIRED in card-gate.mjs.
+    '**Reviewed by:** Codex GPT-5.6 (OpenAI), /codex:review --effort xhigh.',
     '**Where errors surface:** the shared ops inbox, checked before opening.',
   ].join('\n');
 
   check('a bare idea may sit in 0-discovery', fire(mk('0-discovery', 'a.md', '# idea\n\nsomething\n')) === 0);
   check('an answered card passes at 1-spec', fire(mk('1-spec', 'b.md', ANSWERED)) === 0);
   check('...and at 6-done, with errors named', fire(mk('6-done', 'c.md', ANSWERED)) === 0);
+
+  // ── the shipped template must answer NOTHING ───────────────────────────────
+  //
+  // Measured before this fixture existed: an unmodified `templates/CARD.md` dropped into
+  // `1-spec`, `5-verify` and `6-done` produced **zero findings**. All five discovery questions,
+  // the reviewer's identity and "where errors surface" counted as answered — by the text
+  // asking for them.
+  //
+  // Two independent causes, both invisible without this test. The placeholder list catches what
+  // people TYPE (`tbd`, `n/a`) and not what they LEAVE, which is a 60-character italic hint.
+  // And the patterns are loose enough to match inside their own bolded question, so
+  // `**What breaks for them if this never exists?**` answered itself with the rest of itself.
+  //
+  // Inverted on purpose, like the check.mjs template fixture: this proves the gate is not
+  // satisfied by NO input, which is the direction every fail-open in this repo came from.
+  for (const stage of ['1-spec', '5-verify', '6-done']) {
+    const f = mk(stage, `tpl-${stage}.md`, fs.readFileSync(path.join(ROOT, 'templates', 'CARD.md'), 'utf8'));
+    check(`the untouched CARD.md template is refused at ${stage}`, fire(f) === 1);
+  }
   check('card-gate refuses headings with nothing under them',
     fire(mk('1-spec', 'd.md', '# x\n**Who asked?**\n**What they do today instead?**\n')) === 1);
   check('card-gate refuses TBD / n/a / ??? as answers',
@@ -813,6 +898,69 @@ console.log(`\n${'─'.repeat(72)}`);
   check('card-gate names where-errors-surface at 6-done',
     rulesOf(mk('6-done', 'm.md', ANSWERED.replace(/\*\*Where errors surface.*\n?/, '')))
       .join() === 'where-errors-surface');
+
+  // ── reviewed-by · both directions ──────────────────────────────────────────
+  //
+  // AGENTS.md §10 opens with "No model reviews its own work" and repeats it in three skills,
+  // and nothing recorded WHO reviewed — so a score table typed by the builder's own model was
+  // byte-for-byte identical to a real cross-vendor review. This cannot check that the review
+  // was honest, or that it happened; it makes the claim attributable, which is the difference
+  // between an omission and a lie.
+  // ── 7-operate · the stage that existed only in the pipeline diagram ────────
+  //
+  // No requirement, no row in the stage table, no row in `/card move`, no mention in
+  // `/deploy` — a directory nothing could put a card into and nothing ever emptied. It is also
+  // the stage covering everything after merge, which is where a product with real users lives.
+  //
+  // Two of `operate-after-done`'s four questions are mechanically checkable; the other two are
+  // judgement and are deliberately not faked here.
+  const OPERATED = `${ANSWERED}
+**Observed in production:** no new errors in three days; p95 unchanged at 240ms.
+**Fed back:** nothing to feed back — no support questions since the deploy.`;
+  check('a card in 7-operate owes what production actually did',
+    rulesOf(mk('7-operate', 'v.md', ANSWERED)).sort().join() === 'fed-back,observed-in-production');
+  check('...and passes once both are answered', fire(mk('7-operate', 'w.md', OPERATED)) === 0);
+  check('...and "nothing to feed back" is a complete answer, not an empty one',
+    !rulesOf(mk('7-operate', 'x.md', OPERATED)).includes('fed-back'));
+  check('...while an earlier stage owes neither', fire(mk('6-done', 'y.md', ANSWERED)) === 0);
+
+  // ── kind: migration · the kind that ADDS requirements ──────────────────────
+  //
+  // AGENTS.md §11 says "If anything fails: roll back. Never fix forward on production." That is
+  // right for stateless code and it is the CAUSE of the outage once a schema has moved: the tag
+  // restores the old image, the old image meets a migrated database, and the result is corrupt
+  // data rather than a failed deploy. A four-vendor council reached that independently, twice.
+  //
+  // Every other kind makes a card cheaper; this one makes it dearer, which the waiver mechanism
+  // could not express. The silent case matters as much as the refusal: a `feature` card must
+  // not suddenly owe migration answers.
+  const MIGRATION = `> kind: migration\n\n${ANSWERED}`;
+  check('a migration card owes expand/contract and mixed-version at 2-plan',
+    rulesOf(mk('2-plan', 'q.md', MIGRATION)).sort().join() === 'expand-contract,mixed-version');
+  check('...and data-rollback as well once it reaches 5-verify',
+    rulesOf(mk('5-verify', 'r.md', MIGRATION)).includes('data-rollback'));
+  check('...and a card of any other kind owes none of them',
+    rulesOf(mk('5-verify', 's.md', `> kind: feature\n\n${ANSWERED}`)).length === 0);
+  check('...and a migration that answers all three passes', fire(mk('5-verify', 't.md', `${MIGRATION}
+**Expand/contract:** the additive column ships in 1.4; the drop ships in 1.6, two releases later.
+**Mixed-version:** 1.3 workers keep writing the old column; both are written until 1.6.
+**Data rollback:** pg_dump snapshot taken by the deploy gate; restore rehearsed on staging 2026-07-30.`)) === 0);
+  // The declaration must be reachable where the template actually puts it — the metadata line
+  // is `·`-separated, and `[>\s]*` could not cross a `·`, so this exemption existed and was
+  // unreachable in its documented spelling.
+  check('...and kind: is read from the ·-separated metadata line',
+    rulesOf(mk('2-plan', 'u.md', `> Stage: 2-plan · Owner: jr · kind: migration\n\n${ANSWERED}`))
+      .includes('expand-contract'));
+
+  check('card-gate names reviewed-by when a card reaches 5-verify without it',
+    rulesOf(mk('5-verify', 'n.md', ANSWERED.replace(/\*\*Reviewed by.*\n?/, '')))
+      .join() === 'reviewed-by');
+  check('...and stays silent once the reviewing model is named',
+    fire(mk('5-verify', 'o.md', ANSWERED)) === 0);
+  check('...and an italic placeholder does not count as naming one',
+    rulesOf(mk('5-verify', 'p.md',
+      ANSWERED.replace(/\*\*Reviewed by:\*\*.*/, '**Reviewed by:** _the model and vendor that read this_')))
+      .join() === 'reviewed-by');
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -1764,7 +1912,12 @@ console.log(`\n${'─'.repeat(72)}`);
   process.on('exit', cleanup);
 
   const before = spawnSync('node', [gate], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
-  check('check.mjs passes on this workspace before anything is planted', before.status === 0);
+  // **The detail argument is not decoration here.** This assertion had none, so when it failed
+  // it said only "false" — and the whole point of the block is that check.mjs's verdict about
+  // the planted card is meaningless if the baseline is already red. A red baseline with no
+  // reason printed costs more to diagnose than the failure it is guarding.
+  check('check.mjs passes on this workspace before anything is planted', before.status === 0,
+    `exit ${before.status}: ${(before.stdout || '').split('\n').filter((l) => l.includes('❌')).slice(0, 2).join(' | ') || (before.stderr || '').slice(0, 160)}`);
 
   try {
     // A card at 1-spec answering none of discovery-first's five questions. Nothing else about
@@ -2007,11 +2160,18 @@ console.log(`\n${'─'.repeat(72)}`);
   check('mutation-test refuses mutations-unparseable — a mutations.json it cannot read',
     (() => { const r = scratch('{ not json'); return r.status === 2 && /not valid JSON/.test(r.stderr); })());
 
-  // No mutations is not a pass, and says so rather than printing a tick.
+  // No mutations is not a pass, and the EXIT CODE has to say so too.
+  //
+  // This asserted `status === 0` while its own name said "rather than reporting success" —
+  // and exit 0 is precisely how a script reports success. The prose in the output said one
+  // thing, the code every caller actually reads said the opposite, and the assertion locked
+  // the disagreement in place. A tool that tested nothing must not return the code meaning
+  // "tested everything, found nothing wrong".
   {
     const r = scratch(null);
-    check('with no mutations defined it says nothing was tested, rather than reporting success',
-      r.status === 0 && /not a pass/.test(r.stdout) && !/caught/.test(r.stdout));
+    check('with no mutations defined it REFUSES rather than reporting success',
+      r.status === 2 && /not a pass/.test(r.stdout) && !/caught/.test(r.stdout),
+      `status ${r.status}`);
   }
 
   // A `from` that no longer matches means the CODE moved and the mutation did not.
@@ -2163,6 +2323,540 @@ console.log('\n▸ guard-edit from a plugin cache — the root it guards is not 
   } finally {
     fs.rmSync(cache, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
+  }
+}
+
+// ── config-unreadable — a corrupt config must not switch the guard off ──────
+//
+// `guard-edit` read `workspace.config.json` itself and ended `catch { return ['code']; }`. In a
+// project whose real `codeDirs` is `["src"]`, one malformed brace silently returned the guard
+// to a directory that does not exist, so `isProductCode` was false for every file and every
+// edit was allowed — no log, no refusal, nothing in any diff. The single blocking control in
+// the workspace, turned off by a typo.
+//
+// Both directions, because the silent case is where all fifteen of this repo's fail-opens came
+// from: a corrupt config REFUSES, and a valid one that simply does not mention codeDirs still
+// falls back quietly, which was the original and correct instinct.
+console.log('\n▸ guard-edit · config-unreadable');
+{
+  const guard = path.join(HOOKS, 'guard-edit.mjs');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cfgunread-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: d, stdio: 'ignore' });
+    fs.mkdirSync(path.join(d, 'board', '3-build'), { recursive: true });
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    const target = path.join(d, 'src', 'auth.js');
+    const fire = () => run(guard, { tool_name: 'Write', cwd: d, tool_input: { file_path: target } },
+      { CLAUDE_PROJECT_DIR: d });
+
+    // 1 · REFUSES — the config is there and unreadable.
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), '{oops');
+    const broken = fire();
+    check('a corrupt workspace.config.json refuses the edit',
+      broken.code === 2, `exit ${broken.code}`);
+    check('...attributed to config-unreadable, not to a sibling rule',
+      /refused: config-unreadable/.test(broken.stderr), broken.stderr.split('\n')[0]);
+
+    // 2 · STAYS SILENT — no config at all is the documented default, not a failure.
+    fs.rmSync(path.join(d, 'workspace.config.json'));
+    const absent = fire();
+    check('...but an ABSENT config still falls back quietly to ["code"]',
+      absent.code === 0, `exit ${absent.code}: ${absent.stderr.split('\n')[0]}`);
+
+    // 3 · and a valid config naming src/ refuses on the CARD rule, proving the corrupt case
+    //     above was refused for its own reason rather than because src/ is product code.
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify({ codeDirs: ['src'] }));
+    const valid = fire();
+    check('...and a valid config reaches the card rule instead',
+      valid.code === 2 && /refused: no-card-in-build/.test(valid.stderr), valid.stderr.split('\n')[0]);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
+// ── a gate that CANNOT START must not report that it found nothing ──────────
+//
+// The most important fix of 2026-07-31, and `kill-audit` proved it was the one protection
+// added that day with nothing watching it: delete the `!g.ran` branch and every test stayed
+// green. A survivor is not a gap in the control, it is a gap in what watches it.
+//
+// The defect it guards: `check.mjs` spawned `path.join(ROOT, 'scripts', 'card-gate.mjs')`,
+// which does not exist in an adopted project — the child never ran, `JSON.parse(r.stdout || '{}')`
+// became `{findings: []}`, and zero findings printed as a green tick. In every repository that
+// installed this plugin, the three strongest gates passed having inspected nothing.
+//
+// Reproduced by removing the gate from a copy of the plugin, which is the only honest way to
+// make it genuinely unreachable — `sibling()` looks in PLUGIN_ROOT first and then the repo, so
+// deleting one copy is not enough.
+console.log('\n▸ check.mjs — a gate that could not run is a failure, not a pass');
+{
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'nogate-plugin-'));
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'nogate-proj-'));
+  try {
+    // A plugin copy with everything EXCEPT the gate under test.
+    fs.cpSync(PLUGIN, cache, { recursive: true });
+    fs.rmSync(path.join(cache, 'scripts', 'card-gate.mjs'), { force: true });
+
+    spawnSync('git', ['init', '-q'], { cwd: proj, stdio: 'ignore' });
+    fs.writeFileSync(path.join(proj, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    fs.writeFileSync(path.join(proj, '.nexa'), JSON.stringify({ nexaId: 'nogate0000000000' }));
+    fs.mkdirSync(path.join(proj, 'board', '1-spec'), { recursive: true });
+    fs.writeFileSync(path.join(proj, 'board', '1-spec', '001-x.md'), '# 001\n\nnothing answered.\n');
+
+    const r = spawnSync('node', [path.join(cache, 'scripts', 'check.mjs')],
+      { cwd: proj, encoding: 'utf8', timeout: 300000, env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+    const out = `${r.stdout}${r.stderr}`;
+
+    check('a card gate that cannot start makes check.mjs FAIL',
+      r.status !== 0, `exit ${r.status}`);
+    check('...and says so, rather than printing a green tick over zero cards',
+      /could not run/.test(out) && !/✅ every card carries/.test(out),
+      (out.split('\n').find((l) => /card gate|every card/.test(l)) || '').trim().slice(0, 90));
+  } finally {
+    fs.rmSync(cache, { recursive: true, force: true });
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+}
+
+// ── move-card · the transition function the board never had ─────────────────
+//
+// Measured 2026-07-31: `git mv board/1-spec/001.md board/5-verify/001.md` exited 0. Four gates
+// skipped, no refusal, no record. An audit and a four-vendor council reached the same sentence
+// from different directions — the board is a state machine with no transition function.
+//
+// The refusal that matters is `unknown-transition`, and it is different in kind from every
+// other gate here: an invalid move is not a move that failed its checks, it is a move that
+// **does not exist**, so it is refused before any guard runs.
+console.log('\n▸ move-card — an undefined transition is not a failed one');
+{
+  const mover = path.join(PLUGIN, 'scripts', 'move-card.mjs');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'movecard-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: d, stdio: 'ignore' });
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    fs.writeFileSync(path.join(d, '.nexa'), JSON.stringify({ nexaId: 'movecard00000000' }));
+    const ANSWERED_CARD = ['# 001 — a card',
+      '**Who asked?** Priya, ops lead, in the Oct 3 review.',
+      '**What they do today instead?** By hand in psql.',
+      '**What breaks for them if this never exists?** 2h per incident, twice a month.',
+      '**What number moves?** Manual edits: 4 now, 0 is success.',
+      '**What would make us stop?** No manual edits for a month.',
+      '**Reviewed by:** Codex GPT-5.6 (OpenAI), /codex:review.',
+      '**Where errors surface:** the on-call channel.',
+      // ── these five exist because the FIRST version of this fixture canonized a bug ──
+      //
+      // `nexa-move` named guards in pipeline.json and ran card-gate, which implements none of
+      // them — so this fixture asserted that a card with no spec section and no acceptance
+      // criterion SHOULD move 1-spec → 2-plan, and it passed. A council found it by reading
+      // pipeline.json against the two requirement lists. The card now carries what the
+      // transitions it is driven through actually demand.
+      '',
+      '## 1 · Spec',
+      'The worker must refuse a job that carries no tenant id.',
+      '- [ ] a job without tenant_id is rejected at the queue boundary',
+      '',
+      '## 2 · Plan',
+      '| File | Change |',
+      '|---|---|',
+      '| src/worker.js | reject jobs with no tenant id |',
+      '```',
+      'graphify explain "how is a job tenant-scoped"',
+      '→ src/worker.js:40 handle(), src/db.js:12 withTenant',
+      '```',
+      '',
+      '## 3 · Build',
+      'Added the predicate at the queue boundary.',
+      '',
+      '**Verdict:** PASS',   // the template's own format — see the regex note in card-demands
+      '| Axis | Score | Note |',
+      '|---|---|---|',
+      '| Matches the spec | 5 | |',
+      '| Nothing invented | 4 | |',
+      '| Nothing duplicated | 4 | |',
+      '| Nothing extra | 4 | |',
+      '| Fits the file | 5 | |',
+      '- [x] the guard was watched failing — see below',
+      '```',
+      'FAIL worker rejects untenanted job',
+      '  expected refusal, got accept',
+      '```'].join('\n');
+    const place = (stage, name = '001-a.md') => {
+      fs.rmSync(path.join(d, 'board'), { recursive: true, force: true });
+      fs.mkdirSync(path.join(d, 'board', stage), { recursive: true });
+      fs.writeFileSync(path.join(d, 'board', stage, name), ANSWERED_CARD);
+      spawnSync('git', ['add', '-A'], { cwd: d, stdio: 'ignore' });
+      spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'x'],
+        { cwd: d, stdio: 'ignore' });
+    };
+    const move = (...a) => spawnSync('node', [mover, ...a],
+      { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+
+    place('1-spec');
+    const skip = move('001', '5-verify');
+    check('an undefined transition is REFUSED — the git mv that skipped four stages',
+      skip.status === 2, `exit ${skip.status}`);
+    check('...attributed to unknown-transition, not to a guard that happened to fail',
+      /unknown-transition/.test(skip.stderr), skip.stderr.split('\n')[1]);
+    check('...and it says where the card CAN go, so the refusal is actionable',
+      /2-plan/.test(skip.stderr), skip.stderr.slice(0, 80));
+    check('...and the card did not move', fs.existsSync(path.join(d, 'board', '1-spec', '001-a.md')));
+
+    // The silent case: the defined next step is allowed, or this is a gate that refuses
+    // everything and would be switched off within a day.
+    place('1-spec');
+    const legal = move('001', '2-plan');
+    check('...but the transition the pipeline DOES define is allowed',
+      legal.status === 0, `exit ${legal.status}: ${legal.stderr.slice(0, 80)}`);
+    check('...and the card is now in 2-plan',
+      fs.existsSync(path.join(d, 'board', '2-plan', '001-a.md')));
+
+    // A card that cannot satisfy the destination's guards is rolled back, not left stranded
+    // half-moved — the failure mode of doing the mv first and checking afterwards.
+    place('5-verify');
+    const bare = fs.readFileSync(path.join(d, 'board', '5-verify', '001-a.md'), 'utf8')
+      .replace(/\*\*Where errors surface.*\n?/, '');
+    fs.writeFileSync(path.join(d, 'board', '5-verify', '001-a.md'), bare);
+    // A holding invariant, so this reaches the CARD-GATE refusal it is testing rather than
+    // being stopped earlier by `invariants-held` — which now runs first, and should.
+    fs.mkdirSync(path.join(d, 'code'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'code', 'inv.mjs'), 'process.exit(0);\n');
+    fs.writeFileSync(path.join(d, 'invariants.json'), JSON.stringify({
+      invariants: [{ id: 'tenant', kind: 'tenant', what: 'holds', cwd: 'code', command: 'node inv.mjs' }],
+    }));
+    const refused = move('001', '6-done');
+    check('a card missing what the destination requires is refused',
+      refused.status === 1, `exit ${refused.status}`);
+    check('...by guard-refused, naming the guard id that refused',
+      /guard-refused/.test(refused.stderr)
+      && /(where-errors-surface|errors surface)/.test(refused.stderr),
+      refused.stderr.split('\n').filter(Boolean).slice(0, 4).join(' | ').slice(0, 140));
+    check('...and the move is ROLLED BACK rather than left half-applied',
+      fs.existsSync(path.join(d, 'board', '5-verify', '001-a.md'))
+      && !fs.existsSync(path.join(d, 'board', '6-done', '001-a.md')));
+
+    // ── gate-unavailable · a mover that cannot run its gate has not checked the card ──
+    //
+    // The first version wrapped the card-gate call in `if (gate)` with NO else, so an
+    // installation missing card-gate.mjs moved every card unchecked — the identical fail-open
+    // this session removed from check.mjs, reintroduced in the file written to fix it.
+    {
+      const noGate = fs.mkdtempSync(path.join(os.tmpdir(), 'nogate-mover-'));
+      fs.cpSync(PLUGIN, noGate, { recursive: true });
+      fs.rmSync(path.join(noGate, 'scripts', 'card-gate.mjs'), { force: true });
+      place('5-verify');
+      const r = spawnSync('node', [path.join(noGate, 'scripts', 'move-card.mjs'), '001', '6-done'],
+        { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+      check('a mover whose gate is missing REFUSES rather than moving unchecked',
+        r.status === 2 && /gate-unavailable/.test(r.stderr), `exit ${r.status}: ${r.stderr.split('\n')[1] ?? ''}`);
+      check('...and the card stayed where it was',
+        fs.existsSync(path.join(d, 'board', '5-verify', '001-a.md')));
+      fs.rmSync(noGate, { recursive: true, force: true });
+    }
+
+    // ── guard-unimplemented · a guard name nothing executes ────────────────
+    //
+    // pipeline.json naming a guard that neither card-demands nor card-gate implements is the
+    // defect this whole design exists to prevent — the file asserting a check that does not
+    // happen. Refused loudly rather than passed silently.
+    {
+      const badPipe = fs.mkdtempSync(path.join(os.tmpdir(), 'badpipe-'));
+      fs.cpSync(PLUGIN, badPipe, { recursive: true });
+      const pj = JSON.parse(fs.readFileSync(path.join(badPipe, 'pipeline.json'), 'utf8'));
+      for (const t of pj.transitions) {
+        if (t.from === '1-spec' && t.to === '2-plan') t.guards = ['a-guard-nothing-implements'];
+      }
+      fs.writeFileSync(path.join(badPipe, 'pipeline.json'), JSON.stringify(pj, null, 2));
+      place('1-spec');
+      const r = spawnSync('node', [path.join(badPipe, 'scripts', 'move-card.mjs'), '001', '2-plan'],
+        { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+      check('a pipeline guard nothing implements is refused, not ignored',
+        r.status === 2 && /guard-unimplemented/.test(r.stderr), `exit ${r.status}: ${r.stderr.split('\n')[1] ?? ''}`);
+      fs.rmSync(badPipe, { recursive: true, force: true });
+    }
+
+    // ── invariants-held · the tick mark that discharged the only real gate ────
+    //
+    // `definition-of-done` said "**nexa-prove green** — the invariants ran against a real
+    // instance", and pipeline.json discharged that with `ticked-checklist` = `/^\s*- \[x\]/im`.
+    // Measured: a card whose sole evidence was `- [x] nexa-prove green — I ran it, honest`
+    // entered 6-done with zero unmet demands. The one control that runs the application was
+    // satisfied by typing x between two brackets — introduced the same morning nexa-prove was
+    // written, by adding a checklist line without wiring it to a guard.
+    {
+      // The scratch project is shared across these cases, and an earlier one declares an
+      // invariant. Remove it: this case is specifically about the state EVERY adopter starts
+      // in — a tick mark and nothing declared.
+      fs.rmSync(path.join(d, 'invariants.json'), { force: true });
+      place('5-verify');
+      const claim = `${ANSWERED_CARD}\n- [x] nexa-prove green — I ran it, honest\n\`\`\`\nFAIL x\n  expected refusal\n\`\`\`\n`;
+      fs.writeFileSync(path.join(d, 'board', '5-verify', '001-a.md'), claim);
+
+      const claimed = move('001', '6-done');
+      check('invariants-held: a card cannot CLAIM the invariants held with a tick mark',
+        claimed.status === 1 && /invariants-held/.test(claimed.stderr),
+        `exit ${claimed.status}: ${(claimed.stderr || '').split('\n').filter(Boolean)[1] ?? ''}`);
+      check('...and the card stayed in 5-verify',
+        fs.existsSync(path.join(d, 'board', '5-verify', '001-a.md')));
+
+      // The silent case: a declared invariant that genuinely holds lets the card through.
+      fs.mkdirSync(path.join(d, 'code'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'code', 'inv.mjs'), 'process.exit(0);\n');
+      fs.writeFileSync(path.join(d, 'invariants.json'), JSON.stringify({
+        invariants: [{ id: 'tenant', kind: 'tenant', what: 'B cannot read A', cwd: 'code', command: 'node inv.mjs' }],
+      }));
+      const proved = move('001', '6-done');
+      check('...and allows the move once an invariant is declared and holds',
+        proved.status === 0, `exit ${proved.status}: ${(proved.stderr || '').split('\n').filter(Boolean)[1] ?? ''}`);
+    }
+
+    // A number nobody put on the board.
+    place('1-spec');
+    const missing = move('999', '2-plan');
+    check('a card number that is not on the board says so',
+      missing.status === 2 && /card-not-found/.test(missing.stderr), missing.stderr.split('\n')[1]);
+
+    // WIP is a property of the DESTINATION, and it is the rule most likely to be broken by an
+    // agent that just finished something and feels productive.
+    fs.rmSync(path.join(d, 'board'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(d, 'board', '3-build'), { recursive: true });
+    fs.mkdirSync(path.join(d, 'board', '2-plan'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'board', '3-build', '002-b.md'), ANSWERED_CARD);
+    fs.writeFileSync(path.join(d, 'board', '2-plan', '001-a.md'), ANSWERED_CARD);
+    spawnSync('git', ['add', '-A'], { cwd: d, stdio: 'ignore' });
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'x'], { cwd: d, stdio: 'ignore' });
+    const wip = move('001', '3-build');
+    check('moving a second card into 3-build is refused by wip-limit-move',
+      wip.status === 1 && /wip-limit-move/.test(wip.stderr), wip.stderr.split('\n')[1]);
+
+    // --dry-run must change nothing. A preview that moves the card is worse than no preview.
+    place('1-spec');
+    const dry = move('001', '2-plan', '--dry-run');
+    check('--dry-run reports the transition and moves nothing',
+      dry.status === 0 && fs.existsSync(path.join(d, 'board', '1-spec', '001-a.md')),
+      dry.stdout.trim().split('\n')[0]);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
+// ── prove-invariants · the only gate that runs the application ──────────────
+//
+// Two audits and a four-vendor council independently reached the same sentence: *every gate
+// inspects process artifacts — cards, comments, citations — and none of them ever runs the
+// application.* An agent demonstrated a card whose code took the tenant from a header and
+// interpolated it into SQL, with an unsigned Stripe webhook, walking 1-spec → 6-done with every
+// gate green. `skills/test-the-real-thing` had been prose since the day it was written.
+//
+// The fixture is a REAL cross-tenant leak in running code — no stub, no TODO, passes lint —
+// proved violated, then proved held once the predicate is added. Both directions, because a
+// gate that only ever refuses is one nobody keeps.
+console.log('\n▸ prove-invariants — run the app, not the paperwork');
+{
+  const d = fs.mkdtempSync(path.join(os.homedir(), 'nexa-prove-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: d, stdio: 'ignore' });
+    fs.writeFileSync(path.join(d, '.nexa'), JSON.stringify({ nexaId: 'prove00000000000' }));
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    fs.mkdirSync(path.join(d, 'code'), { recursive: true });
+
+    const LEAKY = "const DOCS = [{ id: 1, tenant: 'A' }, { id: 2, tenant: 'B' }];\n"
+      + 'export const getDoc = (callerTenant, id) => DOCS.find((x) => x.id === id);\n';
+    const SAFE = "const DOCS = [{ id: 1, tenant: 'A' }, { id: 2, tenant: 'B' }];\n"
+      + 'export const getDoc = (callerTenant, id) => DOCS.find((x) => x.id === id && x.tenant === callerTenant);\n';
+    fs.writeFileSync(path.join(d, 'code', 'app.mjs'), LEAKY);
+    fs.writeFileSync(path.join(d, 'code', 'inv.mjs'),
+      "import { getDoc } from './app.mjs';\n"
+      + "const leaked = getDoc('B', 1);\n"
+      + "if (leaked && leaked.tenant !== 'B') { console.error('CROSS-TENANT READ'); process.exit(1); }\n");
+
+    const prove = (...a) => spawnSync('node', [path.join(PLUGIN, 'scripts', 'prove-invariants.mjs'), ...a],
+      { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+
+    // 1 · nothing declared is NOT a pass — the fourth time this workspace has had to learn it.
+    const none = prove();
+    // Named by rule id, not merely by exit code: one bit cannot say WHICH rule fired, and an
+    // over-determined fixture is silently worthless — the lesson guard-edit's header records.
+    check('no-invariants: nothing declared REFUSES — "none declared" is not "none violated"',
+      none.status === 2 && /NOT a pass/.test(none.stdout)
+      && /no-invariants|No invariants declared/.test(`${none.stdout}${none.stderr}`), `exit ${none.status}`);
+
+    fs.writeFileSync(path.join(d, 'invariants.json'), JSON.stringify({
+      invariants: [{ id: 'cross-tenant-read', kind: 'tenant', what: "B cannot read A's doc",
+        why: 'the breach', cwd: 'code', command: 'node inv.mjs' }],
+    }));
+
+    // 2 · a REAL leak in running code, which every existing gate passes.
+    const bad = prove();
+    check('invariant-violated: it refuses a real cross-tenant leak, found by running the code',
+      bad.status === 1 && /invariant-violated/.test(bad.stdout), `exit ${bad.status}`);
+    check('...and the violation names the invariant and shows the output',
+      /cross-tenant-read/.test(bad.stdout) && /CROSS-TENANT READ/.test(bad.stdout));
+
+    // 3 · the silent case. Add the predicate; nothing else changes.
+    fs.writeFileSync(path.join(d, 'code', 'app.mjs'), SAFE);
+    const good = prove();
+    check('...and stays silent — allows, exit 0 — once the tenant predicate is added', good.status === 0, `exit ${good.status}`);
+
+    // 4 · a declared invariant whose command cannot run has proved nothing.
+    fs.writeFileSync(path.join(d, 'invariants.json'), JSON.stringify({
+      invariants: [{ id: 'x', kind: 'tenant', what: 'y', cwd: 'code', command: 'node no-such-file.mjs' }],
+    }));
+    const broken = prove();
+    check('prove-unreachable: it refuses when the check could not run, rather than passing',
+      broken.status === 1, `exit ${broken.status}`);
+
+    // invariant-command-missing — declared with nothing to run proves nothing, and must say so
+    // rather than counting as held.
+    fs.writeFileSync(path.join(d, 'invariants.json'), JSON.stringify({
+      invariants: [{ id: 'nocmd', kind: 'tenant', what: 'declared but empty' }],
+    }));
+    const nocmd = prove();
+    check('invariant-command-missing: it refuses an invariant with no command to run',
+      nocmd.status === 1 && /invariant-command-missing/.test(nocmd.stdout), `exit ${nocmd.status}`);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
+// ── nexa-move on a REAL adoption, where the board is outside the repo ───────
+//
+// **The fixture that would have caught the flagship shipping broken.**
+//
+// Since card 003 the board lives at `~/.nexa/projects/<id>/board`, outside the repository.
+// `move-card.mjs` moved cards with `git mv`, and git refuses a path it does not own:
+//
+//     fatal: '…/.nexa/projects/…/board/1-spec/001-a.md' is outside repository at '…/my-app'
+//
+// So every card move on a default install died with a raw Node stack trace — and none of the
+// 432 fixtures added beside it saw that, because every one built the board INSIDE its scratch
+// repo, which is the pre-2026-07-30 layout. **They tested the configuration that does not
+// ship.** A fixture built around the author's mental model confirms the author's mental model.
+//
+// This one adopts a repository the way a user does — `init.mjs --apply` — and drives a card
+// through the pipeline wherever that adoption decided to put the board.
+console.log('\n▸ nexa-move on a real adoption (board outside the repo)');
+{
+  const proj = fs.mkdtempSync(path.join(os.homedir(), 'nexa-adopt-'));
+  let home = null;
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: proj, stdio: 'ignore' });
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'],
+      { cwd: proj, stdio: 'ignore' });
+    const boot = spawnSync('node', [path.join(PLUGIN, 'scripts', 'init.mjs'), '--apply'],
+      { cwd: proj, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+    check('a real adoption succeeds', boot.status === 0, (boot.stderr || '').slice(0, 120));
+
+    // Where did the adoption actually put the board? Ask the same resolver the code uses.
+    const { paths: pathsOf } = await import(path.join(PLUGIN, 'scripts', 'hooks', 'roots.mjs'));
+    home = pathsOf(proj).board;
+    check('...and the board is OUTSIDE the repository, as card 003 requires',
+      !home.startsWith(`${proj}${path.sep}`), home);
+
+    const CARD = ['# 001 — a real card',
+      '**Who asked?** Priya, ops lead, in the Oct 3 review.',
+      '**What they do today instead?** By hand in psql.',
+      '**What breaks for them if this never exists?** 2h per incident.',
+      '**What number moves?** Manual edits: 4 now, 0 is success.',
+      '**What would make us stop?** No manual edits for a month.',
+      '**Where errors surface:** the on-call channel.',
+      '',
+      '## 1 · Spec',
+      'The worker must refuse a job carrying no tenant id.',
+      '- [ ] a job without tenant_id is rejected at the queue boundary'].join('\n');
+    fs.mkdirSync(path.join(home, '1-spec'), { recursive: true });
+    fs.writeFileSync(path.join(home, '1-spec', '001-a.md'), CARD);
+
+    const move = (...a) => spawnSync('node', [path.join(PLUGIN, 'scripts', 'move-card.mjs'), ...a],
+      { cwd: proj, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+
+    const r = move('001', '2-plan');
+    check('a card moves on the layout the workspace actually installs',
+      r.status === 0, `exit ${r.status}: ${(r.stderr || '').split('\n').filter(Boolean)[0] ?? ''}`);
+    check('...and it is not a stack trace pretending to be a refusal',
+      !/at Object\.|node:internal|Error: Command failed/.test(r.stderr), (r.stderr || '').slice(0, 120));
+    check('...and the card is really in 2-plan now',
+      fs.existsSync(path.join(home, '2-plan', '001-a.md'))
+      && !fs.existsSync(path.join(home, '1-spec', '001-a.md')));
+
+    // The refusal path has to work on this layout too — a rollback that throws is worse than
+    // no rollback, because the card ends up in a stage it never satisfied.
+    const bad = move('001', '3-build');
+    check('...and a refusal on this layout rolls back cleanly, without throwing',
+      bad.status === 1 && !/node:internal/.test(bad.stderr)
+      && fs.existsSync(path.join(home, '2-plan', '001-a.md')),
+      `exit ${bad.status}: ${(bad.stderr || '').split('\n').filter(Boolean)[0] ?? ''}`);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    if (home) fs.rmSync(path.dirname(home), { recursive: true, force: true });
+  }
+}
+
+// ── the blank card template must FAIL every gate ────────────────────────────
+//
+// The cheapest test in this repository, and it invalidated four gates at once before it
+// existed. Measured against the unmodified `plugin/templates/CARD.md`: seven of nine stage
+// demands were satisfied by a card nobody had typed a word into. `cp templates/CARD.md
+// board/3-build/NNN.md` passed 2-plan, 3-build, 4-review and 6-done — and because the 3-build
+// demand is the same `graphify explain` regex `guard-edit.mjs` uses as its only content
+// condition, it also unlocked writes to product code.
+//
+// Two of the seven are worth remembering, because both are the "a rule quoted is a rule
+// satisfied" mistake `guard-coverage.mjs:78` records having made once already:
+//
+//   · `- [x]` matched the prose at template line 32 that explains a bare tick is refused
+//   · "the pasted output of a guard watched failing" matched an empty
+//     ```<paste the deliberate failure here>``` placeholder
+//
+// **The assertion is inverted on purpose.** Every other fixture here proves a control fires on
+// bad input; this one proves the control is not satisfied by NO input, which is the direction
+// all fifteen of this repo's fail-open defects came from.
+console.log('\n▸ the blank card template must satisfy no gate');
+{
+  const tpl = path.join(ROOT, 'templates', 'CARD.md');
+  // **The plugin's copy, not `ROOT/scripts/`.** `check.mjs` resolves the project it is checking
+  // from its own location: at `<repo>/plugin/scripts/` the parent is `plugin/`, which is not a
+  // workspace, so CLAUDE_PROJECT_DIR decides — which is what this fixture needs. Reached
+  // through `<repo>/scripts/` it resolves to THIS repository and reports on the real board,
+  // silently ignoring the scratch project and passing for the wrong reason.
+  const CHECK = [path.join(ROOT, 'plugin', 'scripts', 'check.mjs'),
+    path.join(ROOT, 'scripts', 'check.mjs')].find((p) => fs.existsSync(p));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'blankcard-'));
+  try {
+    spawnSync('git', ['init', '-q'], { cwd: d, stdio: 'ignore' });
+    fs.writeFileSync(path.join(d, 'workspace.config.json'), JSON.stringify({ codeDirs: ['code'] }));
+    fs.writeFileSync(path.join(d, '.nexa'), JSON.stringify({ nexaId: 'blankcard0000000' }));
+
+    // One stage at a time, because a demand only applies from the stage that owes it onward.
+    for (const stage of ['2-plan', '3-build', '4-review', '5-verify', '6-done']) {
+      const board = path.join(d, 'board', stage);
+      fs.rmSync(path.join(d, 'board'), { recursive: true, force: true });
+      fs.mkdirSync(board, { recursive: true });
+      fs.copyFileSync(tpl, path.join(board, '001-untouched.md'));
+      const r = spawnSync('node', [CHECK], { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+      const out = `${r.stdout}${r.stderr}`;
+      check(`an untouched template in ${stage} is refused`,
+        /is missing/.test(out), (out.split('\n').find((l) => /card|missing/.test(l)) || '').trim().slice(0, 90));
+    }
+
+    // And the control: a card that HAS been filled in must still pass, or the fix above is
+    // just a gate that refuses everything.
+    const filled = fs.readFileSync(tpl, 'utf8')
+      .replace('| | |', '| src/auth.js | add the tenant predicate |')
+      .replace('graphify explain "…"', 'graphify explain "how is a session resolved"')
+      .replace('→', '→ src/auth.js:44 resolveSession, src/db.js:12 withTenant');
+    fs.rmSync(path.join(d, 'board'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(d, 'board', '3-build'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'board', '3-build', '001-filled.md'),
+      filled.replace('- [ ] …', '- [ ] the worker refuses a job with no tenant id'));
+    const r = spawnSync('node', [CHECK], { cwd: d, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: d } });
+    // Scoped to complaints about the CARD. The scratch project also lacks docs/DECISIONS.md and
+    // a few other workspace files, and those are a different check's business — matching them
+    // here would make this control assertion fail for a reason it is not testing.
+    const cardGripes = `${r.stdout}${r.stderr}`.split('\n').filter((l) => /001-filled\.md is missing/.test(l));
+    check('...but a filled-in card at the same stage passes',
+      cardGripes.length === 0, cardGripes[0]?.trim().slice(0, 100));
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
   }
 }
 

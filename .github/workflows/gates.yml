@@ -98,8 +98,10 @@ jobs:
 
       - name: Install
         if: steps.paths.outputs.present == 'true'
+        env:
+          CODE_PATHS: ${{ steps.paths.outputs.paths }}
         run: |
-          for d in ${{ steps.paths.outputs.paths }}; do
+          for d in $CODE_PATHS; do
             if [ -f "$d/package.json" ]; then
               ( cd "$d" && (npm ci --ignore-scripts || npm install --ignore-scripts) )
             fi
@@ -109,9 +111,11 @@ jobs:
       # one: a CI run that spends tokens or places calls is a bill nobody approved.
       - name: Tests
         if: steps.paths.outputs.present == 'true'
+        env:
+          CODE_PATHS: ${{ steps.paths.outputs.paths }}
         run: |
           ran=0
-          for d in ${{ steps.paths.outputs.paths }}; do
+          for d in $CODE_PATHS; do
             [ -f "$d/package.json" ] || continue
             for s in test:offline test:ci test; do
               if node -e "process.exit(require('./$d/package.json').scripts?.['$s'] ? 0 : 1)"; then
@@ -121,16 +125,93 @@ jobs:
           done
           [ "$ran" = 1 ] || echo "::notice::no offline test script found in the product code"
 
+      # ── correctness, which nothing here was checking ──────────────────────────
+      #
+      # Every gate in this file aims at the AGENT's honesty — stubs, fabricated citations,
+      # skipped stages. None of them aimed at whether the code compiles. `check.mjs` verified
+      # that the STRINGS `lint`, `format` and `typecheck` existed as package.json keys, as a
+      # warning, and nothing ever ran them.
+      #
+      # So a hallucinated library export, a missing import, an unformatted diff and a type
+      # error all scored 5/5 on the review rubric and reached 6-done. Hallucinated APIs are the
+      # single most-cited failure of AI-assisted coding and this workspace had no mechanism for
+      # them at all — the one that exists is a type checker, and it was one line away.
+      #
+      # `continue-on-error` on format only: a formatting difference is not a reason to fail a
+      # merge, but it must be visible. lint and typecheck are refusals.
+      - name: Typecheck
+        if: steps.paths.outputs.present == 'true'
+        env:
+          CODE_PATHS: ${{ steps.paths.outputs.paths }}
+        run: |
+          for d in $CODE_PATHS; do
+            [ -f "$d/package.json" ] || continue
+            if node -e "process.exit(require('./$d/package.json').scripts?.typecheck ? 0 : 1)"; then
+              echo "▸ $d — npm run typecheck"; ( cd "$d" && npm run typecheck )
+            else
+              echo "::error::$d has no typecheck script. A hallucinated import is the commonest"
+              echo "::error::AI-coding defect and a type checker is the mechanism for it."
+              echo "::error::Copy plugin/templates/engineering-baseline/ — or set NEXA_ALLOW_NO_TYPECHECK=1"
+              [ "${NEXA_ALLOW_NO_TYPECHECK:-}" = "1" ] || exit 1
+            fi
+          done
+
+      - name: Lint
+        if: steps.paths.outputs.present == 'true'
+        env:
+          CODE_PATHS: ${{ steps.paths.outputs.paths }}
+        run: |
+          for d in $CODE_PATHS; do
+            [ -f "$d/package.json" ] || continue
+            if node -e "process.exit(require('./$d/package.json').scripts?.lint ? 0 : 1)"; then
+              echo "▸ $d — npm run lint"; ( cd "$d" && npm run lint )
+            else
+              echo "::error::$d has no lint script — copy plugin/templates/engineering-baseline/"
+              echo "::error::or set NEXA_ALLOW_NO_LINT=1 if this project genuinely does not lint."
+              [ "${NEXA_ALLOW_NO_LINT:-}" = "1" ] || exit 1
+            fi
+          done
+
+      - name: Format check
+        if: steps.paths.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          CODE_PATHS: ${{ steps.paths.outputs.paths }}
+        run: |
+          for d in $CODE_PATHS; do
+            [ -f "$d/package.json" ] || continue
+            node -e "process.exit(require('./$d/package.json').scripts?.format ? 0 : 1)" \
+              && ( cd "$d" && npm run format -- --check 2>/dev/null || npm run format:check 2>/dev/null || true )
+          done
+
+      # ── the only gate that runs the APPLICATION ──────────────────────────────
+      #
+      # Everything else in this workflow reads artifacts. Two audits and a four-vendor council
+      # independently named the absence of this as the single largest gap between the workspace
+      # and a production-ready output: an agent walked a card with a cross-tenant SQL leak and
+      # an unsigned Stripe webhook from 1-spec to 6-done with every gate green.
+      #
+      # `nexa-prove` exits 2 when nothing is declared, which fails this job on purpose — "no
+      # invariants declared" is not "no invariants violated". A project that genuinely has none
+      # yet should say so by declaring the ones it has; there is no honest empty state here.
+      - name: Prove the invariants — the gate that runs the app
+        if: steps.paths.outputs.present == 'true'
+        run: node scripts/prove-invariants.mjs
+
       # Work that LOOKS finished. "No TODO" passes a stub — a stub has no TODO in it; it has a
       # signature and a body that returns a constant.
       - name: depth-check — does it do what it says
         if: steps.paths.outputs.present == 'true'
-        run: node scripts/depth-check.mjs ${{ steps.paths.outputs.scan }}
+        env:
+          SCAN_PATHS: ${{ steps.paths.outputs.scan }}
+        run: node scripts/depth-check.mjs $SCAN_PATHS
 
       - name: TODO / FIXME / commented-out code
         if: steps.paths.outputs.present == 'true'
+        env:
+          SCAN_PATHS: ${{ steps.paths.outputs.scan }}
         run: |
-          P="${{ steps.paths.outputs.scan }}"
+          P="$SCAN_PATHS"
           if grep -rnE '\b(TODO|FIXME)\b' $P 2>/dev/null; then
             echo "::error::TODO or FIXME in shipped code — definition-of-done forbids it"; exit 1
           fi

@@ -240,7 +240,8 @@ events** (`UserPromptSubmit` runs two):
 | `PreToolUse` | `guard-edit.mjs` | **the one that refuses.** No card in build → the edit is blocked |
 | `PreToolUse` | `guard-wakeup.mjs` | **refuses a wakeup whose own reason says there is nothing to wait for** — a timer is not a substitute for finishing |
 | `PostToolUse` | `after-edit.mjs` | notices what an edit implies you now owe |
-| `Stop` | `session-end.mjs` | the turn cannot end quietly with a gate unrun |
+| `Stop` | `autopilot.mjs` | decides whether to continue unattended, and refuses to invent work when there is none |
+| `SessionEnd` | `session-end.mjs` | asks the four questions whose answers are lost when the window closes — decisions, contract gaps, unmeasured numbers |
 | `PreCompact` | `pre-compact.mjs` | preserves the card, the files touched and the measurements **before** the window is squeezed |
 
 **2 · Skills load themselves.** Each `SKILL.md` carries a `description:` that says *when* it
@@ -273,9 +274,10 @@ refusal, not a note.
 | `finish-dont-schedule` | a turn is about to end with work left, or /loop is about to be used — **is there anything real to wait for?** |
 | `reflect` | the records have gone stale; read them back and consolidate |
 
-### 7 commands — `.claude/commands/`
+### 11 commands — `.claude/commands/`
 
-`/card` · `/council` · `/review` · `/verify` · `/measure` · `/plan-review` · `/deploy`
+`/card` · `/council` · `/council-custom` · `/review` · `/verify` · `/measure` · `/plan-review`
+· `/deploy` · `/autopilot` · `/image` · `/remove`
 
 ### 3 subagents — `.claude/agents/`
 
@@ -283,7 +285,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 37 scripts — `scripts/`
+### 40 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -368,6 +370,62 @@ output** — averaging four models produces something none of them would defend.
 
 **WIP = 1 at `3-build`, enforced.** `templates/CARD.md` is the shape; each stage has a gate
 that must be answered, not ticked.
+
+**The board is a state machine, and `plugin/pipeline.json` is its definition** — nine states,
+sixteen transitions, and the guards on each named as data. `nexa-move <NNN> <stage>` is the
+only legal way to move a card: it refuses a `from → to` the pipeline does not define *before*
+running any guard, executes that transition's guards, and rolls back if one refuses.
+
+```bash
+nexa-move --list              every transition, and the guards on each
+nexa-move 007 4-review        move a card, with its gate checked
+nexa-move 007 6-done --dry-run
+```
+
+`git mv board/…` is refused by `guard-edit` and points here. It measurably had to be: before
+this existed, `git mv board/1-spec/001.md board/5-verify/001.md` exited 0 and crossed four
+gates with no refusal and no record.
+
+### `nexa-prove` — the one gate that runs your application
+
+Every other gate in this workspace reads an artifact: a card, a comment, a citation. Two
+independent audits and a four-vendor council reached the same sentence about that — *nothing
+here ever runs the software*. An agent demonstrated a card whose code took the tenant from an
+`x-org-id` header, interpolated it into SQL, and handled a Stripe webhook with no signature
+check, walking `1-spec → 6-done` with every gate green.
+
+```bash
+nexa-prove --list             the four invariants, and what each costs when it is wrong
+nexa-prove                    run them against a real instance
+```
+
+| kind | the failure it prevents |
+|---|---|
+| `tenant` | one tenant reading another's data — the breach |
+| `idempotent` | the same event delivered twice charging twice — the double charge |
+| `authz` | an unauthenticated caller being served — the open door |
+| `migration` | the previous release not surviving the new schema — the rollback outage |
+
+Each is **a command you write** that exits non-zero when the invariant is violated. The
+workspace supplies the discipline — that they are declared, that they run at
+`5-verify → 6-done` as the `invariants-held` guard, and that they cannot be ticked without
+running — not the assertions, which depend on your schema.
+
+**An empty `invariants.json` exits 2.** "No invariants declared" is not "no invariants
+violated", and a tool that examined nothing must never return the code meaning it examined
+everything. `plugin/templates/invariants.example.json` is a worked example for a
+multi-tenant SaaS.
+
+### The sandbox — a boundary under the guard
+
+`guard-edit` decides whether a shell command writes to product code by matching the command
+text, and its own header says that cannot be complete. The adopted settings add
+`sandbox.filesystem.denyWrite` for `.env`, `data/**`, `plan/**`, `board/6-done/**` and the
+control files themselves — which refuses at the **filesystem layer**, so `python3 -c`,
+`node -e`, `perl -i` and `git apply` all fail because the kernel says no.
+
+The hook is not replaced: it carries the *card* rule, which is a process question a filesystem
+cannot answer. Categorical boundary first, enumerated guard behind it.
 
 **The two outer stages exist because a council found the pipeline broke at both ends:**
 
@@ -471,6 +529,33 @@ that has not been used enough to know.**
 ## Credits
 
 Built by **[Jillur Rahman](https://github.com/developerjillur)** (NexaLance), with Claude Code.
+
+### Co-author — [Jonayed Ahamed / DevZonayed](https://github.com/DevZonayed)
+
+**Half of this repository's commits are his**, across the thirteen pull requests that turned a
+single-repo workspace into an installable plugin. Named specifically, because each one fixed
+something that had already shipped broken:
+
+| Release | What it actually fixed |
+|---|---|
+| **The plugin itself** | the workspace ships as one installable thing — `#1`, `#3`. Before it, adoption meant cloning a repo and wiring it by hand |
+| **1.2.1** | *"a fix without a version bump reaches nobody"* — the release discipline that makes every row below reach a user |
+| **1.3.0** | `nexa-init`, because *"restart Claude Code"* is not a step anybody guesses |
+| **1.3.1** | autopilot could not tell you why it did nothing |
+| **1.3.2** | the breadcrumb shipped ten minutes earlier cried wolf |
+| **1.3.3** | **the deny rules protecting `plan/` and `board/6-done/` did nothing** — `Write(path)` rules are inert; only `Edit(path)` matches. Found in a live session, not a test |
+| **1.4.0** | *"shipping the binary is not shipping the feature"* — the image tool was invisible to the model |
+| **1.4.1** | which version is the running session actually executing? |
+| **1.5.0** | only destructive decisions belong to the human — the autopilot veto |
+| **1.6.0** | state moved out of your repository into `~/.nexa/projects/`, so adopting a repo stopped writing fourteen files into it |
+| **1.6.1** | the diagnostic was reporting a closed session's hook as the live one |
+| — | **`$HOME` was being detected as an adopted workspace**, so `~/.nexa` made every walk-up terminate at the home directory |
+| — | **the council reviewed nothing, confidently, for several minutes** — and four defences missed it |
+| — | *"everything was green, so I verified it and found seven things"* |
+
+Two of those titles are the whole thesis of this workspace stated by someone finding it the
+hard way: **a green suite is evidence about the harness, not the product**, and **a defence
+that four other defences did not catch was never a defence.**
 
 The design owes specific debts, and they are worth naming because each one changed something
 concrete:

@@ -323,6 +323,105 @@ export function paths(root) {
 }
 
 /**
+ * The pipeline — states and transitions — read from `plugin/pipeline.json`.
+ *
+ * ── the drift this replaces ────────────────────────────────────────────────
+ *
+ * The nine stages were written out in eight places, and two of the copies already disagreed:
+ * `reflect.mjs` iterated eight stages while `check.mjs` iterated nine, and `card-gate`'s
+ * requirements were cumulative while `check.mjs`'s were not — so the same board got two
+ * different verdicts and CI ran the looser one.
+ *
+ * Falls back to the literal list when the file cannot be read, because a workspace that cannot
+ * enumerate its own stages should degrade to the behaviour it has always had rather than stop.
+ * The fallback is the ONLY place the order is still written twice, and it is three lines from
+ * the file it mirrors.
+ */
+const FALLBACK_STATES = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build',
+  '4-review', '5-verify', '6-done', '7-operate'];
+
+let _pipeline = null;
+export function pipeline() {
+  if (_pipeline) return _pipeline;
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'pipeline.json'), 'utf8'));
+    const states = Array.isArray(raw.states) && raw.states.length ? raw.states : FALLBACK_STATES;
+    const transitions = (raw.transitions ?? []).filter((t) => t.from && t.to);
+    _pipeline = { states, transitions, kinds: raw.kinds ?? {}, loaded: true };
+  } catch {
+    _pipeline = { states: FALLBACK_STATES, transitions: [], kinds: {}, loaded: false };
+  }
+  return _pipeline;
+}
+
+/** The nine stages, in order. The one list every consumer should use. */
+export const stages = () => pipeline().states;
+
+/**
+ * Is `from → to` a transition the pipeline defines? Returns the matching entries.
+ *
+ * `from: "*"` matches any source — used by PARK, because refusing to let somebody stop working
+ * on something is not a guardrail.
+ */
+export function transitionsFor(from, to) {
+  return pipeline().transitions.filter((t) => (t.from === from || t.from === '*') && t.to === to);
+}
+
+/**
+ * The workspace config, and **whether it could be read at all**.
+ *
+ * ── the fail-open this replaces ─────────────────────────────────────────────
+ *
+ * `guard-edit` carried its own copy of this, ending `catch { return ['code']; }`. The comment
+ * above it argued the fallback was deliberately narrow so a broken config makes the gate
+ * *quieter*. That reasoning holds for a config that is **absent** and fails for one that is
+ * **corrupt**, and the two were indistinguishable:
+ *
+ *     echo '{oops' > workspace.config.json
+ *
+ * In a project whose real `codeDirs` is `["src"]`, that one write silently returns the guard to
+ * `["code"]`, a directory that does not exist, so `isProductCode` is false for every file and
+ * `guard-edit` allows every edit. No log, no refusal, no diff anywhere — the single blocking
+ * control in the workspace, switched off by a malformed brace.
+ *
+ * So the two cases are now separated. Absent → the narrow default, which is the original and
+ * correct instinct. Present but unparseable → `ok: false`, and **every caller that refuses must
+ * refuse**. A config nobody can read is not a config that permits everything.
+ *
+ * @returns {{ok: boolean, config: object, why?: string, missing?: boolean}}
+ */
+export function readConfig(root) {
+  const file = paths(root).config;
+  if (!fs.existsSync(file)) return { ok: true, missing: true, config: {} };
+  try {
+    const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return { ok: false, config: {}, why: `${file} is not a JSON object` };
+    }
+    return { ok: true, config };
+  } catch (e) {
+    return { ok: false, config: {}, why: `${file} does not parse — ${e.message}` };
+  }
+}
+
+/**
+ * The directories holding PRODUCT CODE, and the one place that decides.
+ *
+ * `['code']` is the narrow default for a project that has not said. `ok: false` means the
+ * config exists and is broken — see `readConfig`. Callers that refuse on `!ok` are the reason
+ * this returns the flag instead of swallowing it.
+ *
+ * @returns {{ok: boolean, dirs: string[], why?: string}}
+ */
+export function codeDirs(root) {
+  const r = readConfig(root);
+  if (!r.ok) return { ok: false, dirs: ['code'], why: r.why };
+  const dirs = Array.isArray(r.config.codeDirs)
+    ? r.config.codeDirs.filter((d) => typeof d === 'string' && d) : [];
+  return { ok: true, dirs: dirs.length ? dirs : ['code'] };
+}
+
+/**
  * The council, cloned once and shared by every project.
  *
  * It used to be a clone **inside each repository** (`.council-src/`) reached by four symlinks —

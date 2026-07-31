@@ -25,10 +25,9 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { MARKER, stateRoot, markerId, paths } from './hooks/roots.mjs';
+import { MARKER, stateRoot, markerId, paths, stages } from './hooks/roots.mjs';
 
-const STAGES = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build',
-  '4-review', '5-verify', '6-done', '7-operate'];
+const STAGES = stages();
 
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
@@ -303,10 +302,57 @@ function writeSettings(root, payload, created, modified) {
 }
 
 /** The settings this workspace needs. Kept next to the ladder that writes them. */
-export const SETTINGS = {
+/**
+ * The settings written into an adopted repository.
+ *
+ * **`codeDirs` is a parameter now, and that was a real hole.** Every credential rule below was
+ * hardcoded to `./code/`, while `detectCodeDirs()` twenty lines down scans for the project's
+ * real source directories and writes the answer to `config.json`. Nothing joined the two. So a
+ * repository whose code lives in `src/` — the common case, and one `detectCodeDirs` gets right
+ * — was handed `config.json: {"codeDirs":["src"]}` next to `Read(./code/.env)`, a rule guarding
+ * a path that does not exist. **The credential protection covered nothing, and the file two
+ * directories away said so.**
+ *
+ * The comment on `Write(...)` below is a careful, measured account of a rule that was inert.
+ * That lesson was learned properly and the identical defect beside it was not noticed, which is
+ * the argument for deriving these from one source rather than writing them twice.
+ */
+export const settingsFor = (codeDirs = ['code'], root = null) => {
+// ── a codeDir that escapes the project root needs the ABSOLUTE form ─────────
+//
+// `setup.sh --code ../my-app` is the DOCUMENTED way to point at code in a sibling repository,
+// and it writes `codeDirs: ["../my-app"]`. This function then produced `Read(./../my-app/.env)`.
+//
+// The permission-rule prefix table gives exactly four forms — `//` absolute, `~/` home, `/`
+// project-root, and `./` or none for project-relative. **`./../` is not one of them**, and a
+// gitignore-style pattern does not traverse upward. So for the sibling-repo layout the
+// credential rules guarded a path that cannot match, while looking present in the file.
+//
+// Third instance of this exact defect class in this one function: first the rules were
+// hardcoded to `./code/` while codeDirs said `src`, then `.env` was denied for reading but not
+// writing, now the path form itself. The pattern is always the same — a rule that reads
+// correctly and matches nothing.
+//
+// `//` + the resolved absolute path is the documented form for anything outside the project.
+const rule = (d, suffix) => {
+  if (!d.startsWith('..')) return `./${d}${suffix}`;
+  if (!root) return `./${d}${suffix}`;          // no root to resolve against; unchanged
+  return `//${path.resolve(root, d).replace(/^\/+/, '')}${suffix}`;
+};
+return ({
   permissions: {
     deny: [
-      'Read(./code/.env)', 'Read(./code/.env.*)', 'Read(./code/data/**)',
+      // Credentials and data, in every directory the project actually calls product code.
+      ...codeDirs.flatMap((d) => [
+        `Read(${rule(d, '/.env')})`, `Read(${rule(d, '/.env.*')})`, `Read(${rule(d, '/data/**')})`,
+        // ── `Read` alone left the write side open ─────────────────────────────
+        //
+        // §8 of the contract lists `.env` among the files "an agent must not touch without
+        // being asked", and only reading was denied. An agent could not read the file and
+        // could freely overwrite it — which destroys a credential rather than leaking one,
+        // and is the failure nobody thinks to check for because the rule looked present.
+        `Edit(${rule(d, '/.env')})`, `Edit(${rule(d, '/.env.*')})`, `Edit(${rule(d, '/data/**')})`,
+      ]),
       // ── `Write(path)` deny rules do nothing, and Claude Code says so out loud ──
       //
       // Running a real session against a freshly adopted repo printed, twice:
@@ -324,11 +370,98 @@ export const SETTINGS = {
       'Edit(./plan/**)',
       'Edit(./board/6-done/**)',
     ],
-    ask: ['Bash(npm run test:live:*)', 'Bash(codex exec:*)', 'Bash(git push:*)'],
+    // ── the controls themselves, and why these ASK rather than DENY ───────────
+    //
+    // Nothing stopped an agent editing the file that registers the hooks. A gate an agent finds
+    // inconvenient could be removed by the agent, which is the standard self-disabling hole and
+    // the one thing a permission system is uniquely able to prevent.
+    //
+    // `ask`, not `deny`, deliberately. These files DO get edited legitimately — adopting a
+    // second code directory, adding a hook, correcting the contract — and a `deny` that has to
+    // be worked around teaches people to work around it. `ask` puts a human in the loop for the
+    // one class of edit whose whole purpose might be to remove the loop.
+    ask: [
+      'Bash(npm run test:live:*)', 'Bash(codex exec:*)', 'Bash(git push:*)',
+      'Edit(./.claude/settings.json)', 'Edit(./.claude/settings.local.json)',
+      'Edit(./AGENTS.md)', 'Edit(./CLAUDE.md)',
+      'Edit(./workspace.config.json)', 'Edit(./.nexa)',
+    ],
+  },
+  // ── the sandbox: a categorical boundary under an enumerated guard ──────────
+  //
+  // `guard-edit.mjs` decides whether a shell command writes to product code by pattern-matching
+  // the command TEXT. Measured: 18 of 20 spellings caught, with `git apply` and any constructed
+  // path permanently out of reach — and the file says so rather than implying completeness.
+  // That is the ceiling of an enumerated defence: it can only refuse what somebody listed.
+  //
+  // `sandbox.filesystem.denyWrite` refuses at the FILESYSTEM layer instead. `python3 -c`,
+  // `node -e`, `perl -i`, `git apply`, base64-piped-to-sh — all fail, because the kernel says
+  // no. Every bypass the guard documents as "answered by review, not by a matcher" is closed
+  // by configuration rather than by more regex.
+  //
+  // **The hook is not replaced.** It carries the CARD rule — "no product edit without a card in
+  // build" — which is a process question a filesystem cannot answer. The sandbox sits under it:
+  // categorical boundary first, then the enumerated guard for the things a boundary cannot know.
+  // Two independent readings reached this same conclusion, and it is the only adoption from the
+  // reference that touches the running system rather than the paperwork.
+  //
+  // `denyWrite` is merged with the paths from `Edit(...)` deny rules above, so those entries
+  // already contribute — there was simply no sandbox for them to be enforced in.
+  sandbox: {
+    enabled: true,
+    // A sandbox that silently does not start is the fail-open this workspace exists to hunt.
+    failIfUnavailable: false,
+    // Version control, containers and the GitHub CLI need the host; sandboxing them breaks the
+    // deploy path for no security gain, since they are the tools the deploy gate itself runs.
+    excludedCommands: ['git', 'docker', 'gh'],
+    filesystem: {
+      denyWrite: [
+        ...codeDirs.flatMap((d) => [rule(d, '/.env'), rule(d, '/.env.*'), rule(d, '/data/**')]),
+        './plan/**',
+        './board/6-done/**',
+        // The controls themselves. `ask` rules put a human in the loop for the *tool*; this
+        // stops a sandboxed shell writing around them entirely.
+        './.claude/settings.json',
+        './.nexa',
+      ],
+      denyRead: codeDirs.flatMap((d) => [rule(d, '/.env'), rule(d, '/.env.*')]),
+    },
+    // Credentials are stripped from sandboxed subprocesses rather than merely unreadable on
+    // disk — the council members already run outside the repo, and this closes the same door
+    // for any command an agent runs.
+    credentials: {
+      files: codeDirs.map((d) => rule(d, '/.env')),
+      envVars: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'GITHUB_TOKEN'],
+    },
   },
   model: 'opus',
-  env: { MAX_THINKING_TOKENS: '31999' },
+  // ── the mode that turns every rule above off ────────────────────────────────
+  //
+  // `defaultMode: "bypassPermissions"` skips all permission checks. Every `Edit(./plan/**)` and
+  // `Read(./code/.env)` rule written above evaporates with it. A workspace whose entire thesis
+  // is "gates refuse" shipped no protection against the one switch that turns the gates off.
+  //
+  // Honest scope: PreToolUse hooks still run in bypass mode, so `guard-edit` survives. It is the
+  // PERMISSION layer that disappears — and that layer is what protects `.env` and `board/6-done`.
+  disableBypassPermissionsMode: 'disable',
+  // Up to three, tried in order when the primary is unavailable. Without it a rate limit stalls
+  // whichever gate was running — including `nexa-prove`, the only one that runs the application.
+  fallbackModel: ['opus', 'sonnet'],
+  // ── effortLevel, not MAX_THINKING_TOKENS ───────────────────────────────────
+  //
+  // `MAX_THINKING_TOKENS` is the 2024-shaped knob; `effortLevel` is the current control, and
+  // `xhigh` is the top value valid in settings.json — `max` and `ultracode` are session-only
+  // and explicitly NOT valid here, which is worth knowing before somebody writes one and
+  // wonders why it is ignored.
+  //
+  // `skills/pick-the-model` asserts "maximum thinking effort" as doctrine; it was enforcing it
+  // through a superseded key.
+  effortLevel: 'xhigh',
+});
 };
+
+/** The default shape, for callers that have no project to inspect (tests, docs, --print). */
+export const SETTINGS = settingsFor();
 
 // ── what counts as product code, detected rather than assumed ───────────────
 //
@@ -537,7 +670,10 @@ export function bootstrap(root, templatesDir, opts = {}) {
   flush();                       // the files above are already on disk — record them now
   let settings;
   try {
-    settings = writeSettings(root, SETTINGS, created, modified);
+    // **The detected directories, not the literal `./code/`.** `codeDirs` is computed thirty
+    // lines above and was previously used only for `config.json`, so the credential deny rules
+    // named a directory the project might not have. See settingsFor().
+    settings = writeSettings(root, settingsFor(codeDirs, root), created, modified);
   } finally {
     flush();                     // and again, whatever happened in there
   }

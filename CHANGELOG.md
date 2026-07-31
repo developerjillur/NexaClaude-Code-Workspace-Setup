@@ -5,6 +5,106 @@ README counts were wrong by hand before a check started counting the files inste
 
 ---
 
+## 1.7.0 — 2026-07-31
+
+**The release where the workspace stopped only reading its own paperwork.** Two independent
+audits and a four-vendor council reached the same sentence from different directions: *every
+gate inspects artifacts — cards, comments, citations — and none of them ever runs the
+application*. An agent demonstrated a card whose code took the tenant from an `x-org-id`
+header, interpolated it into SQL, and handled a Stripe webhook with no signature check —
+walking `1-spec → 6-done` with every gate green.
+
+### `nexa-prove` — the first gate that runs your software
+
+`scripts/prove-invariants.mjs` + `templates/invariants.example.json`. Four invariants whose
+failure costs money — `tenant`, `idempotent`, `authz`, `migration` — each a command *you* write
+that exits non-zero when the invariant is violated. Verified against a real cross-tenant leak
+in running code: refused, then held once the predicate was added.
+
+**An empty `invariants.json` exits 2.** "No invariants declared" is not "no invariants
+violated" — the fourth time this workspace has had to learn that a tool which examined nothing
+must not return the code meaning it examined everything.
+
+### The board became a state machine with a transition function
+
+- **`plugin/pipeline.json`** — nine states, sixteen transitions, guards as data. The stage list
+  had been copy-pasted into eight places and two copies had already drifted: `reflect` iterated
+  eight stages while `check` iterated nine, and `card-gate`'s requirements were cumulative while
+  `check`'s were not, so the two gates disagreed about the same board and CI ran the looser one.
+- **`nexa-move`** — refuses a `from → to` the pipeline does not define *before* running any
+  guard, executes that transition's guards, rolls back if one refuses. Measured before it
+  existed: `git mv board/1-spec/001.md board/5-verify/001.md` exited 0 and crossed four gates.
+- **`card-demands.mjs`** — one requirement table both the gate and the mover read. The guard
+  names in `pipeline.json` had been decorative: `nexa-move` ran `card-gate`, which implements
+  none of them, so a card with no spec section moved into `2-plan` and the mover printed a tick.
+
+### The gates stopped reporting green when they had not run
+
+The worst defect in the release, and it shipped in every installed copy: `check.mjs` spawned
+`path.join(ROOT, 'scripts', …)` — a path an adopted project does not have. The child never
+started, `JSON.parse(r.stdout || '{}')` became `{findings: []}`, and zero findings printed as a
+tick. **The three strongest gates passed having inspected nothing.**
+
+- `runGate()` distinguishes ran-and-passed from could-not-run, at every call site
+- `depth-check` reads `codeDirs` instead of a private product's hardcoded paths, sees TS/TSX,
+  and exits 2 when it scanned nothing
+- `guard-coverage` scans the adopter's tree, and zero controls is no longer full coverage
+- `mutation-test` exits 2 with no mutations, where it printed "this is not a pass" and exited 0
+
+### The blank template satisfied seven of nine gates
+
+Including `graphify explain`, which is `guard-edit`'s only content condition before it permits
+writes to product code — so `cp templates/CARD.md board/3-build/` unlocked `code/`. And the
+6-done "pasted output of a guard watched failing" was satisfied by the template's own prose
+*explaining that rule*. Fixed by one idea applied everywhere: **a rule quoted is not a rule
+satisfied.** `card-gate` now refuses the template's italic hints as answers, too.
+
+### Review, security and operations
+
+- `Verdict: BACK` — a **failed** review — satisfied the 5-verify gate; scores accepted 1/5.
+  Now `PASS` only, and every axis must be 3+, not just the first row
+- `reviewed-by` is required at 5-verify. §10 says "no model reviews its own work" in four
+  places and nothing recorded who did
+- `kind: migration` **adds** requirements instead of waiving them — expand/contract and
+  mixed-version at 2-plan, a rehearsed data restore at 5-verify. `deploy-gate` §3a: a tag
+  restores code, never rows, and §11's "never fix forward" is the *cause* of the outage when a
+  schema has moved
+- `7-operate` became a real stage — requirements, a move row, a `/deploy` handoff
+- **`scan-secrets` missed 8 of 11 real credential formats**, and its history pass was dead three
+  ways: a backtick killed the shell, `-----BEGIN` was read as an option, and `re.source` drops
+  the `/i` flag. A `DB_PASSWORD` committed and deleted was caught in the tree and missed in
+  history — the exact case the file says it exists for. Now 0 of 12 missed
+
+### Adopted from the ecosystem
+
+Read from [shanraisshan/claude-code-best-practice](https://github.com/shanraisshan/claude-code-best-practice):
+
+- **`sandbox.filesystem.denyWrite`** — a categorical boundary under the enumerated guard.
+  `guard-edit` matches command text and cannot be complete; the sandbox refuses at the
+  filesystem layer, so `python3 -c`, `node -e`, `perl -i` and `git apply` all fail
+- **`disableBypassPermissionsMode`** — bypass mode skipped every permission rule the bootstrap
+  writes. A workspace whose thesis is "gates refuse" shipped nothing against the switch that
+  turns them off
+- **`effortLevel: xhigh`** replaces the superseded `MAX_THINKING_TOKENS`; **`fallbackModel`**
+  so a rate limit does not stall the one gate that runs the app
+- **`SessionEnd` wired** — the source documents 28 hook events; this used 6. `session-end.mjs`
+  had been dead code referenced only by a false README line
+- Credential rules emit the documented `//` absolute form when `codeDirs` escapes the project
+  root — `Read(./../my-app/.env)` matched nothing in the documented sibling-repo setup
+
+### The audit of the audit
+
+`kill-audit` mutated a file nothing under test was reading, so eleven rules reported SURVIVED
+while their fixtures worked. It now mutates every distinct copy and journals all of them.
+**33 caught, 1 survived, 0 unresolved** — and the survivor was the rule added that morning with
+nothing watching it.
+
+`docs/LEARNED.md` records the pattern across all nine defects introduced by this release: *a
+document asserting a check, and nothing performing it.* Every one was caught by a control or a
+reviewer, and not one by the author.
+
+---
+
 ## 1.1.0 — 2026-07-29
 
 **The release that makes this installable into somebody else's project.** Two themes: the

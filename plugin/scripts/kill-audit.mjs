@@ -174,10 +174,23 @@ const KILLS = [
   // The advice taken literally: *"delete each child-gate invocation, invert each propagated
   // status, and make a child crash. The oracle must name the missing gate, not merely observe
   // exit 1 somewhere."*
+  // The branch gained an `!g.ran` arm on 2026-07-31 — the fix for a gate that printed a green
+  // tick when its child could not start — so `if (n) {` became `} else if (n) {` and this
+  // pattern stopped matching. kill-audit reported `not-applicable`, which it correctly calls a
+  // failure of the AUDIT rather than a result about the control: the mutation silently tested
+  // nothing. The control was edited and this file was not, exactly as its own message says.
   { id: 'check-cardgate', file: 'scripts/check.mjs',
     what: 'check.mjs stops counting card-gate findings — cards reach any stage unanswered',
-    fromRe: /\n(\s*)if \(n\) \{\n(\s*)\/\/ The total is printed FIRST/,
-    to: '\n$1if (false) {\n$2// The total is printed FIRST' },
+    fromRe: /\n(\s*)\} else if \(n\) \{\n(\s*)\/\/ The total is printed FIRST/,
+    to: '\n$1} else if (false) {\n$2// The total is printed FIRST' },
+
+  // The gate that turns "could not run" into a refusal. Without it, an installed plugin whose
+  // sibling scripts are unreachable prints `✅ … (0 checked)` and exits 0 — which is what it
+  // did, in every adopted repository, until 2026-07-31.
+  { id: 'check-gate-ran', file: 'scripts/check.mjs',
+    what: 'check.mjs treats a gate that could not START as a gate that found nothing',
+    from: '  if (!g.ran) {\n    bad(\'the card gate could not run — no card was checked\'',
+    to: '  if (false) {\n    bad(\'the card gate could not run — no card was checked\'' },
   { id: 'check-coverage', file: 'scripts/check.mjs',
     what: 'check.mjs stops reporting guard-coverage findings — an untested control passes the gate',
     from: '  else for (const f of out.findings) {\n    bad(`${f.name}: ${f.detail}`',
@@ -214,10 +227,57 @@ const KILLS = [
     what: 'the vendored council stops needing provenance — a stale copy reports itself current, which is exactly how the UTF-8 corruption survived a week',
     from: 'if (!pin?.commit) {',
     to: 'if (false) {' },
+  // Drifted at commit bd7e762, which changed the line to `trusted ? ROOT : …`, and reported
+  // `not-applicable` from then until 2026-07-31 — a mutation that matched nothing, so this
+  // control had been silently unaudited for the whole period while the run still exited 0.
   { id: 'council-cwd', file: 'scripts/council-run.mjs',
     what: 'the council runs from the user\'s repo again, dropping .council/runs/ back into their tree',
-    from: 'const cwd = out ?? process.cwd();',
+    from: 'const cwd = trusted ? ROOT : process.cwd();',
     to: 'const cwd = process.cwd();' },
+
+  // ── prove-invariants · the only control that runs the application ──────────
+  //
+  // Every other mutation here deletes a rule about PROCESS. These delete the rules about the
+  // PRODUCT, which is the axis two audits and a council scored lowest.
+  { id: 'prove-empty-passes', file: 'scripts/prove-invariants.mjs',
+    what: 'prove-invariants treats "no invariants declared" as "no invariants violated"',
+    from: "  if (JSON_OUT) console.log(JSON.stringify({ declared: 0, proved: 0, violated: [], status: 'no-invariants' }));\n  process.exit(2);",
+    to: "  if (JSON_OUT) console.log(JSON.stringify({ declared: 0, proved: 0, violated: [], status: 'no-invariants' }));\n  process.exit(0);" },
+  { id: 'prove-violation-ignored', file: 'scripts/prove-invariants.mjs',
+    what: 'a violated invariant stops failing the gate — the app is broken and the gate is green',
+    from: 'if (violated.length || broken.length) {',
+    to: 'if (false) {' },
+  { id: 'prove-unreachable-passes', file: 'scripts/prove-invariants.mjs',
+    what: 'a check that could not RUN counts as one that held',
+    from: "    results.push({ ...inv, status: 'prove-unreachable', detail: 'timed out' });",
+    to: "    results.push({ ...inv, status: 'held', detail: 'timed out' });" },
+
+  // ── move-card · the transition function ────────────────────────────────────
+  //
+  // A new refusing control (2026-07-31) and kill-audit's scope report named it as carrying no
+  // mutation. The rule worth deleting is the one that makes it a transition function at all:
+  // without it, `nexa-move` degrades to a `git mv` with extra steps, and `1-spec → 5-verify`
+  // — the exact skip it was written for — succeeds.
+  { id: 'move-undefined-transition', file: 'scripts/move-card.mjs',
+    what: 'nexa-move stops checking whether a transition EXISTS — a card can skip four gates again',
+    from: 'if (!candidates.length) {',
+    to: 'if (false) {' },
+
+  // Doing the `git mv` first and checking afterwards is only safe because of the rollback. Cut
+  // it and a card that fails its destination's guards is left stranded in a stage it never
+  // satisfied — worse than refusing, because the board now lies.
+  { id: 'move-stage-demands', file: 'scripts/move-card.mjs',
+    what: 'the mover stops running the destination\'s demands — the pipeline\'s guard names go back to being decorative',
+    from: 'if (stageDemands.length) {',
+    to: 'if (false) {' },
+  { id: 'move-layout-aware', file: 'scripts/move-card.mjs',
+    what: 'every move goes back to git mv, which cannot work on the layout this ships with',
+    from: '  if (tracked) execFileSync(\'git\', [\'mv\', a, b], { cwd: ROOT, stdio: \'pipe\' });\n  else fs.renameSync(a, b);',
+    to: '  execFileSync(\'git\', [\'mv\', a, b], { cwd: ROOT, stdio: \'pipe\' });' },
+  { id: 'move-rollback', file: 'scripts/move-card.mjs',
+    what: 'a card refused by the destination gate is left half-moved instead of rolled back',
+    from: '    relocate(dest, src);',
+    to: '    /* rollback removed */' },
 
   // ── closing the scope report's own list ────────────────────────────────────
   //
@@ -309,9 +369,24 @@ function runEverything() {
 // alive to work. In-process restore stays as the fast path; the journal is the one that holds.
 const JOURNAL = path.join(ROOT, '.nexa-kill-audit-inflight.json');
 
-function journalWrite(file, original) {
+// ── the journal records EVERY copy, because a mutation now writes more than one ──
+//
+// This wrote `{file, original}` — a single entry — and each call overwrote the last. That was
+// correct while a mutation touched one file. It stopped being correct when mutations began
+// writing every distinct on-disk copy of a control (see the `candidates` comment below), and
+// the failure is silent: journal two files, recover one, and the OTHER stays disarmed with no
+// record that it ever changed.
+//
+// Not hypothetical. This run was killed mid-`depth-stub` on an exFAT volume, where
+// `<repo>/scripts` and `<repo>/plugin/scripts` are independent copies; both were mutated and
+// the journal named one. The restore happened to be recoverable only because both copies held
+// identical bytes.
+//
+// `files` is a map of path → original. The old single-entry shape is still read on recovery, so
+// a journal written by a previous version is not orphaned by this change.
+function journalWrite(files) {
   try {
-    fs.writeFileSync(JOURNAL, `${JSON.stringify({ file, original, at: new Date().toISOString() })}\n`);
+    fs.writeFileSync(JOURNAL, `${JSON.stringify({ files, at: new Date().toISOString() })}\n`);
   } catch { /* the run still proceeds; the in-process restore is the fast path */ }
 }
 const journalClear = () => { try { fs.unlinkSync(JOURNAL); } catch { /* already gone */ } };
@@ -323,11 +398,18 @@ const journalClear = () => { try { fs.unlinkSync(JOURNAL); } catch { /* already 
 function journalRecover() {
   if (!fs.existsSync(JOURNAL)) return;
   try {
-    const { file, original, at } = JSON.parse(fs.readFileSync(JOURNAL, 'utf8'));
-    if (typeof file === 'string' && typeof original === 'string' && fs.existsSync(file)) {
+    const j = JSON.parse(fs.readFileSync(JOURNAL, 'utf8'));
+    // `files` is the current shape; `{file, original}` is what versions before 2026-07-31 wrote,
+    // and a journal left by one of those must still be recoverable — the whole point of this
+    // file is that a killed run cannot leave a control disarmed.
+    const entries = j.files && typeof j.files === 'object'
+      ? Object.entries(j.files)
+      : (typeof j.file === 'string' ? [[j.file, j.original]] : []);
+    for (const [file, original] of entries) {
+      if (typeof file !== 'string' || typeof original !== 'string' || !fs.existsSync(file)) continue;
       if (fs.readFileSync(file, 'utf8') !== original) {
         fs.writeFileSync(file, original);
-        console.error(`  ⚠️  recovered ${path.relative(ROOT, file)} — a previous run (${at}) was killed`
+        console.error(`  ⚠️  recovered ${path.relative(ROOT, file)} — a previous run (${j.at}) was killed`
           + ' mid-mutation and left it disarmed. Restored before starting.');
       }
     }
@@ -393,10 +475,29 @@ say('  baseline: green\n');
 const results = [];
 for (const k of KILLS) {
   if (ONLY && k.id !== ONLY) continue;
-  const f = path.join(ROOT, k.file);
+  // ── EVERY on-disk copy of the control, not just one path ───────────────────
+  //
+  // `<repo>/scripts` is a SYMLINK to `<repo>/plugin/scripts`, so on a normal checkout these
+  // two paths are one file and mutating either is the same act. **On a filesystem without
+  // symlinks they are two independent copies** — exFAT, and Windows without developer mode,
+  // where git materialises the link as a real directory.
+  //
+  // Measured 2026-07-31 on an exFAT volume: eleven mutations reported SURVIVED, including
+  // `sed`, `wip-limit` and `discard` — controls with fixtures that demonstrably catch them.
+  // The audit had mutated `<repo>/scripts/...` while `hooks.test.mjs` was reading
+  // `<repo>/plugin/scripts/...`, so the suite ran the UNMUTATED copy and stayed green.
+  //
+  // **An audit that mutates a file nothing under test reads reports SURVIVED for every rule
+  // in it** — the exact fail-open shape this file exists to hunt, aimed at itself for the
+  // third time. Mutating every distinct copy is correct in both layouts: on APFS the second
+  // path resolves to the same inode and is skipped, on exFAT both are written.
+  const candidates = [...new Set([path.join(ROOT, 'plugin', k.file), path.join(ROOT, k.file)]
+    .filter((p) => fs.existsSync(p))
+    .map((p) => fs.realpathSync(p)))];
   // A control that is not present here is not a survivor — it is absent. Reporting it as
   // "SURVIVED" would be the same fail-open this file exists to hunt, pointed at itself.
-  if (!fs.existsSync(f)) { results.push({ id: k.id, file: k.file, what: k.what, status: 'not-applicable' }); say(`  ·  ${k.id.padEnd(18)} control not present here — skipped`); continue; }
+  if (!candidates.length) { results.push({ id: k.id, file: k.file, what: k.what, status: 'not-applicable' }); say(`  ·  ${k.id.padEnd(18)} control not present here — skipped`); continue; }
+  const f = candidates[0];
   const original = fs.readFileSync(f, 'utf8');
 
   let mutated;
@@ -409,17 +510,21 @@ for (const k of KILLS) {
   }
   if (mutated === original) { results.push({ ...k, status: 'no-op' }); say(`  ·  ${k.id.padEnd(18)} mutation changed nothing — skipped`); continue; }
 
-  inFlight.set(f, original);
-  journalWrite(f, original);          // survives SIGKILL, which no handler does
-  fs.writeFileSync(f, mutated);
+  // Every copy is written, and every copy is journalled — a restore that misses one leaves a
+  // mutated control in the tree, which is worse than not running the audit at all.
+  const originals = new Map(candidates.map((p) => [p, fs.readFileSync(p, 'utf8')]));
+  for (const [p, orig] of originals) inFlight.set(p, orig);
+  // One journal write covering EVERY copy, before any of them is touched. Written per-file, the
+  // second call overwrote the first and only the last copy was recoverable.
+  journalWrite(Object.fromEntries(originals));
+  for (const p of candidates) fs.writeFileSync(p, originals.get(p).replace(k.fromRe ?? k.from, k.to));
   let res;
   try {
     // A mutation that breaks parsing is not a test of coverage; it is a test of node.
     const parses = spawnSync('node', ['--check', f], { encoding: 'utf8' }).status === 0;
     res = parses ? runEverything() : { by: 'syntax — mutation invalid, result discarded', invalid: true };
   } finally {
-    fs.writeFileSync(f, original);
-    inFlight.delete(f);
+    for (const [p, orig] of originals) { fs.writeFileSync(p, orig); inFlight.delete(p); }
     journalClear();
   }
 

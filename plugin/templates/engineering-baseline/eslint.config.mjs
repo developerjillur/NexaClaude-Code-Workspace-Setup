@@ -7,7 +7,9 @@
 
 export default [
   {
-    files: ['**/*.{js,mjs,cjs}'],
+    // ts/tsx included: the audit that produced this line found the config matched ZERO
+    // files in a TypeScript project, which is most of what this baseline is aimed at.
+    files: ['**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
@@ -39,7 +41,7 @@ export default [
   },
   {
     // Test files legitimately do things production code must not.
-    files: ['**/test/**', '**/tests/**', '**/*.test.*'],
+    files: ['**/test/**', '**/tests/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*'],
     rules: { 'no-empty': 'off' },
   },
   {

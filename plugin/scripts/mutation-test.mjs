@@ -24,7 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { projectRootFor, paths } from './hooks/roots.mjs';
+import { projectRootFor, paths, PLUGIN_ROOT } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
@@ -100,10 +100,21 @@ if (!MUTATIONS.length) {
   console.log('  No mutations defined. This is not a pass — nothing was tested.\n');
   console.log('  Create `mutations.json` at the workspace root, one entry per security');
   console.log('  decision your project has actually made. See the header of this file for the');
-  console.log('  shape, and templates/mutations.example.json for a worked example.\n');
+  console.log(`  shape, and ${path.join(PLUGIN_ROOT, 'templates', 'mutations.example.json')}`);
+  console.log('  for a worked example.\n');
   console.log('  Synthetic mutations measure nothing. The question each one answers is:');
   console.log('  "if somebody reverted this decision, would anything go red?"\n');
-  process.exit(0);
+  // **Exit 2, because the sentence above is either true or it is decoration.**
+  //
+  // This printed "This is not a pass — nothing was tested" and then exited 0, which every
+  // caller reads as a pass: `npm run mutate` succeeded, a gate chained with `&&` continued,
+  // and `definition-of-done`'s "mutation-test run — and every mutation was caught" could be
+  // ticked by a project with no mutations at all. The prose and the exit code disagreed, and
+  // only the exit code is read by anything.
+  //
+  // The same shape as `depth-check` scanning zero files: a tool that examined nothing must not
+  // return the code that means "examined everything, found nothing wrong".
+  process.exit(2);
 }
 
 const resolved = MUTATIONS.filter((m) => {

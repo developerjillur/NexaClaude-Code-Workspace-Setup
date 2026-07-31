@@ -3,7 +3,7 @@
 <!-- contract-meta
 last-verified: <date you last read this end to end>
 verified-at: INITIAL
-cost: ~5909 tokens, loaded every session — `node scripts/check.mjs` recomputes and refuses on drift
+cost: ~6579 tokens, loaded every session — `nexa-check` recomputes and refuses on drift
 scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
 -->
 
@@ -90,6 +90,7 @@ file or a gate in this repo — not a good intention.
 | **Cited proof that does not exist** | **`verify-claims`** follows every citation into the repo | `scripts/verify-claims.mjs` |
 | **A green suite that catches nothing** | **`mutation-test`** deletes a real invariant and asks if anything notices | `scripts/mutation-test.mjs` |
 | **A secret pushed to a remote** | **`scan-secrets`** — working tree **and full history**, before any push | `scripts/scan-secrets.mjs` |
+| **Every gate passed and the app is still broken** | **`nexa-prove`** runs the APPLICATION and asserts the four invariants that cost money: cross-tenant read, double charge, open endpoint, unsurvivable migration | `scripts/prove-invariants.mjs` |
 
 **The last row is the one most likely to be happening right now.** A stub has no TODO in it —
 it has a signature, a doc comment, a plausible name, and a body that returns a constant. It
@@ -128,6 +129,12 @@ forward with a note.
 | **4-review** | scored on 5 axes, **a different model than the one that built it** | agent |
 | **5-verify** | tests pass, and **at least one guard has been watched to fail** | agent + human |
 | **6-done** | merged, `docs/DECISIONS.md` updated if a decision was made | human |
+| **7-operate** | it is live and production has said something — what you observed, and what came back as a card | human + agent |
+
+**`7-operate` is not decoration and it is not a graveyard.** The board ends at `6-done`; paying
+customers start there. A card moves here on deploy and closes once production has answered
+`skills/operate-after-done`'s four questions — `card-gate` refuses it without an observation and
+a feed-back line, and *"no errors, latency unchanged over three days"* is a complete answer.
 
 **The verify rule is the unusual one and it is deliberate:** a guard nobody has watched fail
 is not a guard. Every invariant test ships with a fixture that deliberately breaks it and
@@ -262,7 +269,8 @@ matter.
 
 **A cheap state check runs on every prompt, and says nothing when there is nothing to say.**
 `scripts/hooks/prompt-check.mjs` — ~190 ms, **zero tokens when green**. It speaks only for WIP
-over the limit, a stale reflection (which refuses the next commit anyway), or uncommitted work
+over the limit, a stale reflection (which `check.mjs` reports and no git hook enforces — see
+below), or uncommitted work
 that has **grown**. Not the absolute count: the product repo has carried 45 uncommitted files
 since 26 July, and reporting that every prompt would be true, correct, and ignored by the
 second day. **A true statement that never changes is still noise.**
@@ -425,11 +433,16 @@ product's own architecture — *nothing built on an agent CLI is interactive*.
 customer can be hurt by and the only one an edit cannot undo.
 
 ```bash
-node scripts/scan-secrets.mjs                 # tree + history, before ANY push
-cd code && vibesec scan src tools server.js   # 0 issues, or stop
-cd code && npm run test:offline               # 427, or stop
+nexa-secrets                    # tree + history, before ANY push
+vibesec scan <your source dirs> # 0 issues, or stop
+<your test command>             # green, or stop
+# snapshot the DATA if this release migrates the schema — §11 above, and skills/deploy-gate §3a
 # tag rollback BEFORE building, then build, recreate, re-run the suite IN the container
 ```
+
+> Replace the middle two lines with your project's real commands and **write the expected
+> number in the comment** — "green, or stop" is a reminder; "427 checks, or stop" is a claim
+> somebody can check. The number belongs to your suite, so this template cannot supply it.
 
 **The in-container run is the one that counts** — two tests once passed locally and failed in
 the container because they read the host's environment.
@@ -441,14 +454,26 @@ query string.
 **If anything fails: roll back. Never fix forward on production.** Then open a card — a
 hotfix with no card is how the same bug ships twice.
 
+**The one exception, and it is the expensive one.** A rollback restores *code*, never *rows*. If
+the release migrated the schema, rolling the image back puts the old application on top of the
+new shape, and the result is corrupted data rather than restored service — the rule above
+becomes the cause of the outage. A schema change is therefore `kind: migration` on its card,
+which `card-gate` refuses without an expand/contract split, an answer for mixed-version
+operation, and a rehearsed data restore. `skills/deploy-gate` §3a is the procedure.
+
 ---
 
 ## 12 · The two gates
 
 ```bash
-node scripts/check.mjs            # before moving any card
-cd code && npm run test:offline   # 427 checks — the deploy gate
+nexa-check           # before moving any card
+<your test command>  # your suite
+nexa-prove           # the invariants, against a RUNNING instance — the deploy gate
 ```
+
+**`nexa-prove` is the only one that runs your software.** The other two read artifacts, and a
+workspace whose every gate reads artifacts can certify a process that produced a broken product
+— which is what two audits and a council found here before it existed.
 
 **Both are refusals.** `check.mjs` catches the mechanical skips — two cards in build, a card
 past a gate it did not satisfy, a ticked criterion citing nothing, a contract whose stated cost

@@ -129,6 +129,12 @@ const RULES = [
 ];
 
 // ── collecting files ─────────────────────────────────────────────────────────
+// **TypeScript was invisible to this scanner.** The filter was `/\.(js|mjs|cjs)$/`, so a
+// TS/TSX project — most of the apps this workspace is aimed at — matched zero files, and the
+// "nothing to check" exit below turned that into a pass. The six stub shapes are syntactic and
+// apply unchanged to TS, TSX, JSX and MTS; there was never a reason to exclude them.
+const SOURCE = /\.(jsx?|mjs|cjs|tsx?|mts|cts)$/;
+
 function filesUnder(p) {
   const out = [];
   const walk = (d) => {
@@ -136,7 +142,7 @@ function filesUnder(p) {
       const full = path.join(d, e.name);
       if (e.name.startsWith('.') || e.name === 'node_modules') continue;
       if (e.isDirectory()) walk(full);
-      else if (/\.(js|mjs|cjs)$/.test(e.name)) out.push(full);
+      else if (SOURCE.test(e.name)) out.push(full);
     }
   };
   const st = fs.existsSync(p) && fs.statSync(p);
@@ -149,15 +155,31 @@ let files = [];
 if (useChanged) {
   try {
     files = execSync('git diff --name-only HEAD', { encoding: 'utf8' })
-      .split('\n').filter((f) => /\.(js|mjs|cjs)$/.test(f) && fs.existsSync(f));
+      .split('\n').filter((f) => SOURCE.test(f) && fs.existsSync(f));
   } catch { files = []; }
 } else {
   files = targets.flatMap(filesUnder);
 }
 
+// ── scanning nothing is not a clean scan ────────────────────────────────────
+//
+// This exited 0. `check.mjs` read that as success and printed `depth-check clean` over a tree
+// this scanner never opened — for every adopter whose code is not in `code/src`, which was the
+// hardcoded path of the private product this workspace came from. Measured on a repo with real
+// stub code: "nothing to check", exit 0, green tick.
+//
+// `--changed` on a clean tree is the one honest zero: nothing changed, so nothing is owed. It
+// keeps exit 0. Being handed explicit paths that yield no files is a misconfiguration, and the
+// only safe rendering of a misconfigured scanner is a refusal.
 if (!files.length) {
-  console.error('depth-check: nothing to check. Pass paths, or --changed with a dirty tree.');
-  process.exit(0);
+  if (useChanged) {
+    console.error('depth-check: no changed source files — nothing to check.');
+    process.exit(0);
+  }
+  console.error(`depth-check: scanned 0 files under ${targets.join(', ') || '(no paths given)'}.
+Nothing was checked, so nothing is clean. Point it at your source with codeDirs in
+workspace.config.json, or pass paths explicitly.`);
+  process.exit(2);
 }
 
 // ── run ──────────────────────────────────────────────────────────────────────

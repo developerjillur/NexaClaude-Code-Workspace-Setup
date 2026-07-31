@@ -10,8 +10,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, spawnSync } from 'node:child_process';
-import { projectRootFor, stateRoot, paths, councilDir, PLUGIN_ROOT } from './hooks/roots.mjs';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
+import { projectRootFor, stateRoot, paths, councilDir, readConfig, codeDirs, stages as pipelineStages, PLUGIN_ROOT } from './hooks/roots.mjs';
+import { demandsFor, scaffolding, meets } from './card-demands.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
 // where this script lives once the workspace ships as a plugin.
@@ -48,7 +49,54 @@ const ok = (m) => console.log(`  ✅ ${m}`);
 const bad = (m, why) => { fail++; console.log(`  ❌ ${m}\n       ${why}`); };
 const soft = (m, why) => { warn++; console.log(`  ⚠️  ${m}\n       ${why}`); };
 
-const stages = ['0-discovery', '0-backlog', '1-spec', '2-plan', '3-build', '4-review', '5-verify', '6-done', '7-operate'];
+/**
+ * Where a BUNDLED sibling script lives — `card-gate.mjs`, `depth-check.mjs`, the rest.
+ *
+ * ── the defect this exists to prevent, and it was the worst one in this file ──
+ *
+ * Three gates spawned `path.join(ROOT, 'scripts', <name>)`. `ROOT` is the **adopter's
+ * project**, and an adopted project contains five things — `.nexa`, `AGENTS.md`, `CLAUDE.md`,
+ * `.claudeignore`, `.claude/settings.json`. It has no `scripts/`. So in the only configuration
+ * this ships as, the child never started, `JSON.parse(r.stdout || '{}')` turned the empty
+ * output into `{findings: []}`, and zero findings printed as a green tick:
+ *
+ *     ✅ every card carries what its stage requires (0 checked)
+ *     ✅ all 0 controls have a refusal case AND a silent case
+ *       All checks pass.                                        exit 0
+ *
+ * Reproduced end to end against a freshly adopted repository. **The three strongest gates in
+ * the workspace passed having inspected nothing**, which is the exact failure mode this file's
+ * own header warns about: a check that reports absence where there is none teaches people to
+ * ignore the ones that matter. This is its inverse and it is worse — reporting presence where
+ * there is none.
+ *
+ * The correct idiom was already in this file at the `save-prompt` lookup: try the plugin, fall
+ * back to the repository. It just was not applied here.
+ */
+const sibling = (...parts) => [path.join(PLUGIN_ROOT, 'scripts', ...parts),
+  path.join(ROOT, 'scripts', ...parts)].find((p) => fs.existsSync(p)) ?? null;
+
+/**
+ * Run a bundled gate that speaks `--json`, and **never let "could not run" read as "clean"**.
+ *
+ * @returns {{ran: boolean, why?: string, out?: object}} `ran: false` is a `bad()` at every
+ *   call site. A gate that cannot start is a broken installation, not a passing repository.
+ */
+const runGate = (name, args = ['--json']) => {
+  const script = sibling(name);
+  if (!script) return { ran: false, why: `${name} is not in this plugin or this repository` };
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', cwd: ROOT });
+  if (r.error) return { ran: false, why: `${name} could not be spawned — ${r.error.message}` };
+  let out;
+  try { out = JSON.parse(r.stdout || ''); } catch {
+    // Exit 1 with parseable-nothing is the shape of a crash. Exit 0 with unparseable stdout is
+    // a gate that changed its output format. Both are "we learned nothing", never "no findings".
+    return { ran: false, why: `${name} exited ${r.status} without usable JSON — ${(r.stderr || r.stdout || '').trim().split('\n')[0]?.slice(0, 120) || 'no output'}` };
+  }
+  return { ran: true, out };
+};
+
+const stages = pipelineStages();
 const cardsIn = (s) => {
   const d = path.join(P.board, s);
   if (!fs.existsSync(d)) return [];
@@ -83,24 +131,26 @@ console.log('\n── Cards past their gate ────────────
 
 // 3. Each stage demands its sections be filled. A card sitting in 4-review with an empty
 //    review table is the failure this catches: it looks reviewed and is not.
-const demands = {
-  '2-plan':   [[/## 1 · Spec/, 'spec section'], [/- \[[ x]\] \S/, 'at least one acceptance criterion']],
-  '3-build':  [[/\|\s*[^|\s][^|]*\|\s*[^|\s]/, 'a named file in the plan table'],
-               [/graphify explain/, 'the reuse ladder — graphify explain is not recorded']],
-  '4-review': [[/## 3 · Build/, 'build section']],
-  '5-verify': [[/Verdict:\s*(PASS|BACK)/i, 'a review verdict'],
-               [/\|\s*Matches the spec\s*\|\s*[1-5]/, 'a score on "Matches the spec"']],
-  '6-done':   [[/- \[x\]/i, 'a ticked verification checklist'],
-               [/```[\s\S]*?```/, 'the pasted output of a guard watched failing']],
-};
+// The stage requirements now live in ONE module, imported by this gate AND by `nexa-move`.
+// They were here alone, while `card-gate.mjs` held a different list — so `pipeline.json` could
+// name `spec-section` as a guard on `1-spec → 2-plan` and the mover, which runs card-gate,
+// enforced nothing of the kind. See the header of card-demands.mjs.
+// The same list as `stages`; kept as a name because the loop below reads better for it.
+const STAGE_ORDER = stages;
 let checked = 0;
-for (const [stage, rules] of Object.entries(demands)) {
+// Every stage a card has PASSED, not just the one it sits in — see demandsFor().
+for (const stage of STAGE_ORDER) {
+  const rules = demandsFor(stage);
+  if (!rules.length) continue;
   for (const f of cardsIn(stage)) {
     const body = read(stage, f);
+    const stripped = scaffolding(body);
     checked++;
-    for (const [re, what] of rules) {
-      if (!re.test(body)) bad(`${stage}/${f} is missing ${what}`,
-        'it passed a gate it should not have — move it back');
+    for (const [re, what, guardId, owed] of rules) {
+      if (!meets(re, stripped, body)) bad(`${stage}/${f} is missing ${what} [${guardId}]`,
+        owed === stage
+          ? 'it passed a gate it should not have — move it back'
+          : `owed since ${owed}, and never supplied — it passed that gate without satisfying it`);
     }
 
     // A ticked criterion with no evidence is a claim by whoever wants the card to move.
@@ -112,11 +162,25 @@ for (const [stage, rules] of Object.entries(demands)) {
     // The readiness re-assessment found six of the strongest controls ran only when someone
     // remembered them. This is the cheapest two to fix: both already work, and a card cannot
     // pass 4-review or later without them having actually run.
-    if (['4-review', '5-verify', '6-done'].includes(stage) && fs.existsSync(path.join(ROOT, 'code'))) {
+    //
+    // **The paths used to be the literal `code/src code/tools code/server.js`** — the layout of
+    // the private product this workspace was extracted from. Every adopter whose code is in
+    // `src/` got `depth-check` scanning three directories that do not exist; it exited 0 saying
+    // "nothing to check" and this file printed `depth-check clean` over a tree it never opened.
+    // The whole block was also gated on `ROOT/code` existing, so the documented
+    // `codeDirs: ["src","lib"]` adoption skipped it entirely. `codeDirs` is the answer to
+    // "where is the product", and it is two lines away in the config.
+    // **execFileSync, not execSync.** These paths come out of `workspace.config.json`, which is
+    // a file in the repository an agent can write — interpolating it into a shell string is a
+    // command-injection path, not a hypothetical one.
+    const cfg = readConfig(ROOT).config;
+    const scanPaths = (cfg.depthCheckPaths?.length ? cfg.depthCheckPaths : codeDirs(ROOT).dirs)
+      .filter((d) => fs.existsSync(path.join(ROOT, d)));
+    const depthScript = sibling('depth-check.mjs');
+    if (['4-review', '5-verify', '6-done'].includes(stage) && scanPaths.length && depthScript) {
       try {
-        execSync('node scripts/depth-check.mjs code/src code/tools code/server.js',
-          { cwd: ROOT, stdio: 'pipe' });
-        ok(`${stage}/${f} — depth-check clean`);
+        execFileSync('node', [depthScript, ...scanPaths], { cwd: ROOT, stdio: 'pipe' });
+        ok(`${stage}/${f} — depth-check clean (${scanPaths.join(', ')})`);
       } catch (e) {
         const lines = String(e.stdout ?? '').split('\n').filter((l) => /^\s{4}\S.*:\d+/.test(l));
         bad(`${stage}/${f} — depth-check found ${lines.length} finding(s)`,
@@ -126,10 +190,10 @@ for (const [stage, rules] of Object.entries(demands)) {
 
     // Follow the citations, rather than trusting that someone did. A card only reaches these
     // stages once, and "run verify-claims" as a checklist line is a thing people tick.
-    if (stage === '5-verify' || stage === '6-done') {
+    const claimsScript = sibling('verify-claims.mjs');
+    if ((stage === '5-verify' || stage === '6-done') && claimsScript) {
       try {
-        execSync(`node scripts/verify-claims.mjs ${JSON.stringify(path.join('board', stage, f))}`,
-          { cwd: ROOT, stdio: 'pipe' });
+        execFileSync('node', [claimsScript, path.join('board', stage, f)], { cwd: ROOT, stdio: 'pipe' });
         ok(`${stage}/${f} — every cited claim resolves`);
       } catch (e) {
         const detail = String(e.stdout ?? '').split('\n')
@@ -324,6 +388,54 @@ for (const [label, p] of sides) {
     bad(`${label} settings.json does not parse`, e.message);
   }
 }
+// 8·0. **Which SCRIPT each event runs, not merely that the event is declared.**
+//
+// The check above records event NAMES only, so a hook bound to the wrong script — or to a
+// script that does not exist — is invisible to it. That is not hypothetical: `README.md`
+// documented `Stop` → `session-end.mjs` with the description "the turn cannot end quietly with
+// a gate unrun", while `plugin/hooks/hooks.json` bound `Stop` to `autopilot.mjs`.
+// `session-end.mjs` was 60 lines referenced by nothing but that README row.
+//
+// So the workspace's strongest published enforcement claim named a hook that was not wired,
+// and the drift check that exists to catch exactly this was structurally unable to see it.
+// Comparing basenames per event is the cheapest thing that would have.
+{
+  const manifest = path.join(PLUGIN_ROOT, 'hooks', 'hooks.json');
+  const readme = path.join(ROOT, 'README.md');
+  if (fs.existsSync(manifest) && fs.existsSync(readme)) {
+    try {
+      const wired = {};
+      const json = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      for (const [event, groups] of Object.entries(json.hooks ?? {})) {
+        wired[event] = new Set((groups ?? []).flatMap((g) => (g.hooks ?? [])
+          .map((h) => (h.command ?? '').match(/([\w.-]+\.mjs)/)?.[1]).filter(Boolean)));
+      }
+      // Rows look like: | `Stop` | `autopilot.mjs` | what it does |
+      const rows = fs.readFileSync(readme, 'utf8').split('\n')
+        .map((l) => l.match(/^\|\s*`(\w+)`\s*\|\s*`([\w.-]+\.mjs)`\s*\|/))
+        .filter(Boolean).map((m) => [m[1], m[2]]);
+      const lies = rows.filter(([event, script]) => wired[event] && !wired[event].has(script));
+      const missingEvent = rows.filter(([event]) => !wired[event]);
+      if (lies.length) {
+        bad(`README documents ${lies.length} hook(s) that hooks.json does not wire`,
+          lies.map(([e, s]) => `${e} → ${s}, actually ${[...wired[e]].join(', ') || 'nothing'}`).join('; '));
+      } else if (missingEvent.length) {
+        bad(`README documents ${missingEvent.length} hook event(s) that hooks.json does not declare`,
+          missingEvent.map(([e, s]) => `${e} → ${s}`).join('; '));
+      } else if (rows.length) {
+        ok(`all ${rows.length} documented hooks are wired to the script the README names`);
+      }
+      // And the reverse: a script named in the manifest that is not in the plugin at all.
+      const absent = Object.entries(wired).flatMap(([event, set]) => [...set]
+        .filter((s) => !fs.existsSync(path.join(PLUGIN_ROOT, 'scripts', 'hooks', s)))
+        .map((s) => `${event} → ${s}`));
+      if (absent.length) bad(`${absent.length} wired hook script(s) do not exist`, absent.join('; '));
+    } catch (e) {
+      bad('the hook manifest could not be compared against the README', e.message);
+    }
+  }
+}
+
 // 8a. The tier. `skills/pick-the-model` rule 0: every Claude-side task runs top-tier, and a
 // downgrade is exactly the kind of change that is invisible in review — the output still looks
 // like work. `explorer` sat on `sonnet` for a day without anyone noticing, and it is the agent
@@ -567,12 +679,19 @@ try {
 // A council put this workspace at "top 10%, not top 1%", and part of why was that it had
 // world-class controls against AGENT failure and none of the hygiene an ordinary engineering
 // org takes for granted. The tools belong to the code being written, not to the process
-// writing it — so this WARNS rather than fails, and ships the configs in
-// templates/engineering-baseline/ so the fix is a copy rather than a research task.
+// writing it — so this WARNS rather than fails, and ships the configs so the fix is a copy
+// rather than a research task.
+//
+// **The path it names must be one the reader can reach.** It said `templates/engineering-baseline/`,
+// which is this repository's layout — the directory sat OUTSIDE `plugin/`, so it was in no
+// installed copy, and every adopter was told to copy from a path they do not have. Moved under
+// `plugin/templates/` and printed as an absolute path resolved from PLUGIN_ROOT, so the advice
+// is followable in both deployments.
 //
 // It warns forever, though. A workspace that stops mentioning a missing linter has agreed
 // with you that it does not matter.
 {
+  const BASELINE = path.join(PLUGIN_ROOT, 'templates', 'engineering-baseline');
   const cfgPath = P.config;
   let dirs = ['code'];
   try { dirs = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).codeDirs ?? dirs; } catch { /* default */ }
@@ -582,7 +701,8 @@ try {
   } else {
     const pkgPath = real.map((d) => path.join(d, 'package.json')).find((p) => fs.existsSync(p));
     if (!pkgPath) {
-      soft('the product repo has no package.json', 'lint, format and typecheck cannot be wired without one — templates/engineering-baseline/');
+      soft('the product repo has no package.json',
+        `lint, format and typecheck cannot be wired without one — see ${BASELINE}`);
     } else {
       let scripts = {};
       try { scripts = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).scripts ?? {}; } catch { /* unreadable */ }
@@ -590,7 +710,7 @@ try {
       const missing = want.filter((s) => !scripts[s]);
       if (missing.length) {
         soft(`the product repo has no ${missing.join(', ')} script`,
-          'copy templates/engineering-baseline/ and add them — a linter nobody runs is not a linter');
+          `copy ${BASELINE} and add them — a linter nobody runs is not a linter`);
       } else ok('the product repo wires lint, format, typecheck and test');
     }
   }
@@ -608,12 +728,12 @@ try {
 // are not placeholders, never that they are true. Nothing mechanical can do the second, and
 // the failure that actually happens is the first.
 {
-  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'card-gate.mjs'), '--json'],
-    { encoding: 'utf8' });
-  let out = { findings: [] };
-  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through to the raw status */ }
+  const g = runGate('card-gate.mjs');
+  const out = g.out ?? {};
   const n = (out.findings ?? []).length;
-  if (n) {
+  if (!g.ran) {
+    bad('the card gate could not run — no card was checked', `${g.why}. Until this runs, every stage requirement is unverified.`);
+  } else if (n) {
     // The total is printed FIRST and always. Showing six of nine and saying nothing about the
     // other three is how a bounded report reads as a complete one.
     console.log(`  ⛔ card-gate: ${n} unanswered requirement${n === 1 ? '' : 's'} across ${new Set(out.findings.map((f) => f.card)).size} card${new Set(out.findings.map((f) => f.card)).size === 1 ? '' : 's'}`);
@@ -624,7 +744,13 @@ try {
       fail += n - 6;
       console.log(`  ❌ …and ${n - 6} more — node scripts/card-gate.mjs`);
     }
-  } else ok(`every card carries what its stage requires (${out.cards ?? 0} checked)`);
+  } else if (!(out.cards ?? 0)) {
+    // Said differently from the N-checked case ON PURPOSE. `every card carries what its stage
+    // requires (0 checked)` is the exact string this gate printed while it was silently not
+    // running at all, and a reader cannot tell a vacuous truth from a broken gate by looking at
+    // it. An empty board is fine; it just must not be phrased as an achievement.
+    ok('no cards on the board — nothing to check');
+  } else ok(`every card carries what its stage requires (${out.cards} checked)`);
 }
 
 
@@ -660,6 +786,13 @@ try {
       ['skills', fs.existsSync(path.join(ROOT, '.agents/skills'))
         ? fs.readdirSync(path.join(ROOT, '.agents/skills')).filter((d) => !d.startsWith('._')).length : 0,
         /### (\d+) skills —/],
+      // **Added because it was the number that drifted.** `scripts` and `skills` were checked;
+      // `commands` was not, and the README said 7 while eleven existed — four commands shipped
+      // and documented nowhere a reader would look. A count nothing verifies is exactly the
+      // claim this block exists to catch, and it had one of its own.
+      ['commands', fs.existsSync(path.join(ROOT, '.claude/commands'))
+        ? fs.readdirSync(path.join(ROOT, '.claude/commands')).filter((d) => !d.startsWith('._')).length : 0,
+        /### (\d+) commands —/],
       ['board stages', fs.existsSync(P.board)
         ? fs.readdirSync(P.board).filter((d) => !d.startsWith('._')).length : 0, null],
     ];
@@ -688,11 +821,13 @@ try {
 // work, and a gate that fires on every session with a dirty tree gets switched off by
 // lunchtime. It states the number every time, though.
 {
-  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'graph-fresh.mjs'), '--json'], { encoding: 'utf8' });
-  let out = { findings: [] };
-  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through */ }
+  const g = runGate('graph-fresh.mjs');
+  const out = g.out ?? {};
   const n = (out.findings ?? []).length;
-  if (!n) ok('the code graph describes the code that is there');
+  // Soft, like every other verdict from this gate: a graph that could not be checked is a
+  // reason to distrust an answer, not to stop work. But it must not print the green line.
+  if (!g.ran) soft('the graph freshness check could not run', g.why);
+  else if (!n) ok('the code graph describes the code that is there');
   else for (const f of out.findings.slice(0, 3)) {
     soft(`graph: ${f.dir} — ${f.detail}`, 'rebuild before trusting graphify explain — a stale graph does not error, it answers');
   }
@@ -756,11 +891,28 @@ try {
 // one afternoon while fixing a council's criticism that the controls here only advise. So it
 // is a gate now.
 {
-  const r = spawnSync('node', [path.join(ROOT, 'scripts', 'guard-coverage.mjs'), '--json'], { encoding: 'utf8' });
-  let out = { controls: [], findings: [] };
-  try { out = JSON.parse(r.stdout || '{}'); } catch { /* fall through */ }
+  const g = runGate('guard-coverage.mjs');
+  const out = g.out ?? {};
   const n = (out.findings ?? []).length;
-  if (!n) ok(`all ${(out.controls ?? []).length} controls have a refusal case AND a silent case`);
+  const controls = (out.controls ?? []).length;
+  // **Zero controls is not full coverage — but only when nothing was scanned.**
+  //
+  // `✅ all 0 controls have a refusal case AND a silent case` was printed, in green, by an
+  // installation where the gate had not run at all. The first fix failed everything with zero
+  // controls, which turned a legitimate case into a false failure: a project that has been
+  // scanned properly and simply owns no refusing scripts yet. `plugin-packaging.test.mjs`
+  // caught that within the same session, which is the test doing exactly its job.
+  //
+  // So the three states are now distinct: could not run (fail), scanned nothing (fail), and
+  // scanned a real tree that holds no controls yet (a note, not a tick).
+  if (!g.ran) bad('the coverage gate could not run — no control was checked', g.why);
+  else if (out.noSourceTree) soft('the coverage gate had no source tree to scan',
+    'no configured code directory exists yet — set codeDirs in workspace.config.json once your code is here.');
+  else if (!out.scanned) bad('the coverage gate scanned zero files',
+    `it looked in ${(out.roots ?? []).join(', ')} and found no source files. Nothing was verified — this is not coverage.`);
+  else if (!controls) soft(`the coverage gate scanned ${out.scanned} file(s) and found no controls`,
+    'nothing here can refuse yet, so there is nothing to cover. Not a failure — but not coverage either.');
+  else if (!n) ok(`all ${controls} controls have a refusal case AND a silent case`);
   else for (const f of out.findings) {
     bad(`${f.name}: ${f.detail}`, 'write the case it must IGNORE before the case it must catch');
   }

@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace, paths } from './roots.mjs';
+import { projectRoot, isAdoptedWorkspace, paths, codeDirs } from './roots.mjs';
 
 // Two roots, and this one is the *project* — board, config, code directories. `roots.mjs` holds
 // the evidence; the short version is that a single root computed from this file's own location
@@ -31,14 +31,12 @@ const P = paths(ROOT);
 // REFUSES and a refusal aimed at the wrong tree is how a guard gets switched off. If the
 // config is missing or malformed the fallback is `code/` — deliberately narrow, so a broken
 // config makes the gate quieter rather than turning the whole workspace into product code.
-function codeDirs() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(P.config, 'utf8'));
-    const dirs = Array.isArray(cfg.codeDirs) ? cfg.codeDirs.filter((d) => typeof d === 'string' && d) : [];
-    return dirs.length ? dirs : ['code'];
-  } catch { return ['code']; }
-}
-const CODE = codeDirs();
+// **Now resolved by `roots.mjs`, and a corrupt config REFUSES rather than falling back.** The
+// local copy ended `catch { return ['code']; }`, which meant `echo '{oops' > workspace.config.json`
+// silently returned this guard to a directory that does not exist in a `src/` project — turning
+// the only blocking control in the workspace off, with no log and no diff. See `readConfig`.
+const CODE_CFG = codeDirs(ROOT);
+const CODE = CODE_CFG.dirs;
 // macOS resolves /var to /private/var, and a path can arrive in either form: the shell hands
 // over `/var/...` while ROOT is computed as `/private/var/...`. `path.relative` between the two
 // then yields `../../..`, the file reads as outside the workspace, and **the guard passes
@@ -104,7 +102,7 @@ const read = () => new Promise((r) => {
   process.stdin.on('end', () => r(s));
 });
 
-// @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder, project-root-unknown
+// @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder, project-root-unknown, config-unreadable, board-move-unguarded
 const allow = () => process.exit(0);
 
 // ── why a refusal carries an id ──────────────────────────────────────────────
@@ -152,6 +150,60 @@ let file = input?.tool_input?.file_path ?? '';
 // review and by `git diff`, not by a matcher.
 if (input?.tool_name === 'Bash') {
   const cmd = String(input?.tool_input?.command ?? '');
+
+  // ── moving a card is a TRANSITION, not a file move ────────────────────────
+  //
+  // Measured 2026-07-31: `git mv board/1-spec/001.md board/5-verify/001.md` exited 0. Four
+  // gates skipped — spec approval, plan, build, review — with no refusal and no record. The
+  // `Edit(./board/6-done/**)` deny rule does not help: permission rules never reach Bash.
+  //
+  // `nexa-move` is the transition function — it refuses a from→to pair the pipeline does not
+  // define, runs that transition's guards, and rolls the move back if one refuses. This points
+  // at it rather than reimplementing the check, because two implementations of one rule is how
+  // `check.mjs` and `card-gate.mjs` came to disagree about the same board.
+  //
+  // Only `board/<stage>/` → `board/<other-stage>/`. Renaming a card inside its own stage, or
+  // moving anything else, is not a transition and stays silent.
+  // ── a heredoc DOCUMENTING the command is not the command ──────────────────
+  //
+  // Caught live: an edit replacing the `git mv` instructions in the docs was itself refused,
+  // because the Python heredoc performing the replacement contained the string it was removing.
+  // The file already records this failure mode for the discard rule — *"a guard that fires on
+  // a read-only command is how `touch .nexa-allow-discard` becomes a reflex"* — and the new
+  // rule shipped without the same defence.
+  //
+  // So the same treatment: quoted heredoc bodies and fenced blocks are stripped before matching.
+  // A heredoc that is genuinely performing the move still contains it OUTSIDE the body, and a
+  // constructed command remains outside this guard's reach either way — that limit is stated at
+  // the end of the writers list rather than implied away.
+  const prose = cmd
+    // <<'EOF' … EOF and <<"EOF" … EOF — a QUOTED delimiter means the shell does not expand the
+    // body, which is exactly the case where the body is data rather than commands.
+    .replace(/<<-?\s*(['"])(\w+)\1[\s\S]*?^\s*\2\s*$/gm, '')
+    .replace(/```[\s\S]*?```/g, '');
+  const mv = prose.match(/(?:^|[\s;&|])git\s+(?:-[^\s]+\s+)*mv\s+(?:-[^\s]+\s+)*["']?([^\s"';&|]+)["']?\s+["']?([^\s"';&|]+)["']?/);
+  if (mv) {
+    const stageOf = (p) => p.match(/(?:^|\/)board\/([^/]+)\//)?.[1] ?? null;
+    const a = stageOf(mv[1]); const b = stageOf(mv[2]);
+    if (a && b && a !== b) {
+      block('board-move-unguarded',
+`BLOCKED — moving a card between stages is a transition, and this bypasses every gate on it.
+
+    ${a} → ${b}
+
+\`git mv\` asks nothing. A card can cross four stages this way with no spec, no plan, no
+review and no record that it happened — measured, not hypothetical.
+
+Use the transition function instead, which refuses a move the pipeline does not define and
+runs that transition's guards:
+
+  nexa-move ${(mv[1].match(/(\d+)-/) ?? [, '<NNN>'])[1]} ${b}
+  nexa-move --list          every transition, and the guards on each
+  nexa-move <NNN> ${b} --dry-run
+
+If this genuinely is not a card transition — renaming, tidying, a fixture — NEXA_NO_CARD=1.`);
+    }
+  }
 
   // ── the hole that was not theory ─────────────────────────────────────────────
   //
@@ -288,9 +340,25 @@ if (input?.tool_name === 'Bash') {
   //
   // A quoted argument is one token no matter what is inside it. Each pattern now takes
   // `"…"`, `'…'` or a bare run, in that order, and the helper strips the quotes.
-  const Q = String.raw`(?:"([^"]+)"|'([^']+)'|([^\s"'|;&<>]+))`;
-  /** The first non-empty capture group in a match, which is the token whichever form it took. */
-  const tok = (m) => m.slice(1).find((g) => g != null && g !== '') ?? '';
+  // ── the third spelling of a path with a space, and it was a one-character bypass ──
+  //
+  // The quoted forms were added because this drive's name has a space in it. The BARE form
+  // still stopped at the first unescaped space, and a shell has a third way to write the same
+  // path — a backslash. Measured on the same repository, same command, three spellings:
+  //
+  //     sed -i "" s/a/b/ "code/x.js"                              → BLOCKED
+  //     sed -i "" s/a/b/ "/Volumes/T7 Shield/…/code/x.js"         → BLOCKED
+  //     sed -i "" s/a/b/ /Volumes/T7\ Shield/…/code/x.js          → ALLOWED
+  //
+  // `\ ` is the most idiomatic of the three, because it is what tab-completion produces. Any
+  // repository whose path contains a space had a bypass reachable by pressing Tab.
+  const Q = String.raw`(?:"([^"]+)"|'([^']+)'|((?:\\.|[^\s"'|;&<>])+))`;
+  /**
+   * The first non-empty capture group in a match, which is the token whichever form it took.
+   * Backslash escapes are undone, so `T7\ Shield` becomes `T7 Shield` and compares equal to the
+   * quoted spelling of the same path.
+   */
+  const tok = (m) => (m.slice(1).find((g) => g != null && g !== '') ?? '').replace(/\\(.)/g, '$1');
 
   const ARG = String.raw`(?:"[^"]*"|'[^']*'|[^\s"'|;&]+)`;   // one argument, quoted or not
   const writes = [
@@ -304,7 +372,44 @@ if (input?.tool_name === 'Bash') {
     // the pattern.
     new RegExp(String.raw`(?:^|[\s;&|])tee\s+(?:-[^\s]*\s+)*${Q}`, 'g'),
     new RegExp(String.raw`(?:^|[\s;&|])(?:truncate|dd)\s[^;&|]*\bof=${Q}`, 'g'),
+    // ── the writers a probe found walking straight past this list ──────────────
+    //
+    // Measured 2026-07-31 by feeding twenty ordinary write commands to this hook: four were
+    // blocked. The list above covers what somebody reaches for FIRST; everything below is what
+    // they reach for SECOND, which is the relevant set once the first attempt was refused.
+    //
+    // `python3 -c` and `node -e` matter most and are the least tractable — a shell is a
+    // programming language and an inline program can build its path at run time. What is
+    // matched is the LITERAL case: a quoted path sitting next to a write call. That is the
+    // careless reach, which is the one that actually happens; a constructed path stays
+    // allowed and is answered by review, exactly as this file already argues about heredocs.
+    // GREEDY on the intermediate arguments, so `${Q}` lands on the LAST token. Lazy, the
+    // expression matched `perl -i -pe s/a/b/ code/x.js` with `s/a/b/` as the path — it contains
+    // a `/`, so `looksLikePath` said yes — and the real target was never examined. The same
+    // trap as `tee` reading its destination as the input file, recorded a few lines above.
+    new RegExp(String.raw`(?:^|[\s;&|])perl\s+(?:-[^\s]*\s+)*-[^\s]*i[^\s]*\s+(?:-[^\s]*\s+)*(?:${ARG}\s+)*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])truncate\s+(?:-[^\s]*\s+)*(?:${ARG}\s+)*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])rm\s+(?:-[^\s]*\s+)*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])rsync\s+(?:-[^\s]*\s+)*(?:${ARG}\s+)*${Q}`, 'g'),
+    new RegExp(String.raw`(?:^|[\s;&|])(?:ed|ex)\s+(?:-[^\s]*\s+)*${Q}`, 'g'),
+    // `patch FILE < diff` names its target; `patch -p1 < diff` does not, and that form is
+    // caught by the `git apply` sibling below only when it is git. A bare `patch -p1` remains
+    // outside this guard and the file says so rather than implying otherwise.
+    new RegExp(String.raw`(?:^|[\s;&|])patch\s+(?:-[^\s]*\s+)*${Q}`, 'g'),
+    // Interpreter one-liners: the quoted path argument of a write call inside -c / -e.
+    new RegExp(String.raw`(?:writeFileSync|appendFileSync|createWriteStream|open)\s*\(\s*${Q}`, 'g'),
   ];
+  // ── what is still allowed, measured rather than guessed ────────────────────
+  //
+  // 18 of 20 write paths blocked, 0 of 10 read-only commands falsely refused (2026-07-31,
+  // `scratchpad/probe-space.mjs`). The two that remain are stated because a guard that implies
+  // completeness is worse than one whose edges are written down:
+  //
+  //   · `git apply patch.diff` — **the files written are inside the diff, not in the command.**
+  //     Catching it means parsing the patch, and the same is true of `patch -p1 < diff`. Left
+  //     to review and `git diff`, like the constructed-path case above.
+  //   · an UNQUOTED, UNESCAPED path containing a space — the shell splits it into two
+  //     arguments, so the command does not write there either. Allowing it is correct.
 
   // A bare word is not a path, and neither is anything still carrying shell syntax.
   //
@@ -397,6 +502,22 @@ Do one of:
 Editing: ${file}`);
 }
 
+// 0. A config that exists and cannot be read takes this guard down with it, so it is a refusal
+//    rather than a fallback. The old code caught the parse error and returned `['code']`, which
+//    in a `src/` project means "nothing is product code" — the guard allowing every edit,
+//    silently, because of a malformed brace. Refusing is noisy and recoverable; failing open is
+//    neither.
+if (!CODE_CFG.ok) {
+  block('config-unreadable', `BLOCKED — the workspace config exists but cannot be read, so this guard cannot tell
+product code from anything else.
+
+${CODE_CFG.why}
+
+Fix the JSON, or delete the file to fall back to the default ["code"]. This is refused
+rather than allowed because a guard that cannot see the tree it protects must not
+report that the tree is clean.`);
+}
+
 // 1. The workspace, the plan, and docs are edited by process work, not by cards.
 const rel = path.relative(ROOT, file);
 const isProductCode = isCode(file);
@@ -424,7 +545,7 @@ Editing product code with no card in build is how work drifts from the plan: the
 spec to check it against and no place to record what was decided.
 
 Do one of:
-  · move a card into board/3-build      git mv board/2-plan/NNN-*.md board/3-build/
+  · move a card into board/3-build      nexa-move <NNN> 3-build
   · create one                          cp templates/CARD.md board/0-backlog/NNN-slug.md
   · if this is genuinely not card work   NEXA_NO_CARD=1, and say why in the card later
 

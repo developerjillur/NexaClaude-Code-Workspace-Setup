@@ -474,7 +474,6 @@ nothing git tracks inside `plugin/` may be a symlink that escapes `plugin/`. The
 declared dependency now, which is what it should always have been — it is a published plugin
 with its own manifest, and vendoring links to it was never the shape.
 
-<!-- reflected-at: cf4d6d3 -->
 
 
 ---
@@ -539,3 +538,64 @@ restarting five times and saying so. The real answer sat in their log the whole 
 
 **A user reporting the same failure repeatedly is not a user who needs the explanation again.
 It is a signal that the explanation is wrong.**
+
+---
+
+## 2026-07-31 · Nine defects, one shape: the assertion nothing performs
+
+Reflected at `fcb26ea`, after a day that added `nexa-prove`, `nexa-move`, `pipeline.json`,
+`card-demands.mjs`, an OS sandbox and ~3,000 lines of change. **Nine defects were introduced by
+that work. Every one was caught by a control or a reviewer, and not one by the author.**
+
+Listed only because the shape is identical across all nine, which is the finding:
+
+| Where | The assertion | What actually happened |
+|---|---|---|
+| `check.mjs` | `✅ every card carries what its stage requires` | the child gate never started; `{}` parsed to zero findings |
+| `depth-check` | `depth-check clean` | scanned zero files, hardcoded to a private product's paths |
+| `card-gate` | placeholder rejection | the template's own italic hints answered every question |
+| `pipeline.json` | `guards: ['spec-section', …]` | `nexa-move` ran a different gate; the names executed nothing |
+| `move-card` | a rollback on refusal | `if (gate)` with no else — absent gate meant no check at all |
+| `move-card` | the transition function | `git mv` on a board that lives outside the repo; every move died |
+| `scan-secrets` | `[history-pass] N commits scanned` | a backtick killed the shell; the broadest rule never ran |
+| `kill-audit` | `SURVIVED` on eleven rules | it mutated a file nothing under test was reading |
+| `definition-of-done` | **`nexa-prove` green** | discharged by `- [x]`, so the one gate that runs the app never ran |
+
+### The pattern
+
+**A document asserting a check, and nothing performing it.** Not a lie — every one was written
+by someone who believed it, and in most cases the mechanism existed a few files away. The gap
+is always between the *claim* and the *execution*, and it is invisible from the side that
+wrote the claim, because writing the claim is what makes it feel done.
+
+This repository already knew this. `guard-coverage.mjs:78` records matching `@rules` against
+the example in its own comment. The `Write(path)` deny rules were inert for months. Both are
+the same defect, and both were fixed without anyone naming the class — so it recurred nine
+times in a single day, inside the work meant to remove it.
+
+### What to do differently, concretely
+
+- **A green tick must be the OUTPUT of an execution, never a synonym for one.** Wherever a
+  document says "X ran", something must have run X and read its exit code. `invariants-held`
+  is the pattern: the guard spawns the tool rather than matching a sentence about it.
+- **"Could not run" is a third state, and it must never round to "clean".** Five of the nine
+  are this exact rounding. Every gate now distinguishes ran-and-passed from could-not-run.
+- **Write the fixture against the configuration that SHIPS.** `nexa-move` had 432 fixtures and
+  every one built the board inside the scratch repo — the legacy layout. They tested the
+  author's mental model, which is the thing a test cannot afford to share.
+- **A fixture built from the real template, not a hand-written string.** The `**Verdict:** PASS`
+  regex was unsatisfiable by the workspace's own card format, and only a fixture reading
+  `templates/CARD.md` could see it.
+- **When a control catches you, the control is the evidence — not the inconvenience.** Six
+  times today the workspace refused its own author: untracked files, a stale README count, a
+  missing fixture, a rule id with no assertion, a drifted token budget, a heredoc false
+  positive. Each refusal was correct. That is what the controls are for, and it is the only
+  reason nine defects did not ship.
+
+### The measurement that says it worked
+
+`kill-audit` went from **11 survived, 2 unresolved** to **33 caught, 1 survived, 0 unresolved**
+— and the one survivor was the rule added that morning with nothing watching it. The audit
+found the author's newest work first, which is the correct behaviour and slightly humbling.
+
+<!-- reflected-at: fcb26ea -->

@@ -1,0 +1,218 @@
+{
+  "$comment": [
+    "THE PIPELINE, as data. One definition, several consumers.",
+    "",
+    "\u2500\u2500 why this file exists \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "",
+    "The nine stages were copy-pasted into eight places \u2014 card-gate's ORDER, check.mjs's",
+    "stages AND its STAGE_ORDER, bootstrap's STAGES, reflect.mjs, verify-install.mjs, the",
+    "AGENTS.md diagram and the /card move table. They had already drifted:",
+    "",
+    "  \u00b7 reflect.mjs iterated eight stages; check.mjs iterated nine (0-discovery was missing)",
+    "  \u00b7 card-gate's REQUIRED was cumulative; check.mjs's demands was not, so a requirement",
+    "    was discharged by moving past it. The two gates disagreed about the same board, and",
+    "    CI ran the looser one.",
+    "",
+    "An audit and a four-vendor council both landed on the same sentence from different",
+    "directions: the board is a state machine with no transition function. This is the first",
+    "half of the answer \u2014 states and transitions as data. `nexa-move` is the second half.",
+    "",
+    "\u2500\u2500 what this is NOT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "",
+    "Not an XState machine, and deliberately not an interpreter. **Git owns this state.** A",
+    "runtime holding the board in memory would be a second source of truth and a",
+    "reconciliation bug. What is borrowed from XState is the SHAPE \u2014 named states, explicit",
+    "transitions, guards as data rather than as regexes buried in two scripts \u2014 because that",
+    "shape is what makes a gate testable. `Verdict: BACK` satisfied the 5-verify gate for",
+    "weeks precisely because no fixture could ask what an anonymous regex does with a failing",
+    "verdict. See docs/XSTATE-LESSONS.md.",
+    "",
+    "\u2500\u2500 events, which the linear diagram never had \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "",
+    "The diagram shows one implicit event: forward. Real work rejects, abandons, reopens and",
+    "supersedes, and a card that fails review had nowhere defined to go \u2014 so it went wherever",
+    "somebody dragged it.",
+    "",
+    "`guards` name the checks a transition must satisfy. They are ids, not code: card-gate and",
+    "check.mjs own the implementations, and naming them here is what lets guard-coverage ask",
+    "for a firing fixture and a silent fixture per transition."
+  ],
+  "version": 1,
+  "states": [
+    "0-discovery",
+    "0-backlog",
+    "1-spec",
+    "2-plan",
+    "3-build",
+    "4-review",
+    "5-verify",
+    "6-done",
+    "7-operate"
+  ],
+  "initial": "0-discovery",
+  "transitions": [
+    {
+      "from": "0-discovery",
+      "to": "0-backlog",
+      "on": "ACCEPT",
+      "guards": [
+        "who-asked",
+        "todays-workaround",
+        "cost-of-status-quo",
+        "the-number-that-moves",
+        "kill-condition"
+      ]
+    },
+    {
+      "from": "0-backlog",
+      "to": "1-spec",
+      "on": "START",
+      "guards": []
+    },
+    {
+      "from": "1-spec",
+      "to": "2-plan",
+      "on": "SPECIFIED",
+      "guards": [
+        "spec-section",
+        "acceptance-criterion"
+      ]
+    },
+    {
+      "from": "2-plan",
+      "to": "3-build",
+      "on": "PLANNED",
+      "guards": [
+        "plan-table-filled",
+        "reuse-ladder-recorded",
+        "wip-limit"
+      ]
+    },
+    {
+      "from": "3-build",
+      "to": "4-review",
+      "on": "BUILT",
+      "guards": [
+        "build-section"
+      ]
+    },
+    {
+      "from": "4-review",
+      "to": "5-verify",
+      "on": "PASS",
+      "guards": [
+        "review-verdict-pass",
+        "review-score-at-least-3",
+        "reviewed-by"
+      ]
+    },
+    {
+      "from": "5-verify",
+      "to": "6-done",
+      "on": "VERIFIED",
+      "guards": [
+        "ticked-checklist",
+        "pasted-failure",
+        "where-errors-surface",
+        "invariants-held"
+      ]
+    },
+    {
+      "from": "6-done",
+      "to": "7-operate",
+      "on": "DEPLOYED",
+      "guards": []
+    },
+    {
+      "from": "7-operate",
+      "to": "6-done",
+      "on": "OBSERVED",
+      "guards": [
+        "observed-in-production",
+        "fed-back"
+      ]
+    },
+    {
+      "$comment": "Backward and sideways. A card that fails review had nowhere defined to go.",
+      "from": "4-review",
+      "to": "3-build",
+      "on": "REJECT",
+      "guards": []
+    },
+    {
+      "from": "5-verify",
+      "to": "3-build",
+      "on": "REJECT",
+      "guards": []
+    },
+    {
+      "from": "2-plan",
+      "to": "1-spec",
+      "on": "RETURN_TO_SPEC",
+      "guards": []
+    },
+    {
+      "from": "3-build",
+      "to": "1-spec",
+      "on": "RETURN_TO_SPEC",
+      "guards": []
+    },
+    {
+      "from": "6-done",
+      "to": "3-build",
+      "on": "REOPEN",
+      "guards": []
+    },
+    {
+      "from": "7-operate",
+      "to": "3-build",
+      "on": "REOPEN",
+      "guards": []
+    },
+    {
+      "$comment": "A card can always be abandoned or superseded, from anywhere, with no gate. Refusing to let somebody stop working on something is not a guardrail.",
+      "from": "*",
+      "to": "0-backlog",
+      "on": "PARK",
+      "guards": []
+    }
+  ],
+  "kinds": {
+    "$comment": "kind: on a card changes what it owes. Waivers make it cheaper; migration makes it dearer \u2014 see card-gate.mjs REQUIRED_BY_KIND.",
+    "feature": {
+      "waives": []
+    },
+    "bug": {
+      "waives": [
+        "who-asked",
+        "todays-workaround",
+        "cost-of-status-quo",
+        "the-number-that-moves",
+        "kill-condition"
+      ]
+    },
+    "control": {
+      "waives": [
+        "who-asked",
+        "todays-workaround",
+        "cost-of-status-quo",
+        "the-number-that-moves"
+      ]
+    },
+    "learning": {
+      "waives": [
+        "who-asked",
+        "todays-workaround",
+        "cost-of-status-quo"
+      ]
+    },
+    "migration": {
+      "waives": [],
+      "adds": [
+        "expand-contract",
+        "mixed-version",
+        "data-rollback"
+      ]
+    }
+  }
+}

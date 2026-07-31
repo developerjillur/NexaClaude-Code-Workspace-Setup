@@ -1,0 +1,97 @@
+{
+  "$comment": [
+    "The invariants whose failure costs money, as commands that RUN YOUR APPLICATION.",
+    "",
+    "Copy to `invariants.json` at your workspace root and replace every command with one that",
+    "exercises a real instance — a booted server, a real database, a replayed webhook. An",
+    "assertion against a mock proves the mock.",
+    "",
+    "Each command must EXIT NON-ZERO when the invariant is violated. That is the whole contract:",
+    "`nexa-prove` runs it and reads the exit code. Use your own test runner, curl + jq, a psql",
+    "script, whatever you already have — this does not care, and deliberately supplies no",
+    "assertion library, because the assertions depend on your schema and only you know it.",
+    "",
+    "── why these four ──────────────────────────────────────────────────────────",
+    "",
+    "They are the ones a passing unit suite does not catch and a paying customer does. Each was",
+    "named independently by a four-vendor council walking a multi-tenant SaaS through this",
+    "pipeline, and each reached 6-done with every existing gate green.",
+    "",
+    "Delete the ones that do not apply to you. Add your own — the `kind` is free text; the four",
+    "below simply carry the explanation `nexa-prove --list` prints. An invariant you did not",
+    "declare is one nothing proves, and the tool says so rather than implying coverage."
+  ],
+  "invariants": [
+    {
+      "id": "cross-tenant-read",
+      "kind": "tenant",
+      "what": "tenant A cannot read tenant B's document",
+      "why": "the breach. One missing predicate in one query, and it is a disclosure notice.",
+      "cwd": "code",
+      "command": "npm run test:invariant:tenant",
+      "timeoutSeconds": 300,
+      "$note": [
+        "What the command should actually do — the shape, not the syntax:",
+        "  1. boot the app against a real database (not sqlite-in-memory if you ship Postgres)",
+        "  2. create two tenants and a document owned by A",
+        "  3. as B, request A's document BY ID — expect 403/404, never 200",
+        "  4. repeat for every entry point, not just the HTTP route: the background worker, the",
+        "     export job, the admin tool, the search index. The route is usually correct; the",
+        "     worker that processes the same record by id is where the predicate goes missing.",
+        "  5. and once against the DATABASE directly, so row-level security is proved rather",
+        "     than assumed from application behaviour"
+      ]
+    },
+    {
+      "id": "webhook-replay",
+      "kind": "idempotent",
+      "what": "the same Stripe event delivered twice grants one entitlement and charges once",
+      "why": "the double charge. The provider retries; your queue retries after a crash. Both succeed.",
+      "cwd": "code",
+      "command": "npm run test:invariant:idempotency",
+      "timeoutSeconds": 300,
+      "$note": [
+        "  1. POST a real signed webhook payload",
+        "  2. POST the IDENTICAL payload again — same event id, same signature",
+        "  3. assert exactly one entitlement, one ledger row, one email",
+        "  4. then do it CONCURRENTLY, because the sequential case passes on code whose only",
+        "     protection is a check-then-insert race",
+        "  5. and assert the uniqueness is enforced by a DATABASE constraint, not by application",
+        "     code — application code is not there during the race"
+      ]
+    },
+    {
+      "id": "unauthenticated-refused",
+      "kind": "authz",
+      "what": "every mutating endpoint refuses an anonymous caller",
+      "why": "the open door. Usually one route added last week without the middleware.",
+      "cwd": "code",
+      "command": "npm run test:invariant:authz",
+      "timeoutSeconds": 180,
+      "$note": [
+        "  Enumerate the routes FROM THE ROUTER at runtime rather than from a list you maintain —",
+        "  a hand-maintained list is missing exactly the route somebody just added. Call each",
+        "  with no credentials and assert 401/403. This is the cheapest of the four to write and",
+        "  the one most likely to fire."
+      ]
+    },
+    {
+      "id": "previous-version-against-new-schema",
+      "kind": "migration",
+      "what": "the app version currently in production still works after this migration runs",
+      "why": "the rollback outage. `docker tag` restores code, never rows — see skills/deploy-gate §3a.",
+      "cwd": "code",
+      "command": "npm run test:invariant:migration",
+      "timeoutSeconds": 600,
+      "$note": [
+        "  1. restore a production-like snapshot",
+        "  2. run the migration",
+        "  3. boot the PREVIOUS release against the migrated schema and run its smoke tests",
+        "  4. assert the queue's in-flight payloads still deserialise under the old worker",
+        "",
+        "  If this cannot pass, the migration is not expand/contract and the release cannot be",
+        "  rolled back. That is a fact worth learning before the deploy rather than during it."
+      ]
+    }
+  ]
+}

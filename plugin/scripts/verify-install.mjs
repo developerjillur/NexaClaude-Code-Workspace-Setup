@@ -17,8 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-
-import { PLUGIN_ROOT, projectRootFor } from './hooks/roots.mjs';
+import { PLUGIN_ROOT, projectRootFor, stateRoot } from './hooks/roots.mjs';
 
 const PLUGIN = PLUGIN_ROOT;
 const { root: REPO } = projectRootFor(import.meta.url);
@@ -134,9 +133,26 @@ console.log('\n▸ a clean repository root');
   const d = repo();
   const s = session(d, 'Quote back, verbatim, any workspace-state notice you were given at the start of this session. If there was none, say NONE.');
   check('the session ran', !s.timedOut, `status ${s.status}`);
+  // ── these two asserted the pre-1.6.0 layout, and failed on a CORRECT install ──
+  //
+  // Until 2026-07-30 the scaffold wrote `board/` and `workspace.config.json` into the user's
+  // repository. Card 003 moved them to `~/.nexa/projects/<id>/` (`bootstrap.mjs:513-516`) and
+  // left this file checking the repository for them, so `nexa-verify-install` reported 2
+  // failures out of 15 against an installation with nothing wrong with it.
+  //
+  // A verifier that cries wolf is the same defect as a gate that passes silently: both teach
+  // the reader that the output is not worth reading. So the assertion follows the layout —
+  // five entries in the repo, everything else in the project's state directory.
   const stages = ['0-discovery', '3-build', '7-operate'];
-  check('the board was scaffolded', stages.every((x) => fs.existsSync(path.join(d, 'board', x))));
-  for (const f of ['workspace.config.json', 'AGENTS.md', 'CLAUDE.md', '.claudeignore',
+  const home = stateRoot(d);
+  check('the board was scaffolded into ~/.nexa/projects/<id>/',
+    !!home && stages.every((x) => fs.existsSync(path.join(home, 'board', x))),
+    `looked in ${home}`);
+  check('...and the repository did NOT receive a board',
+    !fs.existsSync(path.join(d, 'board')));
+  check('created config.json in the state directory',
+    !!home && fs.existsSync(path.join(home, 'config.json')), `looked in ${home}`);
+  for (const f of ['.nexa', 'AGENTS.md', 'CLAUDE.md', '.claudeignore',
     path.join('.claude', 'settings.json')]) {
     check(`created ${f}`, fs.existsSync(path.join(d, f)));
   }
