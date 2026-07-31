@@ -560,6 +560,7 @@ that four other defences did not catch was never a defence.**
 The design owes specific debts, and they are worth naming because each one changed something
 concrete:
 
+- **[shanraisshan/claude-code-best-practice](https://github.com/shanraisshan/claude-code-best-practice)** — the settings surface this workspace was a year behind on. Five things changed after reading it, and one of them is structural: **`sandbox.filesystem.denyWrite` refuses at the filesystem layer**, which is a categorical boundary under a `guard-edit` that matches command text and says in its own header that it cannot be complete. Also `disableBypassPermissionsMode` (bypass mode had been skipping every permission rule this workspace writes), `effortLevel` replacing the superseded `MAX_THINKING_TOKENS`, `fallbackModel`, and the `SessionEnd` event — which existed all along while `session-end.mjs` sat here as dead code
 - **[Anthropic's large-codebase guidance](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start)** — layered, directory-scoped `CLAUDE.md` instead of one file that rides every session
 - **[AGENTS.md](https://agents.md)** — the cross-tool contract format, read natively by Codex CLI, Cursor, Copilot, Aider, Zed, Windsurf and 28+ others
 - **[karpathy/llm-council](https://github.com/karpathy/llm-council)** — the three-stage council, adapted to local CLIs and given bias measurement
