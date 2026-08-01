@@ -5,6 +5,33 @@ README counts were wrong by hand before a check started counting the files inste
 
 ---
 
+## 1.17.1 — 2026-08-02
+
+**A hook that printed a node stack trace where a reason belongs.** `prompt-check` spawned
+`node scripts/reflect.mjs --check` relative to the PROJECT. That only resolves in a repo that
+vendored the scripts, and since card 003 none do — `./nexa` runs them from the plugin cache. So in
+every normal adopted project the spawn failed with MODULE_NOT_FOUND, the catch took node's first
+stderr line, and the user was told, on **every prompt**:
+
+    **The reflection is stale** — node:internal/modules/cjs/loader:1433
+
+The reflection was not stale. The check could not run. A control that cannot run reporting a
+finding instead of reporting that it could not run is the exact shape §3 exists to refuse.
+
+- `reflect.mjs` is resolved from `PLUGIN_ROOT`, so it is found wherever the plugin is installed.
+- `execFileSync` with an argument array rather than a shell string — no shell, nothing in the
+  resolved path can be interpreted.
+- A crash is now told apart from a verdict. `reflect --check` exits 1 with its verdict on stderr,
+  which is why stderr is read; but a stderr that looks like a node stack trace reports "could not
+  run" instead, because that is a different problem with a different fix.
+- The message a human now sees: *"docs/LEARNED.md has no `reflected-at` marker — run …"*.
+
+**The test for it had to be built somewhere the bug exists.** This repo vendors `scripts/`, so the
+hook resolves either way here and a first attempt passed with the bug still in — measured, by
+re-introducing the old spawn and watching it stay green. The fixture is now an adopted project with
+no `scripts/`, which is what a real one looks like. Mutation-checked: restore the old spawn and it
+fails, printing the stack-trace line.
+
 ## 1.17.0 — 2026-08-02
 
 **The release where the guard could finally reach Conductor.** `bootstrap.decide()` refused every

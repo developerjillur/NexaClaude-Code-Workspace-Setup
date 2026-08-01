@@ -491,8 +491,34 @@ console.log('\n\u25b8 prompt-check \u2014 silence in the normal case IS the feat
   const learned = path.join(ROOT, 'docs', 'LEARNED.md');
   const orig = fs.readFileSync(learned, 'utf8');
   fs.writeFileSync(learned, orig.replace(/reflected-at: (?:[0-9a-f]+|INITIAL)/i, 'reflected-at: 0000000'));
-  check('speaks when the reflection is stale', /reflection is stale/i.test(run(pc, {}).stdout));
+  const staleOut = run(pc, {}).stdout;
+  check('speaks when the reflection is stale', /reflection is stale/i.test(staleOut));
+
+  check('...with an actionable reason, never a node stack-trace line',
+    !/node:internal\/|throw err;|Cannot find module/.test(staleOut),
+    staleOut.trim().split('\n').find((l) => /reflection is stale/i.test(l)));
   fs.writeFileSync(learned, orig);
+
+  // **The condition the bug actually lived in: an adopted project that does NOT vendor the
+  // scripts.** THIS REPO DOES vendor them, so running the hook here resolves
+  // `node scripts/reflect.mjs` either way and the assertion above passes with the bug present —
+  // measured, by re-introducing the old spawn and watching it stay green. Since card 003 a normal
+  // adopted project has no `scripts/`: `./nexa` runs them out of the plugin cache. There the old
+  // code spawned MODULE_NOT_FOUND and printed node's first stderr line as the reason, on every
+  // prompt:
+  //     "**The reflection is stale** — node:internal/modules/cjs/loader:1433"
+  // So the fixture must be a project without `scripts/`, or this tests nothing.
+  {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-bare-'));
+    execFileSync('git', ['init', '-q'], { cwd: bare, stdio: 'ignore' });
+    fs.writeFileSync(path.join(bare, '.nexa'),
+      JSON.stringify({ nexaId: 'testfixture000000', adopted: new Date(0).toISOString() }));
+    const out = run(pc, {}, { CLAUDE_PROJECT_DIR: bare }).stdout;
+    check('an adopted project with no vendored scripts/ never sees node internals',
+      !/node:internal\/|throw err;|Cannot find module/.test(out),
+      out.trim().split('\n').find((l) => /reflection/i.test(l)) || '(silent)');
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
 
   // It must cost little enough that nobody notices it on every prompt.
   const t0 = Date.now(); run(pc, {}); const ms = Date.now() - t0;

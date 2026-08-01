@@ -22,8 +22,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, isAdoptedWorkspace, statePath, paths } from './roots.mjs';
-import { execSync } from 'node:child_process';
+import { projectRoot, isAdoptedWorkspace, statePath, paths, PLUGIN_ROOT } from './roots.mjs';
+import { execSync, execFileSync } from 'node:child_process';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT } = projectRoot();
@@ -49,11 +49,38 @@ try {
 
   // 2 · Reflection staleness. This already refuses commits; finding out now is strictly better
   // than finding out after eight commits of work, which is what happened twice on 2026-07-28.
-  try {
-    execSync('node scripts/reflect.mjs --check', { cwd: ROOT, stdio: 'pipe', timeout: 4000 });
-  } catch (e) {
-    const why = String(e.stderr ?? '').trim().split('\n')[0];
-    notes.push(`**The reflection is stale** — ${why || 'run node scripts/reflect.mjs'}. It will refuse the next commit.`);
+  //
+  // **Resolve the script from the PLUGIN, not from the project.** `node scripts/reflect.mjs` with
+  // `cwd: ROOT` only works in a repository that vendored the scripts — and since card 003 nothing
+  // does: `./nexa` runs them out of the plugin cache. So in every normal adopted project this
+  // spawn failed with MODULE_NOT_FOUND, and the catch below took Node's first stderr line —
+  // `node:internal/modules/cjs/loader:1433` — and printed it to the user as the REASON the
+  // reflection was stale. On every prompt. The reflection was not stale; the check could not run.
+  //
+  // That is the failure this workspace exists to refuse, in its own hook: a control that cannot
+  // run reporting a finding instead of reporting that it could not run. So the two cases are now
+  // separated — a real staleness verdict (exit 1 with a message on stdout) says so, and a check
+  // that could not execute at all says THAT, which is a different problem with a different fix.
+  const reflect = path.join(PLUGIN_ROOT, 'scripts', 'reflect.mjs');
+  if (fs.existsSync(reflect)) {
+    try {
+      // execFileSync, not execSync: no shell, so nothing in the resolved path can be interpreted.
+      execFileSync('node', [reflect, '--check'], { cwd: ROOT, stdio: 'pipe', timeout: 4000 });
+    } catch (e) {
+      // `reflect.mjs --check` exits 1 and puts its verdict on STDERR, so stderr is read here on
+      // purpose. What must still be separated is a verdict from a crash: if node itself failed to
+      // load the script, stderr is a stack trace whose first line is `node:internal/...`, and
+      // printing that as the reason is what produced
+      //     "**The reflection is stale** — node:internal/modules/cjs/loader:1433"
+      // on every prompt. Say "could not run" for that, because the fix is a different fix.
+      const err = String(e.stderr ?? '').trim();
+      const crashed = /^node:internal\/|^\s*throw err;|Cannot find module/m.test(err);
+      if (crashed) {
+        notes.push('**The reflection check could not run** — `reflect.mjs` failed to start. A tooling fault, not a stale reflection.');
+      } else {
+        notes.push(`**The reflection is stale** — ${err.split('\n').filter(Boolean)[0] || 'run `nexa-reflect`'}. It will refuse the next commit.`);
+      }
+    }
   }
 
   // 3 · Uncommitted work — but only when it GROWS.
