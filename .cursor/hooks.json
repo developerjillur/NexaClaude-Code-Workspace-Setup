@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "node plugin/scripts/hooks/agent-adapter.mjs guard-edit.mjs",
+        "timeout": 30,
+        "failClosed": true,
+        "matcher": "Shell|Write|Delete"
+      }
+    ]
+  }
+}

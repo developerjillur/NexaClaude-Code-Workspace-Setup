@@ -1,0 +1,5 @@
+# nexa-workspace: managed. Edit AGENTS.md, not this file.
+#
+# Aider reads nothing automatically — not AGENTS.md, not CONVENTIONS.md. This line is what
+# makes the contract reach it. Marked read-only so it is cached and never edited by the agent.
+read: [AGENTS.md]

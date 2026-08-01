@@ -62,8 +62,18 @@ const JSON_OUT = has('json');
 
 /** A marker so `--check` can tell OUR hook from one the user wrote, and never clobber theirs. */
 const MARK = '# nexa-workspace: managed. Edit AGENTS.md, not this file.';
-/** Bumped when the hook body changes, so `--check` can say "stale" rather than only "missing". */
-const VERSION = '1';
+/**
+ * Bumped when the hook body changes, so `--check` says "stale" rather than only "missing".
+ *
+ * **Bump it in the same edit that changes a body.** Version 1 shipped, then `scan-secrets` gained
+ * `--staged` and the hook body changed to use it — and this constant did not move, so every
+ * already-installed hook kept running the old command and `--check` reported it current. Caught
+ * by reading this repo's own pre-commit output on the very next commit: it printed
+ * "187 tracked file(s) scanned" where the new body asks for the staged set.
+ *
+ * A staleness marker that is not maintained is a freshness claim.
+ */
+const VERSION = '2';
 
 // ── layer 0 · the git hooks ─────────────────────────────────────────────────
 //

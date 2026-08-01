@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "node plugin/scripts/hooks/agent-adapter.mjs guard-edit.mjs"
+      }
+    ]
+  }
+}
