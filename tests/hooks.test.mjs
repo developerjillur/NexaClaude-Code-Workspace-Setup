@@ -377,8 +377,8 @@ console.log('\n▸ the first session in a fresh repo — one hook, zero commands
 
   // The repository gets what cannot live elsewhere, and nothing more.
   const inRepo = fs.readdirSync(arena).filter((f) => f !== '.git' && !f.startsWith('._')).sort();
-  check('the repository receives exactly five entries, none of them the board',
-    JSON.stringify(inRepo) === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+  check('the repository receives exactly six entries, none of them the board',
+    JSON.stringify(inRepo) === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md', 'nexa'].sort()),
     inRepo.join(', '));
 
   // …and the rest is in ~/.nexa, keyed by the project's path.
@@ -3211,6 +3211,11 @@ console.log('\n▸ nexa-portable — the same rules, for tools that have no hook
     fs.copyFileSync(path.join(PLUGIN, 'scripts', s), path.join(proj, 'plugin', 'scripts', s));
   }
   fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
+  // `--install` copies the portable runner out of templates/, and every git hook it writes goes
+  // through it — so a scratch project without templates/ gets hooks that correctly refuse for
+  // lack of ./nexa. A real install has it; this fixture must too, or it tests the wrong thing.
+  fs.mkdirSync(path.join(proj, 'plugin', 'templates'), { recursive: true });
+  fs.copyFileSync(path.join(PLUGIN, 'templates', 'nexa'), path.join(proj, 'plugin', 'templates', 'nexa'));
   const P = (...a) => spawnSync('node', [path.join(proj, 'plugin', 'scripts', 'portable.mjs'), ...a],
     { cwd: proj, encoding: 'utf8' });
   const commit = (msg) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', msg],

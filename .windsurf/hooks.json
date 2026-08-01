@@ -2,12 +2,12 @@
   "hooks": {
     "pre_write_code": [
       {
-        "command": "node plugin/scripts/hooks/agent-adapter.mjs guard-edit.mjs"
+        "command": "./nexa adapter guard-edit.mjs"
       }
     ],
     "pre_run_command": [
       {
-        "command": "node plugin/scripts/hooks/agent-adapter.mjs guard-edit.mjs"
+        "command": "./nexa adapter guard-edit.mjs"
       }
     ]
   }

@@ -16,18 +16,25 @@ something you **cannot infer from the code**.
 
 > ### Which of these rules can actually stop you depends on your tool
 >
-> Run **`nexa-portable --install`** once. It wires the same guard into every tool that has a hook,
-> and puts a `git` gate underneath all of them.
+> Run **`nexa-portable --install`** once. It writes **`./nexa`** — the one command that works in
+> every tool, because the plugin's own `nexa-*` commands are on PATH **only inside Claude Code**
+> (measured: a login shell Claude Code did not create has none of them). It then wires the guard
+> into every tool that has a hook, and puts a `git` gate underneath all of them.
+>
+> In a container that checked out your repository and nothing else — Codex cloud, CI — run
+> **`./nexa bootstrap`** from the setup script. Proven end to end: with no plugin and no `nexa` on
+> PATH, a commit adding an API key is refused and an ordinary commit passes.
 >
 > | Reading this in | What these rules are | How |
 > |---|---|---|
 > | **Claude Code** — CLI, VS Code, JetBrains, desktop | **refusals** | `PreToolUse` → `guard-edit` |
 > | **Cursor** | **refusals** | `.cursor/hooks.json` → `preToolUse` |
-> | **Codex CLI** | **refusals** | `.codex/hooks.json` → `PreToolUse` |
+> | **Codex CLI** | **refusals**, after one extra step | hooks are USER-level: `nexa-portable --codex-user` merges into `~/.codex/hooks.json`. **Measured: `<repo>/.codex/hooks.json` is NOT read by codex 0.144.6**, whatever the docs say — a probe hook there never ran |
 > | **GitHub Copilot** — CLI, cloud agent, VS Code | **refusals** | `.github/hooks/nexa.json` |
 > | **Windsurf / Devin Desktop** | **refusals** | `.windsurf/hooks.json` → `pre_write_code` |
 > | **Zed** | rules + declarative denies | reads `AGENTS.md`; `always_deny` in settings |
 > | **Antigravity, Codex cloud, ChatGPT app, Aider** | **prose** | no hook mechanism exists |
+> | **Claude desktop — Chat / Cowork tabs** | **prose** | skills and plugins there come from your claude.ai account, not from `~/.claude`. The **Code tab** is the CLI and is fully enforced |
 > | **all of the above** | **refused at `git commit`** | `pre-commit` + `pre-push` — layer 0 |
 >
 > **Exit 2 means "block" in all five hook dialects**, so one guard serves all of them;

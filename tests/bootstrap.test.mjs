@@ -143,7 +143,11 @@ console.log('\n▸ a clean repository root — the only case that writes');
   const inRepo = fs.readdirSync(r).filter((f) => f !== '.git' && !f.startsWith('._')).sort();
   check('the repository receives exactly the files that cannot live anywhere else',
     JSON.stringify(inRepo) === JSON.stringify(
-      ['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+      // `nexa` joined this list deliberately and it is the only EXECUTABLE here. The plugin's
+      // own `nexa-*` commands are on PATH only inside Claude Code — measured — so the contract
+      // told every other tool to run something that did not exist for it. It is POSIX shell,
+      // never loaded into a prompt, and costs no model context.
+      ['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md', 'nexa'].sort()),
     inRepo.join(', '));
   check('...and no board/, docs/ or templates/ among them',
     !inRepo.includes('board') && !inRepo.includes('docs') && !inRepo.includes('templates'));
@@ -478,7 +482,7 @@ console.log('\n▸ nexa-init — same policy as the hook, different trigger');
   check('--apply adopts it', applied.status === 0 && fs.existsSync(path.join(fresh, '.nexa')));
   check('...writing only what cannot live elsewhere',
     JSON.stringify(fs.readdirSync(fresh).filter((f) => f !== '.git' && f !== 'src').sort())
-      === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md'].sort()),
+      === JSON.stringify(['.claude', '.claudeignore', '.nexa', 'AGENTS.md', 'CLAUDE.md', 'nexa'].sort()),
     fs.readdirSync(fresh).join(', '));
   check('...and a second run is a no-op that says so',
     /Already adopted/.test(run(fresh).out));

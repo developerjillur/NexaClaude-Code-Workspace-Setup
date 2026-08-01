@@ -1,0 +1,153 @@
+#!/bin/sh
+# nexa — the one command that works in every tool.
+#
+#   ./nexa check          the gates
+#   ./nexa prove          run the application and assert the four invariants
+#   ./nexa portable --install
+#   ./nexa orchestrate --workers
+#   ./nexa bootstrap      fetch the workspace scripts into this repo
+#   ./nexa where          which scripts this repo will actually run, and from where
+#
+# ── why this file is committed to YOUR repository ───────────────────────────
+#
+# The workspace ships as a Claude Code plugin, and its scripts live in the plugin cache — not
+# here. Claude Code puts that cache's `bin/` on PATH for its own sessions, so `nexa-check` works
+# there and **nowhere else**. Measured: in a login shell Claude Code did not create,
+# `command -v nexa-check` returns nothing.
+#
+# So the contract told Codex CLI, Cursor, Aider and a bare terminal to run a command that did not
+# exist for them, and told Codex cloud — which checks out the repository and nothing else — to
+# run one that could not exist. A document instructing something nothing performs is the exact
+# defect this workspace catalogues; it had one of its own, pointed at every tool but one.
+#
+# This file is ~2 KB of POSIX shell, costs no model context, and resolves the scripts wherever
+# they actually are. It is the only executable the workspace asks to live in your repository.
+#
+# ── the resolution order, and why it is this order ──────────────────────────
+#
+#   1. $NEXA_HOME          you said so explicitly. Nothing should second-guess that.
+#   2. .nexa-workspace/    fetched by `./nexa bootstrap`, git-ignored. The only option that
+#                          survives a container with no plugin and no network at run time —
+#                          which is Codex cloud, where the setup script runs bootstrap once.
+#   3. the plugin cache    Claude Code users get this free. NEWEST version, not a pinned one:
+#                          a hook config naming a version stops working the day you upgrade.
+#   4. a sibling checkout  for working on the workspace itself.
+#
+# Absent all four it prints what to run. It never guesses and it never exits 0 having done
+# nothing, because "the gate is not installed" and "the gate passed" must not look alike.
+
+set -e
+
+# The repository root, resolved through symlinks, so `./nexa` works from a subdirectory too.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+ROOT=$(cd "$here" && git rev-parse --show-toplevel 2>/dev/null || echo "$here")
+
+find_scripts() {
+  # 1 · explicit
+  if [ -n "$NEXA_HOME" ] && [ -d "$NEXA_HOME/scripts" ]; then
+    echo "$NEXA_HOME/scripts"; return 0
+  fi
+  # 2 · vendored into this repo by `bootstrap`
+  for d in "$ROOT/.nexa-workspace/plugin/scripts" "$ROOT/.nexa-workspace/scripts"; do
+    [ -d "$d" ] && { echo "$d"; return 0; }
+  done
+  # 3 · the Claude Code plugin cache — newest version, never a pinned one
+  cache="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/nexa/nexa-workspace"
+  if [ -d "$cache" ]; then
+    # `sort -V` is not POSIX and is absent on macOS; sorting the version components
+    # numerically with sort -t. -k is, and gives the same answer for x.y.z.
+    newest=$(ls -1 "$cache" 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+    [ -n "$newest" ] && [ -d "$cache/$newest/scripts" ] && { echo "$cache/$newest/scripts"; return 0; }
+  fi
+  # 4 · a sibling checkout, for working on the workspace itself
+  for d in "$ROOT/../NexaClaude-Code-Workspace-Setup/plugin/scripts" "$ROOT/plugin/scripts"; do
+    [ -d "$d" ] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+
+cmd=${1:-}
+[ $# -gt 0 ] && shift
+
+if [ "$cmd" = "bootstrap" ]; then
+  dest="$ROOT/.nexa-workspace"
+  if [ -d "$dest" ]; then
+    echo "  $dest already exists — remove it to re-fetch." >&2
+    exit 0
+  fi
+  repo=${NEXA_REPO:-https://github.com/developerjillur/NexaClaude-Code-Workspace-Setup.git}
+  echo "  fetching the workspace into .nexa-workspace/ …"
+  git clone --depth 1 --quiet "$repo" "$dest"
+  # Git-ignored: it is a dependency, not your source. Appended rather than written, so an
+  # existing .gitignore is never replaced.
+  if ! grep -qx '.nexa-workspace/' "$ROOT/.gitignore" 2>/dev/null; then
+    printf '\n# the workspace scripts, fetched by ./nexa bootstrap\n.nexa-workspace/\n' >> "$ROOT/.gitignore"
+  fi
+  echo "  ✅ done. ./nexa check now works in any tool, including a container with no plugin."
+  exit 0
+fi
+
+SCRIPTS=$(find_scripts) || {
+  cat >&2 <<'MSG'
+
+  The workspace scripts are not reachable from this repository.
+
+  This is NOT a pass. Nothing was checked.
+
+  Fix it with one of:
+
+    ./nexa bootstrap                 fetch them into .nexa-workspace/ (git-ignored)
+    NEXA_HOME=/path/to/plugin ...    point at a checkout you already have
+
+  In Claude Code they are found automatically once the plugin is installed. In
+  Codex cloud or any container, run `./nexa bootstrap` from the setup script —
+  that container has the repository and nothing else.
+
+MSG
+  exit 2
+}
+
+if [ "$cmd" = "where" ] || [ -z "$cmd" ]; then
+  echo "  scripts: $SCRIPTS"
+  echo "  root:    $ROOT"
+  [ -z "$cmd" ] && echo "
+  ./nexa check | prove | claims | depth | secrets | coverage | mutate | move
+  ./nexa portable --install      wire every tool's hooks
+  ./nexa orchestrate --workers   which agents are installed here
+  ./nexa adapter <guard>         hook entry point (used by .cursor/, .codex/, .github/)
+  ./nexa bootstrap               fetch the scripts into this repo"
+  exit 0
+fi
+
+# The hook entry point every tool's config points at, so no config ever names a plugin path or a
+# version — both of which change under it.
+if [ "$cmd" = "adapter" ]; then
+  exec node "$SCRIPTS/hooks/agent-adapter.mjs" "$@"
+fi
+
+# Subcommand → script. Short names for the ones typed often; anything else is taken literally,
+# so a script added to the plugin needs no change here.
+case "$cmd" in
+  check)       f=check.mjs ;;
+  prove)       f=prove-invariants.mjs ;;
+  claims)      f=verify-claims.mjs ;;
+  depth)       f=depth-check.mjs ;;
+  secrets)     f=scan-secrets.mjs ;;
+  coverage)    f=guard-coverage.mjs ;;
+  mutate)      f=mutation-test.mjs ;;
+  move)        f=move-card.mjs ;;
+  portable)    f=portable.mjs ;;
+  orchestrate) f=orchestrate.mjs ;;
+  audit)       f=kill-audit.mjs ;;
+  attribution) f=gate-attribution.mjs ;;
+  ablation)    f=council/ablation.mjs ;;
+  council)     f=council-run.mjs ;;
+  *)           f="$cmd.mjs" ;;
+esac
+
+[ -f "$SCRIPTS/$f" ] || {
+  echo "  no such command: $cmd  (looked for $SCRIPTS/$f)" >&2
+  echo "  ./nexa   for the list" >&2
+  exit 2
+}
+exec node "$SCRIPTS/$f" "$@"

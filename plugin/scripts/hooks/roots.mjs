@@ -166,6 +166,24 @@ export function projectRootFor(metaUrl) {
 }
 
 export function projectRoot({ cwdFallback = false } = {}) {
+  // **An EXPLICIT project outranks an inference about the script's own location**, and that
+  // ordering was wrong until the portable runner exposed it.
+  //
+  // `./nexa bootstrap` vendors a full clone into `<repo>/.nexa-workspace/`, so the scripts then
+  // live inside something that looks exactly like a workspace — because it IS one. Every gate run
+  // through the runner therefore resolved ROOT to the VENDORED copy and inspected that instead of
+  // the adopter's repository. Measured: a commit adding an Anthropic key printed
+  // "199 staged file(s) scanned. ✅ No unexplained credentials." and passed. The gate ran, looked
+  // at the wrong tree, and returned the code that means all clear — the same shape as every other
+  // defect this workspace has catalogued, one layer further out.
+  //
+  // The comment below already said CLAUDE_PROJECT_DIR outranks the walk-up. It sat underneath a
+  // shortcut that made it unreachable whenever the plugin was itself inside a workspace.
+  const explicit = process.env.CLAUDE_PROJECT_DIR;
+  if (explicit && isDir(explicit) && path.resolve(explicit) !== path.resolve(PLUGIN_ROOT)
+      && looksLikeWorkspace(explicit)) {
+    return { root: path.resolve(explicit), source: 'CLAUDE_PROJECT_DIR', trusted: true };
+  }
   if (looksLikeWorkspace(PLUGIN_ROOT)) {
     return { root: PLUGIN_ROOT, source: 'script location', trusted: true };
   }

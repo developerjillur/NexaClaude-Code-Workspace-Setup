@@ -73,7 +73,7 @@ const MARK = '# nexa-workspace: managed. Edit AGENTS.md, not this file.';
  *
  * A staleness marker that is not maintained is a freshness claim.
  */
-const VERSION = '2';
+const VERSION = '3';
 
 // ── layer 0 · the git hooks ─────────────────────────────────────────────────
 //
@@ -98,9 +98,12 @@ ${MARK}
 # human at 1am do not have that hook — but all of them commit, so this is where they meet the
 # same rules. Skip deliberately with: git commit --no-verify
 set -e
-NEXA="\${NEXA_SCRIPTS:-$(dirname "$0")/../../plugin/scripts}"
-[ -d "$NEXA" ] || NEXA="$(dirname "$0")/../../scripts"
-[ -d "$NEXA" ] || { echo "nexa: scripts not found; skipping gates" >&2; exit 0; }
+# **Everything goes through ./nexa**, which resolves the scripts wherever they are — the plugin
+# cache, .nexa-workspace/, or $NEXA_HOME. The first version hardcoded ../../plugin/scripts, which
+# exists in the WORKSPACE repo and in no adopter's, and then exited 0 when it was missing: a
+# gate that skipped itself and reported success.
+ROOT=$(git rev-parse --show-toplevel)
+[ -x "$ROOT/nexa" ] || { echo "nexa: ./nexa is missing - run: nexa-portable --install" >&2; exit 1; }
 
 # **Only gates that are about THIS CHANGE.** The first version ran check.mjs here and it made
 # the repository uncommittable: check.mjs audits the WORKSPACE — board stages, .claude/skills,
@@ -114,18 +117,18 @@ NEXA="\${NEXA_SCRIPTS:-$(dirname "$0")/../../plugin/scripts}"
 #
 # (No backticks anywhere in these hook bodies: they close the JS template literal that holds
 # them, and they are command substitution in sh. Written with them once; it parsed as JS.)
-node "$NEXA/scan-secrets.mjs" --staged || exit 1
+"$ROOT/nexa" secrets --staged || exit 1
 
 CHANGED=$(git diff --cached --name-only --diff-filter=ACM)
 if [ -n "$CHANGED" ]; then
-  node "$NEXA/depth-check.mjs" --changed || exit 1
+  "$ROOT/nexa" depth --changed || exit 1
 fi
 
 # A card touched by this commit is checked against the stage it is sitting in. Cards not in the
 # diff are somebody else's business.
 for f in $CHANGED; do
   case "$f" in
-    */board/*.md|board/*.md) node "$NEXA/card-gate.mjs" "$f" || exit 1 ;;
+    */board/*.md|board/*.md) "$ROOT/nexa" card-gate "$f" || exit 1 ;;
   esac
 done
 `,
@@ -136,11 +139,10 @@ ${MARK}
 # The full git HISTORY secret scan. Too slow for every commit, and history is exactly what a
 # push exposes — a secret removed from the tree is still in the objects you are about to send.
 set -e
-NEXA="\${NEXA_SCRIPTS:-$(dirname "$0")/../../plugin/scripts}"
-[ -d "$NEXA" ] || NEXA="$(dirname "$0")/../../scripts"
-[ -d "$NEXA" ] || exit 0
+ROOT=$(git rev-parse --show-toplevel)
+[ -x "$ROOT/nexa" ] || exit 0
 
-node "$NEXA/scan-secrets.mjs" --history || exit 1
+"$ROOT/nexa" secrets --history || exit 1
 `,
 };
 
@@ -185,19 +187,32 @@ const HOOK_CONFIGS = [
       version: 1,
       hooks: {
         preToolUse: [{
-          type: 'command', command: `node ${rel} guard-edit.mjs`, timeout: 30,
+          type: 'command', command: `${rel} guard-edit.mjs`, timeout: 30,
           failClosed: true, matcher: 'Shell|Write|Delete',
         }],
       },
     }, null, 2) + '\n',
   },
   {
-    id: 'codex', name: 'Codex CLI', file: '.codex/hooks.json', verified: 'path',
+    // **MEASURED INERT on codex 0.144.6, and written anyway — with the reason stated.**
+    //
+    // The vendor documents `<repo>/.codex/hooks.json`. This binary does not read it: a probe hook
+    // placed there never ran, while `hook: PreToolUse` printed from the GLOBAL config, and
+    // `codex doctor` lists only `~/.codex/config.toml` as a configuration source. The schema
+    // itself is right — it is the same shape as the working entries in `~/.codex/hooks.json`.
+    //
+    // Kept because it is forward-compatible and costs nothing, and because deleting it would
+    // lose the one place the correct schema is written down. But `--check` reports it as INERT
+    // rather than as coverage, which is the rule this module states about config nothing reads.
+    //
+    // Codex hooks are USER-level, and `~/.codex/hooks.json` is a shared file — Orca writes to it
+    // here. `nexa-portable --codex-user` merges one entry in, with a backup, and only when asked.
+    id: 'codex', name: 'Codex CLI', file: '.codex/hooks.json', verified: 'schema; path is INERT on codex 0.144.6', inert: true,
     body: (rel) => JSON.stringify({
       hooks: {
         PreToolUse: [{
           matcher: '.*',
-          hooks: [{ type: 'command', command: `node ${rel} guard-edit.mjs` }],
+          hooks: [{ type: 'command', command: `${rel} guard-edit.mjs` }],
         }],
       },
     }, null, 2) + '\n',
@@ -206,7 +221,7 @@ const HOOK_CONFIGS = [
     id: 'copilot', name: 'GitHub Copilot', file: '.github/hooks/nexa.json', verified: 'path',
     body: (rel) => JSON.stringify({
       hooks: {
-        preToolUse: [{ type: 'command', command: `node ${rel} guard-edit.mjs` }],
+        preToolUse: [{ type: 'command', command: `${rel} guard-edit.mjs` }],
       },
     }, null, 2) + '\n',
   },
@@ -216,8 +231,8 @@ const HOOK_CONFIGS = [
     // says nothing on stdout for this dialect.
     body: (rel) => JSON.stringify({
       hooks: {
-        pre_write_code: [{ command: `node ${rel} guard-edit.mjs` }],
-        pre_run_command: [{ command: `node ${rel} guard-edit.mjs` }],
+        pre_write_code: [{ command: `${rel} guard-edit.mjs` }],
+        pre_run_command: [{ command: `${rel} guard-edit.mjs` }],
       },
     }, null, 2) + '\n',
   },
@@ -273,8 +288,11 @@ const BODY = (t) => (t.id === 'aider'
     : POINTER(t)));
 
 const gitDir = (() => {
-  try { return execFileSync('git', ['rev-parse', '--git-dir'], { cwd: ROOT, encoding: 'utf8' }).trim(); }
-  catch { return null; }
+  for (const cwd of [process.cwd(), process.env.CLAUDE_PROJECT_DIR, ROOT].filter(Boolean)) {
+    try { return execFileSync('git', ['rev-parse', '--git-dir'], { cwd, encoding: 'utf8' }).trim(); }
+    catch { /* try the next */ }
+  }
+  return null;
 })();
 
 /**
@@ -291,8 +309,23 @@ const gitDir = (() => {
  * rather than crashing, and the non-git case is already refused by --install.
  */
 const REPO = (() => {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: ROOT, encoding: 'utf8' }).trim(); }
-  catch { return ROOT; }
+  // **From the user's CWD first, not from the script's location.** `projectRootFor` answers
+  // "which workspace does this SCRIPT belong to", which for an installed plugin is the plugin
+  // cache and for this repository is this repository — neither of which is where the person
+  // typing `nexa-portable --install` is standing.
+  //
+  // Measured: run from `/tmp/ad3`, the install printed nine successes and wrote every config
+  // into the workspace repo instead. For an adopter it would have written their Cursor and Codex
+  // hooks into `~/.claude/plugins/cache/…`, where no tool looks and no repository carries them.
+  //
+  // A command the user typed means the repository the user is in. CLAUDE_PROJECT_DIR is the
+  // explicit override for a hook invoked with a different cwd; ROOT is the last resort.
+  for (const cwd of [process.cwd(), process.env.CLAUDE_PROJECT_DIR, ROOT].filter(Boolean)) {
+    try {
+      return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
+    } catch { /* not a repo from there — try the next */ }
+  }
+  return ROOT;
 })();
 
 const hookDir = (() => {
@@ -300,10 +333,13 @@ const hookDir = (() => {
   // `core.hooksPath` wins when set — a repo using husky or lefthook has moved them, and writing
   // to .git/hooks there produces a file git will never run.
   try {
-    const cfg = execFileSync('git', ['config', '--get', 'core.hooksPath'], { cwd: ROOT, encoding: 'utf8' }).trim();
-    if (cfg) return path.resolve(ROOT, cfg);
+    const cfg = execFileSync('git', ['config', '--get', 'core.hooksPath'], { cwd: REPO, encoding: 'utf8' }).trim();
+    if (cfg) return path.resolve(REPO, cfg);
   } catch { /* unset is the normal case */ }
-  return path.resolve(ROOT, gitDir, 'hooks');
+  // **Resolved against REPO, not ROOT.** `git rev-parse --git-dir` answers relatively (`.git`),
+  // and joining that to ROOT put an adopter's pre-commit hook inside the WORKSPACE repository —
+  // so the tool configs landed correctly and the gate underneath them did not.
+  return path.resolve(REPO, gitDir, 'hooks');
 })();
 
 const state = (name) => {
@@ -339,7 +375,25 @@ if (has('install')) {
     wrote++;
   }
   // ── layer 1 · wire the same guard into every tool that HAS a hook ─────────
-  const adapter = path.relative(REPO, path.join(PLUGIN_ROOT, 'scripts', 'hooks', 'agent-adapter.mjs'));
+  // **Every hook config names `./nexa adapter`, never a plugin path.** The first version wrote
+  // `path.relative(REPO, PLUGIN_ROOT/...)`, which in an adopter's repository resolves to
+  // `../.claude/plugins/cache/nexa/nexa-workspace/1.6.0/scripts/hooks/agent-adapter.mjs` — a path
+  // that escapes the repository, names one machine's home directory, PINS a version that changes
+  // the day they upgrade, and does not exist at all in a container that checked out the repo and
+  // nothing else. Four ways to be wrong in one string.
+  //
+  // `./nexa` is committed to the repository and resolves the scripts itself, so a config written
+  // today keeps working after an upgrade, on another machine, and in Codex cloud.
+  const adapter = './nexa adapter';
+  const runner = path.join(REPO, 'nexa');
+  if (!fs.existsSync(runner)) {
+    const src = path.join(PLUGIN_ROOT, 'templates', 'nexa');
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, runner);
+      try { fs.chmodSync(runner, 0o755); } catch { /* exFAT and Windows have no permission bits */ }
+      console.log('  ✅ ./nexa written — the entry point every tool config points at');
+    }
+  }
   let hooked = 0;
   for (const c of HOOK_CONFIGS) {
     const dest = path.join(REPO, c.file);
@@ -367,11 +421,72 @@ if (has('install')) {
   }
 
   console.log(`\n  ✅ ${wrote} git hook(s) written to ${path.relative(REPO, hookDir) || hookDir}${kept ? `, ${kept} left alone` : ''}`);
-  console.log(`  ✅ ${hooked} native tool hook(s) — Cursor, Codex, Copilot, Windsurf run the same guard`);
+  const inert = HOOK_CONFIGS.filter((c) => c.inert).map((c) => c.file);
+  console.log(`  ✅ ${hooked} native tool hook(s) written — Cursor, Copilot and Windsurf run the same guard`);
+  if (inert.length) {
+    console.log(`  ⚠  ${inert.join(', ')} is written but MEASURED INERT on codex 0.144.6 —`);
+    console.log('     that binary reads hooks only from ~/.codex/hooks.json. For Codex CLI:');
+    console.log('       nexa-portable --codex-user     merges one entry, with a backup');
+    console.log('     Until then Codex is covered by layer 0 — the commit gate — like any');
+    console.log('     tool without hooks.');
+  }
   console.log(`  ✅ ${pointed} instruction pointer(s) — each three lines, all pointing at AGENTS.md`);
   console.log('     These refuse EVERY tool — Cursor, Codex, Copilot, Aider, and a human.\n');
   console.log('  Skippable with --no-verify, deliberately: what this removes is the careless');
   console.log('  skip, not the considered one.\n');
+  process.exit(0);
+}
+
+// ── Codex CLI, which is user-level and shares its file ──────────────────────
+//
+// Separate from --install and opt-in, because it writes OUTSIDE the repository into a file other
+// tools own. Merging rather than replacing is not politeness, it is correctness: Orca keeps its
+// session hooks there, and clobbering them would break a tool the user did not ask us to touch.
+if (has('codex-user')) {
+  const home = process.env.CODEX_HOME || path.join(process.env.HOME ?? '', '.codex');
+  const f = path.join(home, 'hooks.json');
+  if (!fs.existsSync(home)) {
+    console.error(`\n  ${home} does not exist — Codex CLI does not appear to be installed.\n`);
+    process.exit(1);
+  }
+  let cfg = { hooks: {} };
+  if (fs.existsSync(f)) {
+    try { cfg = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) {
+      console.error(`\n  ${f} is not valid JSON — refusing to touch it. ${e.message}\n`);
+      process.exit(1);
+    }
+    const bak = `${f}.nexa-backup`;
+    if (!fs.existsSync(bak)) fs.copyFileSync(f, bak);
+    console.log(`  backup: ${bak}`);
+  }
+  cfg.hooks = cfg.hooks ?? {};
+  cfg.hooks.PreToolUse = cfg.hooks.PreToolUse ?? [];
+  // Idempotent: the marker is what makes running this twice safe, and what lets a later version
+  // find its own entry among somebody else's.
+  // **An explicit marker, not a substring of the command.** The first version matched
+  // `'nexa adapter'`, and the command contains `"$(…)/nexa" adapter` — a quote between the two
+  // words — so it never matched its own entry and every run appended another. Idempotency that
+  // depends on guessing your own output is not idempotency.
+  const MARKER = 'nexa-workspace-guard';
+  const mine = (g) => JSON.stringify(g).includes(MARKER);
+  if (cfg.hooks.PreToolUse.some(mine)) {
+    console.log('\n  already installed in ' + f + '\n');
+    process.exit(0);
+  }
+  cfg.hooks.PreToolUse.push({
+    hooks: [{
+      type: 'command',
+      // Absolute-repo-agnostic: it runs ./nexa from whatever repository Codex is working in, and
+      // does nothing when that repository is not a nexa workspace.
+      command: 'if [ -x "$(git rev-parse --show-toplevel 2>/dev/null)/nexa" ]; then '
+        + '"$(git rev-parse --show-toplevel)/nexa" adapter guard-edit.mjs; else cat >/dev/null; fi'
+        + ` # ${MARKER}`,
+      timeout: 20,
+    }],
+  });
+  fs.writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`);
+  console.log(`\n  ✅ merged into ${f} — other tools' entries were left alone.`);
+  console.log('     It is a no-op in repositories that do not carry ./nexa.\n');
   process.exit(0);
 }
 

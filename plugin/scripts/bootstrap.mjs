@@ -667,6 +667,19 @@ export function bootstrap(root, templatesDir, opts = {}) {
     createOnly(path.join(root, f), fs.readFileSync(path.join(templatesDir, f), 'utf8'), created);
   }
 
+  // ── ./nexa — the only executable this asks to live in your repository ──────
+  //
+  // Everything else here is markdown and config. This one is ~2 KB of POSIX shell and it exists
+  // because the plugin's `nexa-*` commands are on PATH **only inside Claude Code** — measured, in
+  // a login shell Claude Code did not create, `command -v nexa-check` returns nothing. So the
+  // contract told Codex CLI, Cursor, Aider and every container to run commands that did not exist
+  // for them. It costs no model context; it is not markdown and is never loaded into a prompt.
+  {
+    const runner = path.join(root, 'nexa');
+    createOnly(runner, fs.readFileSync(path.join(templatesDir, 'nexa'), 'utf8'), created);
+    try { fs.chmodSync(runner, 0o755); } catch { /* exFAT and Windows carry no permission bits */ }
+  }
+
   flush();                       // the files above are already on disk — record them now
   let settings;
   try {
