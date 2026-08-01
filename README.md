@@ -124,7 +124,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
 | **6 hook events** | including the one that refuses: no product edit without a card in build |
-| **15 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`… on your `PATH` |
+| **26 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`… on your `PATH` (`ls bin/` for all of them) |
 
 ### The first session, and one thing it cannot do
 

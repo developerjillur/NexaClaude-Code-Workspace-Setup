@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/developerjillur/all-cli-council",
-  "commit": "2029815398355eebac0ee7465d20194f756006af",
-  "vendored": "2026-07-31",
+  "commit": "c33f65cf531c59fe11a6cd8bbd4fb56b47d295cb",
+  "vendored": "2026-08-01",
   "licence": "MIT — Copyright (c) 2026 Jillur Rahman; see LICENSE.council at the repo root",
   "note": "Copied verbatim, no path rewriting. Update with: nexa-council-update"
 }

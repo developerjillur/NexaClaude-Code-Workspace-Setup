@@ -795,6 +795,13 @@ try {
         /### (\d+) commands —/],
       ['board stages', fs.existsSync(P.board)
         ? fs.readdirSync(P.board).filter((d) => !d.startsWith('._')).length : 0, null],
+      // **Added for the same reason `commands` was, and it had drifted further.** The README
+      // advertised "15 bare commands" while `bin/` shipped 26 — eleven commands on the reader's
+      // PATH that the README gave them no way to discover. `scripts`, `skills` and `commands`
+      // were each verified here; the one class of thing a user actually TYPES was not.
+      ['bare commands', fs.existsSync(path.join(PLUGIN_ROOT, 'bin'))
+        ? fs.readdirSync(path.join(PLUGIN_ROOT, 'bin')).filter((d) => !d.startsWith('.')).length : 0,
+        /\*\*(\d+) bare commands\*\*/],
     ];
     let drift = 0;
     for (const [label, actual, re] of counts) {

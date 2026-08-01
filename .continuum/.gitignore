@@ -7,3 +7,6 @@ screenshots/
 .env-provenance.json
 comms/*
 !comms/config.json
+telemetry/
+archive/transcripts/
+.pending-checkpoint
