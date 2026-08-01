@@ -14,6 +14,24 @@ Aider, Zed, Windsurf and 28+ other tools read this file natively.** Claude Code 
 Read this before the first edit of every session. It is short on purpose: everything here is
 something you **cannot infer from the code**.
 
+> ### Which of these rules can actually stop you depends on your tool
+>
+> **Every gate in this document is enforced by a Claude Code hook.** `guard-edit` refuses an
+> edit, `nexa-move` refuses a transition, `nexa-prove` refuses a card — all of them are
+> `PreToolUse` hooks and `bin/` commands that only Claude Code runs.
+>
+> So the same file means two different things:
+>
+> | Reading this in | What these rules are |
+> |---|---|
+> | **Claude Code** | **refusals.** The hook exits 2 and the edit does not happen |
+> | Codex CLI, Cursor, Copilot, Aider, Zed, Windsurf | **prose.** Every word applies; nothing enforces it |
+>
+> That was worth saying plainly, because a contract claiming 28+ readers while shipping
+> enforcement for one is a document whose strongest sentences are true for a minority of the
+> agents reading them. If you are not in Claude Code, treat everything below as a standard you
+> are trusted to keep — and run `nexa-check` yourself, because nothing will run it for you.
+
 **This file costs tokens on every single session**, so it earns its length or it gets shorter.
 `scripts/check.mjs` measures the real cost and **refuses when the stated number drifts more
 than 10%** — a comment claiming a budget it no longer meets is worse than no comment.

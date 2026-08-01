@@ -2639,6 +2639,54 @@ console.log('\n▸ move-card — an undefined transition is not a failed one');
   }
 }
 
+// ── gate-attribution · the workspace measuring its own controls ─────────────
+//
+// A council said the thing nothing here had checked: nothing shows the PROCESS gates catch real
+// defects. This workspace ships `measure-dont-claim` and a plan with 77 disproven claims, and
+// had never measured which of its own controls earn their keep.
+//
+// It reports rather than refuses, so what is asserted is that it stays HONEST: it must not
+// invent attributions, and it must keep saying what it cannot see.
+console.log('\n▸ gate-attribution — which control actually caught something');
+{
+  const script = [path.join(PLUGIN, 'scripts', 'gate-attribution.mjs'),
+    path.join(ROOT, 'scripts', 'gate-attribution.mjs')].find((p) => fs.existsSync(p));
+  const r = spawnSync('node', [script, '--json'], { cwd: ROOT, encoding: 'utf8' });
+  let out = null;
+  try { out = JSON.parse(r.stdout || ''); } catch { /* asserted below */ }
+  // The silent case, which guard-coverage rightly demands: on a normal workspace it ALLOWS —
+  // exits 0 and reports — rather than refusing. A measurement tool that fails on the ordinary
+  // path is one nobody runs, and then the measurement never happens at all.
+  check('gate-attribution allows the ordinary case — exit 0, machine-readable counts',
+    !!out && r.status === 0, `exit ${r.status}`);
+  check('...over a real corpus, not an empty one',
+    (out?.sentences ?? 0) > 20 && (out?.scanned ?? 0) > 10,
+    `${out?.sentences} sentences across ${out?.scanned} files`);
+
+  // The finding this exists to surface: the mutation audit and the fixtures catch far more than
+  // the process gates do. If that ever inverts, the pipeline has started earning its weight and
+  // this assertion should be the thing that tells us.
+  const c = out?.controls ?? {};
+  check('...and kill-audit + fixtures outrank card-gate and check.mjs',
+    (c['kill-audit'] ?? 0) + (c['a test fixture'] ?? 0) > (c['card-gate'] ?? 0) + (c['check.mjs'] ?? 0),
+    JSON.stringify(c));
+
+  // The honest half. A tool that measures detection and lets a reader hear "prevention" is the
+  // overclaiming this repo keeps catching in itself.
+  const human = spawnSync('node', [script], { cwd: ROOT, encoding: 'utf8' }).stdout ?? '';
+  check('...and says out loud that it measures DETECTION, not prevention',
+    /DETECTION, not prevention/.test(human));
+  check('...and names the controls it has never recorded catching anything',
+    /Never recorded catching anything/.test(human));
+
+  // It reports rather than gates, but its two usage errors must still REFUSE rather than
+  // print an empty table — a measurement tool that answers confidently about a control that
+  // does not exist is the overclaiming this whole script was written to expose.
+  const bogus = spawnSync('node', [script, '--show=no-such-control'], { cwd: ROOT, encoding: 'utf8' });
+  check('...and refuses an unknown control instead of reporting zero findings for it',
+    bogus.status === 2 && /no such control/.test(bogus.stderr), `exit ${bogus.status}`);
+}
+
 // ── prove-invariants · the only gate that runs the application ──────────────
 //
 // Two audits and a four-vendor council independently reached the same sentence: *every gate
