@@ -225,10 +225,22 @@ const HOOK_CONFIGS = [
     }, null, 2) + '\n',
   },
   {
-    id: 'copilot', name: 'GitHub Copilot', file: '.github/hooks/nexa.json', verified: 'path',
+    // **Schema corrected from a WORKING config, after mine failed silently.** The first version
+    // guessed `{hooks:{preToolUse:[{type,command}]}}` from the docs' prose. A real Copilot hook —
+    // Orca's, in `~/.copilot/hooks/orca.json` — is
+    // `{version:1, hooks:{PreToolUse:[{type:'command', bash:'…', timeoutSec:5}]}}`.
+    //
+    // Four of five fields were wrong: no `version`, the event capitalised differently, the
+    // command field is **`bash`** and not `command`, and the timeout is `timeoutSec`. Copilot
+    // accepted the file and ran nothing — measured, on a real `copilot -p` run: zero calls to the
+    // guard, file created.
+    //
+    // Reading a vendor's documentation is not measuring their product. Third time this month.
+    id: 'copilot', name: 'GitHub Copilot', file: '.github/hooks/nexa.json', verified: 'schema from a working config',
     body: (rel) => JSON.stringify({
+      version: 1,
       hooks: {
-        preToolUse: [{ type: 'command', command: `${rel} guard-edit.mjs` }],
+        PreToolUse: [{ type: 'command', bash: `${rel} guard-edit.mjs`, timeoutSec: 20 }],
       },
     }, null, 2) + '\n',
   },
@@ -445,6 +457,34 @@ if (has('install')) {
   process.exit(0);
 }
 
+// ── Copilot CLI, which is user-level but does NOT share a file ─────────────
+//
+// `~/.copilot/hooks/` holds one JSON per tool — Orca keeps `orca.json` there — so this writes
+// `nexa.json` beside it and never has to merge. Simpler than Codex, and safer: nothing of
+// anybody else's is touched.
+//
+// Repo-level `.github/hooks/nexa.json` is written by --install and, measured on Copilot CLI
+// 1.0.77, is not picked up: a real `copilot -p` run made zero calls to the guard and created the
+// file. Same shape as Codex — the docs describe a repo path, the product reads the user one.
+if (has('copilot-user')) {
+  const dir = path.join(process.env.HOME ?? '', '.copilot', 'hooks');
+  if (!fs.existsSync(path.dirname(dir))) {
+    console.error(`\n  ~/.copilot does not exist — Copilot CLI does not appear to be installed.\n`);
+    process.exit(1);
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, 'nexa.json');
+  const cmd = 'if [ -x "$(git rev-parse --show-toplevel 2>/dev/null)/nexa" ]; then '
+    + '"$(git rev-parse --show-toplevel)/nexa" adapter guard-edit.mjs; else cat >/dev/null; fi';
+  fs.writeFileSync(f, `${JSON.stringify({
+    version: 1,
+    hooks: { PreToolUse: [{ type: 'command', bash: cmd, timeoutSec: 20 }] },
+  }, null, 2)}\n`);
+  console.log(`\n  ✅ wrote ${f} — its own file, nothing of anyone else's touched.`);
+  console.log('     A no-op in repositories that do not carry ./nexa.\n');
+  process.exit(0);
+}
+
 // ── Codex CLI, which is user-level and shares its file ──────────────────────
 //
 // Separate from --install and opt-in, because it writes OUTSIDE the repository into a file other
@@ -478,8 +518,29 @@ if (has('codex-user')) {
   // depends on guessing your own output is not idempotency.
   const MARKER = 'nexa-workspace-guard';
   const mine = (g) => JSON.stringify(g).includes(MARKER);
+  // Reported on BOTH paths — freshly merged and already present. The first version printed it
+  // only after a merge, so the second run of the command, which is what somebody types when they
+  // are checking, said "already installed" and nothing about whether it RUNS.
+  const reportTrust = () => {
+    const toml = (() => {
+      try { return fs.readFileSync(path.join(home, 'config.toml'), 'utf8'); } catch { return ''; }
+    })();
+    const at = (ev) => (cfg.hooks[ev] ?? []).findIndex(mine);
+    const trusted = ['PreToolUse', 'PostToolUse'].every((ev) => at(ev) >= 0
+      && toml.includes(`${f}:${ev.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}:${at(ev)}:0`));
+    if (trusted) { console.log('  ✅ and Codex trusts it — the hooks will run.\n'); return; }
+    console.log('\n  ⚠  NOT YET ACTIVE. Codex runs a hook only once you have approved it, and an');
+    console.log('     untrusted hook is skipped in SILENCE — measured: with these installed and');
+    console.log('     untrusted, `codex exec` made zero calls to them and wrote the file anyway.');
+    console.log('     That is Codex defending itself against a repository injecting a hook.\n');
+    console.log('     Start it interactively once and approve the prompt:   codex\n');
+    console.log('     Until then Codex is covered by layer 0, the commit gate — verified to');
+    console.log('     refuse a secret Codex had written, with no trust in place.\n');
+  };
+
   if (cfg.hooks.PreToolUse.some(mine)) {
-    console.log('\n  already installed in ' + f + '\n');
+    console.log('\n  already merged into ' + f);
+    reportTrust();
     process.exit(0);
   }
   // PostToolUse as well as PreToolUse, and the reason is measured rather than belt-and-braces:
@@ -508,6 +569,8 @@ if (has('codex-user')) {
   fs.writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`);
   console.log(`\n  ✅ merged into ${f} (PreToolUse + PostToolUse) — other tools' entries were left alone.`);
   console.log('     It is a no-op in repositories that do not carry ./nexa.\n');
+
+  reportTrust();
   process.exit(0);
 }
 

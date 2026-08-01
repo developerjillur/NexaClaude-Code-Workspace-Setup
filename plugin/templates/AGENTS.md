@@ -29,8 +29,8 @@ something you **cannot infer from the code**.
 > |---|---|---|
 > | **Claude Code** — CLI, VS Code, JetBrains, desktop | **refusals** | `PreToolUse` → `guard-edit` |
 > | **Cursor** | **refusals** | `.cursor/hooks.json` → `preToolUse` |
-> | **Codex CLI** | **shell writes refused; its own editor not** | measured on 0.144.6. `PreToolUse` fires for **Bash only** — `apply_patch` reaches `PostToolUse`, after the write. A hook must also be **trusted** (`[hooks.state]` in `config.toml` holds a hash) — approve it on the first interactive run, or it is silently ignored |
-> | **GitHub Copilot** — CLI, cloud agent, VS Code | **refusals** | `.github/hooks/nexa.json` |
+> | **Codex CLI** | **refused — shell AND its own editor** | measured on 0.144.6. `PreToolUse` fires for **Bash only**; `apply_patch` reaches `PostToolUse`, so `--post` **undoes** it and keeps a copy. **A hook must be trusted first** — `[hooks.state]` in `config.toml` holds a hash, and an untrusted hook is skipped in silence. Run `codex` once interactively and approve |
+> | **GitHub Copilot** — CLI | **refusals**, proved | `nexa-portable --copilot-user` writes `~/.copilot/hooks/nexa.json`. Its own file, nothing shared. **Measured: the repo-level `.github/hooks/` path is not picked up by CLI 1.0.77**, and the documented schema is wrong in four fields — it is `{version, hooks:{PreToolUse:[{type, bash, timeoutSec}]}}` |
 > | **Windsurf / Devin Desktop** | **refusals** | `.windsurf/hooks.json` → `pre_write_code` |
 > | **Zed** | rules + declarative denies | reads `AGENTS.md`; `always_deny` in settings |
 > | **Antigravity, Codex cloud, ChatGPT app, Aider** | **prose** | no hook mechanism exists |
