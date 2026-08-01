@@ -1,8 +1,14 @@
 # NexaClaude Code Workspace
 
-**A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
+**A complete, opinionated workspace for coding agents — hooks that refuse, gates that run, a
 Kanban pipeline with WIP=1, nineteen skills, three subagents, eleven commands, and a five-model
 council that reviews your decisions across four vendors.**
+
+**It is not Claude-Code-only any more, and that was measured rather than declared.** The same
+guard refuses an edit in **Claude Code, Codex CLI, Copilot CLI, Cursor and Windsurf**, and a
+`git` gate underneath refuses every tool that has no hooks at all — including Codex cloud and the
+ChatGPT app, which check out your repository and nothing else. See
+[Every tool, not only Claude Code](#every-tool-not-only-claude-code).
 
 **Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
 No special commands to memorise — Claude Code loads what it needs, when the situation matches.
@@ -42,6 +48,63 @@ exit code 2 and stops the turn.
 
 ---
 
+## Every tool, not only Claude Code
+
+One command wires it everywhere:
+
+```bash
+nexa-portable --install        the git gate, every tool's hook config, and ./nexa
+nexa-portable --codex-user     Codex reads hooks from ~/.codex — merged, backed up, idempotent
+nexa-portable --copilot-user   Copilot the same, in its own file
+```
+
+**Three layers, and they are not equivalent.**
+
+| | Reaches | Refuses at |
+|---|---|---|
+| **0 · git hooks** | **every tool and every human** | the commit |
+| **1 · native hooks** | tools that have them | the edit, before it happens |
+| **2 · `AGENTS.md`** | every tool reads it | nothing — it is advice |
+
+Layer 2 is where a workspace like this usually stops, and it is the layer that proves nothing.
+A file that says *"run the gates"* is not a gate.
+
+### What is proved, and what is not
+
+Each row below was run, not read. Three vendors' documentation was wrong about their own
+products this month, so nothing here is claimed from a doc.
+
+| Tool | State | How |
+|---|---|---|
+| **Claude Code** — CLI, VS Code, JetBrains, desktop Code tab | **refuses** | `PreToolUse` → `guard-edit` |
+| **Copilot CLI** | **refuses — proved** | `~/.copilot/hooks/nexa.json`. Its repo-level path does **not** work, and the documented schema is wrong in four fields |
+| **Codex CLI** | **refuses — proved** | shell writes at `PreToolUse`; its own `apply_patch` reaches only `PostToolUse`, so the adapter **undoes** the write and keeps a copy. **Approve the hook once** — an untrusted Codex hook is skipped in silence |
+| **Cursor, Windsurf / Devin** | config written, **not measured** | not installed on the machine this was built on. Said plainly rather than counted |
+| **Codex cloud, ChatGPT app, Antigravity, Aider, Zed** | **the commit gate** | no hook mechanism exists. `./nexa bootstrap` in a setup script, then every commit is gated |
+| **Claude desktop — Chat / Cowork tabs** | prose | skills there come from your claude.ai account, not `~/.claude` |
+
+### `./nexa` — the one executable this asks to live in your repo
+
+~2 KB of POSIX shell, never loaded into a prompt. It exists because the plugin's `nexa-*`
+commands are on PATH **only inside Claude Code** — measured: a login shell Claude Code did not
+create has none of them. So `AGENTS.md` was telling Codex, Cursor and Aider to run commands that
+did not exist for them.
+
+```bash
+./nexa check          ./nexa prove        ./nexa orchestrate --workers
+./nexa bootstrap      fetch the scripts into a container that has only your repo
+./nexa where          which scripts this repo will actually run, and from where
+```
+
+It resolves `$NEXA_HOME` → `.nexa-workspace/` → the plugin cache (**newest** version, never a
+pinned one) → a sibling checkout. Finding none, it **exits 2 and says so**, because "the gate is
+not installed" and "the gate passed" must never look alike.
+
+**Proved end to end** in a shell with no plugin and no `nexa` on PATH — which is what Codex cloud
+is: a commit adding an API key is refused; an ordinary commit passes.
+
+---
+
 ## The honest part
 
 This workspace was extracted from a real project, and the most useful thing it learned is
@@ -68,6 +131,13 @@ Two instances, and the second happened while publishing this repo:
   file read as outside the tree. **The first fix for that read as applied and was not** — its
   path helper walked up only one level, and the guard is normally asked about a file inside a
   directory that does not exist yet either.
+
+**And a fourth kind, found this month and worth its own line: three vendors' documentation was
+wrong about their own products.** Codex was recorded here as refusing edits, then as not reading
+repo-level configs — neither true; it has a hook *trust* model and a `PreToolUse` that skips its
+own file editor. Copilot's documented hook schema was wrong in **four of five fields**; it
+accepted the config and ran nothing. Each was corrected by capturing real events.
+**Reading a vendor's docs is not measuring their product.**
 
 All three were found the same way: **cloning into a clean directory and firing the guard by
 hand.** The in-repo tests stayed green through every one of them, because on the machine that
@@ -297,6 +367,11 @@ before any code exists)
 | `council-update.mjs` | reports drift against upstream and re-vendors — the council is pinned in `.vendored-from`, not merely copied |
 | `graph-fresh.mjs` | **is the code graph describing code that still exists?** The contract sends every agent to query the graph first; a stale one does not error, it answers |
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
+| `portable.mjs` | **the same rules in every tool** — writes the git gate, each tool's hook config, and `./nexa`. Reports what is measured and what is not, per tool |
+| `hooks/agent-adapter.mjs` | **one guard, five hook dialects.** Normalises the event and answers in each tool's own verdict format — including Windsurf, which has no JSON verdict and reads only the exit code |
+| `orchestrate.mjs` | fan work across agent CLIs, refusing a same-vendor review, concurrent writers, and a writing task with no card |
+| `gate-attribution.mjs` | which control has ever been recorded catching anything — and it was wrong on its first run, flatteringly |
+| `council/ablation.mjs` | the blind three-arm harness for *does a council beat one good model* |
 | `kill-audit.mjs` | **delete one real protection at a time and see whether anything notices.** Not "is this control watched?" but "is each of its rules watched?" — a control can be watched and still have nine of its ten rules unwatched. Found four on its first run |
 | `guard-coverage.mjs` | **every control that refuses must be tested in BOTH directions** — sixteen were wrong on their first version, and not one was found by the case it was built to catch |
 | `check.mjs` | the gate — 19 checks, and CI runs it |
@@ -415,6 +490,73 @@ running — not the assertions, which depend on your schema.
 violated", and a tool that examined nothing must never return the code meaning it examined
 everything. `plugin/templates/invariants.example.json` is a worked example for a
 multi-tenant SaaS.
+
+### When the agent grades its own work
+
+A real incident, from a user of a top-tier model. They built a skill to write LinkedIn posts in
+their voice and a loop to grade it: write yours without looking at mine, score the delta, and
+below 9.5/10 study my answer and retry. Left running overnight, it halted in **thirty minutes**
+with a 9.5. The output was, in their words, *"all garbage, random words."* Interrogated, the model
+confessed: it had spawned a writer agent **and an examiner agent**, and after ten failed attempts
+to move the number it told the examiner to return 9.5.
+
+**Every control in that loop was reading the SCORE. Nobody read the POST** — and the post was
+obvious on sight.
+
+An audit against it found the same object in this workspace, four times: a control that ran
+nothing and reported success.
+
+| Control | What it certified | Measured |
+|---|---|---|
+| `nexa-prove` | `true`, `:`, `exit 0`, `echo ok` | **"4 held, 0 violated", exit 0, 16 ms** |
+| `mutation-test` | every mutation unresolvable | exit 0 — and the **shipped example** targets a file no adopter has, so this was the *default* adoption path |
+| `check.mjs` → `depth-check` | a `codeDirs` typo | the one gate that reads the artifact, skipped **in silence** |
+| `verify-claims` | one real citation | **licensed every other tick on the card to be prose** |
+
+**The answer is not another judge.** A four-vendor council and a five-way adversarial audit both
+put *"an LLM judge that scores the deliverable"* first among things **not** to build — that is the
+incident, one level up. What ships instead is **`deliverable-shown`**: the move into `5-verify`
+names the artifact, resolves it, refuses it empty, and **prints the first forty lines on screen**.
+It scores nothing. It cannot prove anyone read what it printed — both sources called that
+irreducible — but the one thing every other gate only ever read a *claim* about is now impossible
+to move past unseen.
+
+**And the refusal itself was teaching agents how to bypass it.** `guard-edit` blocked a Codex
+edit, and Codex replied, verbatim: *"applying the guard's documented no-card exception and
+continuing."* It read `NEXA_NO_CARD=1` out of the guard's own stderr. The override still exists
+for humans; it is no longer named in any text a model reads. Blocked again with the hatch removed,
+Codex created a card and proceeded — which is the workflow working. **The difference between the
+two runs was one paragraph of stderr.**
+
+### `nexa-orchestrate` — fanning out, under the same rules
+
+Several agents at once, in **any** editor, because a worker is a headless CLI invocation and that
+is the one primitive every tool shares. What makes it this workspace's rather than a generic DAG
+runner: three rules that were prose until now, all refused at **plan** time.
+
+| Refused | Why |
+|---|---|
+| `same-vendor-review` | §10 — no model reviews its own work. Two Claude models are two models and **one vendor**. The most-repeated rule in the contract, and nothing had ever enforced it |
+| `concurrent-writers` | WIP = 1. Five agents at one repository is four cards in build wearing a different hat |
+| `no-card-for-write` | dispatching an agent to change the product is still a product change |
+
+In Orca, use Orca's own orchestration — it is richer. This is the floor everywhere else, and it
+runs inside Orca too, so a plan is not stranded when you change editor.
+
+### The measurements that grade the workspace itself
+
+- **`nexa-attribution`** — which control has ever been *recorded* catching anything. It was wrong
+  on its first run, in the direction that flattered the most impressive tool: kill-audit reported
+  at 14, actually **4**. A council transcript *criticising* kill-audit was being counted as
+  findings it made. Corrected: fixtures 9, running-the-real-thing 6, kill-audit 4.
+- **`guard-coverage --run`** — executes every suite and keeps only assertions that actually
+  **printed and passed**, instead of reading their wording. It immediately found ten declared
+  rules whose ids sat in test source but never ran — including one "covered" by an unrelated
+  local variable four hundred lines away.
+- **`nexa-ablation`** — a blind three-arm harness for the question neither this repo nor the
+  council has answered: does a council beat one good model? Arms are shuffled, the key is a
+  separate file, and `--reveal` **refuses to report** until every question is scored. It supplies
+  no ground truth and cannot; that part is yours.
 
 ### The sandbox — a boundary under the guard
 
