@@ -39,6 +39,13 @@ if (!cardPath || !fs.existsSync(cardPath)) {
   process.exit(1);
 }
 
+/**
+ * A command that exits 0 whatever the code does. Same list as `prove-invariants`, same reason:
+ * narrow on purpose, because a pattern that starts refusing real commands gets the gate switched
+ * off in an afternoon.
+ */
+const NO_OP = /^(?:\s*(?:true|:|exit\s+0|echo(?:\s+[^;&|]*)?)\s*(?:;|&&)?\s*)+$/i;
+
 const card = fs.readFileSync(cardPath, 'utf8');
 const section = (n) => card.split(new RegExp(`^## ${n} · `, 'm'))[1]?.split(/^## \d+ · /m)[0] ?? '';
 
@@ -168,15 +175,31 @@ if (!ticked.length) {
       checked++; citesHere++;
       const seen = [];
       const known = new Set();
+      const bodies = new Map();
       for (const cand of [path.join(ROOT, 'package.json'), ...codeDirs.map((d) => path.join(ROOT, d, 'package.json'))]) {
         if (!fs.existsSync(cand)) continue;
         seen.push(path.relative(ROOT, cand));
-        try { Object.keys(JSON.parse(fs.readFileSync(cand, 'utf8')).scripts ?? {}).forEach((k) => known.add(k)); }
-        catch { /* an unparseable package.json is not this check's business */ }
+        try {
+          const sc = JSON.parse(fs.readFileSync(cand, 'utf8')).scripts ?? {};
+          for (const [k, v] of Object.entries(sc)) { known.add(k); if (!bodies.has(k)) bodies.set(k, String(v)); }
+        } catch { /* an unparseable package.json is not this check's business */ }
       }
       if (!known.has(script)) {
         bad(`cited script does not exist: npm run ${script}`,
           `${line.trim().slice(0, 70)}\n       looked in: ${seen.join(', ') || 'no package.json found'}`);
+      } else if (NO_OP.test((bodies.get(script) ?? '').trim())) {
+        // **Existence was the whole check, and a script that exists can still do nothing.**
+        // `"test": "echo ok"` resolves, so a card citing `npm run test` as its proof passed —
+        // the same object as an `invariants.json` whose command is `true`, which this workspace
+        // found in `nexa-prove` on the same day.
+        //
+        // This reads the script BODY rather than running it: executing an adopter's test command
+        // at gate time costs minutes and can fail for reasons that are nobody's fault. Reading
+        // is weaker — `npm run test` calling a script that exits 0 unconditionally is one level
+        // down and invisible here — and it closes the one-line version, which is the version
+        // somebody reaches for when the gate is in the way.
+        bad(`cited script cannot fail: npm run ${script}`,
+          `it is \`${(bodies.get(script) ?? '').trim()}\` — a command that always exits 0 proves nothing`);
       }
     }
 

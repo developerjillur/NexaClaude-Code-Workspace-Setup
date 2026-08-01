@@ -96,9 +96,34 @@ const RULES = [
     id: 'always-true-test',
     what: 'assertion that cannot fail',
     // The one that makes a suite worthless while the count goes up.
+    // **The `1 === 1` branch was dead the whole time.** It was written as
+    // `/\b(true|1\s*===\s*1|!!1)\s*[,)]/` AND `!/===|!==|>=|<=|…/`, so any line containing `===`
+    // was excluded — including every line matching the `1 === 1` alternative itself. The exact
+    // example this rule is named after, `assert.ok(1 === 1)`, was invisible to it.
+    //
+    // The two shapes are genuinely different and need separate tests: a bare constant argument,
+    // and a comparison whose two sides are the same text. The second is why the blanket
+    // "contains ===" exclusion was wrong — a self-comparison is a comparison, and it is the
+    // dishonest one.
     test: (l) => {
-      if (!/\b(assert|check|expect|ok)\s*\(/.test(l)) return null;
-      if (/\b(true|1\s*===\s*1|!!1)\s*[,)]/.test(l) && !/===|!==|>=|<=|\.test\(|includes\(/.test(l)) {
+      // **The entry test used to require `assert(`, and `assert.equal(` has a dot.** So the whole
+      // rule never even started on the commonest spelling in a Node suite; `assert.ok(1 === 1)`
+      // only reached it because `ok(` matched by accident. A rule guarded by a pattern narrower
+      // than the thing it describes is a rule that reports clean on the code it was written for.
+      if (!/\b(?:assert|check|expect|should)\b[\w.$]*\s*\(/.test(l)) return null;
+      // A comparison of a thing with itself: 1 === 1, 'a' === 'a', x === x, true !== false.
+      const cmp = l.match(/([A-Za-z_$][\w.$]*|\d+|'[^']*'|"[^"]*"|`[^`]*`)\s*(===|==|!==|!=)\s*([A-Za-z_$][\w.$]*|\d+|'[^']*'|"[^"]*"|`[^`]*`)/);
+      if (cmp && cmp[1] === cmp[3]) {
+        return `assertion compares ${cmp[1]} with itself — it cannot fail`;
+      }
+      // `assert.equal(total, total)` — no operator at all, two identical arguments. A third
+      // shape, and the one that reads most like real work.
+      const two = l.match(/\b(?:assert|expect)\.?\w*\(\s*([A-Za-z_$][\w.$]*|\d+|'[^']*'|"[^"]*")\s*,\s*([A-Za-z_$][\w.$]*|\d+|'[^']*'|"[^"]*")\s*\)/);
+      if (two && two[1] === two[2]) {
+        return `assertion compares ${two[1]} with itself — it cannot fail`;
+      }
+      // A constant argument, with no comparison anywhere on the line to make it meaningful.
+      if (/\b(true|!!1)\s*[,)]/.test(l) && !/===|!==|>=|<=|\.test\(|includes\(/.test(l)) {
         return 'assertion is a constant — it cannot fail';
       }
       return null;

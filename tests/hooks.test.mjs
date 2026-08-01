@@ -1124,8 +1124,15 @@ console.log(`\n${'─'.repeat(72)}`);
 {
   console.log('\n▸ guard-wakeup — waiting is for things outside this session');
   const guard = path.join(HOOKS, 'guard-wakeup.mjs');
+  // **Isolated state, and it was not.** `loop-producing-nothing` keeps a streak counter on disk,
+  // and these fixtures fire a dozen wakeups in a row against an unchanging board — which is
+  // precisely what that rule refuses, so five correct SILENT cases went red the moment it
+  // shipped. They were also writing the counter into the real state directory, which a test has
+  // no business touching. A fresh directory per assertion isolates the streak and the side effect
+  // at once; the streak itself is tested deliberately in its own block below.
   const fire = (tool_input, tool_name = 'ScheduleWakeup') =>
-    run(guard, { tool_name, tool_input }).code;
+    run(guard, { tool_name, tool_input },
+      { NEXA_STATE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'wk-iso-')) }).code;
 
   const SILENT = [
     ['polling CI at its own pace', { delaySeconds: 480, reason: 'watching the CI run, about 8 minutes' }],
@@ -2969,6 +2976,54 @@ console.log('\n▸ The loop cannot edit its own stopping condition');
     fire(path.join(ROOT, 'README.md')).code === 0);
   check('[autopilot-budget] ...and on a file that merely mentions it in its name',
     fire(path.join(ROOT, 'docs', 'autopilot-notes.md')).code === 0);
+}
+
+// [loop-producing-nothing] — the two wakeup rules above read ONE tick at a time, and this hook
+// held no state at all, so a loop that had ticked twenty times and moved nothing was refused
+// only if it confessed in its own reason string. `skills/finish-dont-schedule` said "when a loop
+// has been ticking and producing nothing… stop it" with no counter behind the sentence.
+console.log('\n▸ A loop that keeps ticking and produces nothing');
+{
+  const st = fs.mkdtempSync(path.join(os.tmpdir(), 'wk-'));
+  const tick = () => run(path.join(HOOKS, 'guard-wakeup.mjs'),
+    { tool_name: 'ScheduleWakeup', tool_input: { delaySeconds: 1800, reason: 'watching the CI run' } },
+    { NEXA_STATE_DIR: st, NEXA_ALLOW_WAKEUP: '' });
+
+  const codes = [];
+  for (let i = 0; i < 6; i++) codes.push(tick().code);
+  check('[loop-producing-nothing] the first five ticks are allowed',
+    codes.slice(0, 5).every((c) => c === 0), codes.join(','));
+  check('[loop-producing-nothing] ...and the sixth is refused',
+    codes[5] === 2, `codes ${codes.join(',')}`);
+  const r = tick();
+  check('[loop-producing-nothing] ...naming the streak and the board, not just the delay',
+    /refused: loop-producing-nothing/.test(r.stderr) && /has not moved/.test(r.stderr));
+
+  // The silent halves, and they carry the weight: a counter that cannot be escaped, or that
+  // ignores real progress, turns a legitimate slow wait into a wall.
+  check('[loop-producing-nothing] ...and NEXA_ALLOW_WAKEUP=1 still gets through',
+    run(path.join(HOOKS, 'guard-wakeup.mjs'),
+      { tool_name: 'ScheduleWakeup', tool_input: { delaySeconds: 1800, reason: 'watching the CI run' } },
+      { NEXA_STATE_DIR: st, NEXA_ALLOW_WAKEUP: '1' }).code === 0);
+
+  // Progress resets it. "Produced nothing" is defined as the board not changing, so a card that
+  // moved must clear the streak — otherwise the guard punishes the run that did the work.
+  const moved = fs.mkdtempSync(path.join(os.tmpdir(), 'wk2-'));
+  fs.mkdirSync(path.join(moved, 'board', '3-build'), { recursive: true });
+  const t2 = (root) => run(path.join(HOOKS, 'guard-wakeup.mjs'),
+    { tool_name: 'ScheduleWakeup', tool_input: { delaySeconds: 1800, reason: 'watching the CI run' } },
+    { NEXA_STATE_DIR: moved, CLAUDE_PROJECT_DIR: root, NEXA_ALLOW_WAKEUP: '' }).code;
+  for (let i = 0; i < 5; i++) t2(ROOT);
+  fs.writeFileSync(path.join(ROOT, 'board', '3-build', 'zz-wk-probe.md'), '# probe\n');
+  try {
+    check('[loop-producing-nothing] ...and a board that MOVED resets the streak',
+      t2(ROOT) === 0);
+  } finally {
+    fs.rmSync(path.join(ROOT, 'board', '3-build', 'zz-wk-probe.md'), { force: true });
+  }
+
+  fs.rmSync(st, { recursive: true, force: true });
+  fs.rmSync(moved, { recursive: true, force: true });
 }
 
 console.log('\n▸ Controls that certified nothing');

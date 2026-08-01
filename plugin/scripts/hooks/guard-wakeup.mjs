@@ -42,7 +42,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { projectRoot, paths } from './roots.mjs';
+import { projectRoot, paths, statePath } from './roots.mjs';
 
 // Two roots — see roots.mjs. This one is the PROJECT: board, docs, config, git.
 const { root: ROOT } = projectRoot();
@@ -55,7 +55,7 @@ const read = () => new Promise((r) => {
   process.stdin.on('end', () => r(s));
 });
 
-// @rules admits-nothing-pending, short-delay-unexplained
+// @rules admits-nothing-pending, short-delay-unexplained, loop-producing-nothing
 //
 // The two rules below both refuse the reported incident, and for a day the fixture asserting
 // `=== 2` could not tell them apart — so deleting the rule written FOR that incident, matching
@@ -141,18 +141,67 @@ if (delay > 0 && delay < 1200 && !NAMES_SOMETHING_EXTERNAL.test(hay)) {
   );
 }
 
-// ── 3 · a quiet nudge when the board still has work ──────────────────────────
+// ── 3 · the loop that keeps ticking and produces nothing ─────────────────────
+//
+// The two rules above read one wakeup at a time. **This hook held no state at all**, so a loop
+// that had ticked twenty times and moved nothing was refused only if it CONFESSED in its own
+// reason string — and `skills/finish-dont-schedule` says "when a loop has been ticking and
+// producing nothing… stop it" with no counter behind the sentence.
+//
+// That is the shape the grader-capture incident ended in: repeated attempts, no progress, and
+// then a self-issued reason to stop. Here it is the mirror — repeated attempts, no progress, and
+// a self-issued reason to CONTINUE. Neither is visible from inside a single tick.
+//
+// "Produced nothing" is defined as the board not having changed: same card, same stage. That is
+// narrow on purpose. Real work happens that no card records, so this WARNS at three and refuses
+// at six, and the refusal names the override — a wakeup while genuinely waiting on a slow
+// external thing is legitimate and must not be blocked into silence.
+// Hoisted above both rules. It was declared inside rule 4's own try-block, so rule 3 referred to
+// a binding that did not exist yet — and rule 3's `catch` swallowed the ReferenceError, leaving a
+// guard that ran, threw, and allowed, in silence. Exactly the shape everything else in this file
+// exists to catch, written while fixing it. Found by watching it fail to fire, not by reading it.
+const buildCards = (() => {
+  try {
+    const build = path.join(P.board, '3-build');
+    return fs.existsSync(build)
+      ? fs.readdirSync(build).filter((f) => f.endsWith('.md') && !f.startsWith('._')) : [];
+  } catch { return []; }
+})();
+
+try {
+  const f = statePath(ROOT, 'wakeup-streak.json');
+  const board = buildCards.slice().sort().join('|');
+  let st = { board: '', ticks: 0 };
+  try { st = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { /* first tick */ }
+  const same = st.board === board;
+  const ticks = same ? (st.ticks ?? 0) + 1 : 1;
+  try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ board, ticks })); }
+  catch { /* a counter that cannot be written must not block a legitimate wakeup */ }
+
+  if (ticks >= 6 && process.env.NEXA_ALLOW_WAKEUP !== '1') {
+    block('loop-producing-nothing',
+      `BLOCKED — ${ticks} consecutive wakeups and the board has not moved.\n\n` +
+      `  board: ${board || '(no cards)'}\n` +
+      `  reason: ${reason.slice(0, 160) || '(none given)'}\n\n` +
+      `A loop that keeps scheduling itself while nothing changes is the failure this hook\n` +
+      `exists for, and it is invisible from inside any single tick — which is why the count\n` +
+      `is kept on disk rather than asked of you.\n\n` +
+      `Finish the card, or move it, or say plainly that the work is blocked and on what.\n\n` +
+      `Genuinely waiting on something slow outside? NEXA_ALLOW_WAKEUP=1`);
+  }
+  if (ticks === 3 || ticks === 4 || ticks === 5) {
+    console.error(`⚠ ${ticks} wakeups now with the board unchanged. At 6 this is refused.`);
+  }
+} catch { /* the state dir is optional; a missing counter never blocks */ }
+
+// ── 4 · a quiet nudge when the board still has work ──────────────────────────
 //
 // Not a refusal. A long wakeup with a card mid-build is legitimate — you may be waiting on a
 // review — but it is worth saying out loud, because "I will pick it up next tick" is how a
 // card sits in 3-build for a week.
 try {
-  const build = path.join(P.board, '3-build');
-  const cards = fs.existsSync(build)
-    ? fs.readdirSync(build).filter((f) => f.endsWith('.md') && !f.startsWith('._'))
-    : [];
-  if (cards.length) {
-    console.error(`⚠ ${cards[0]} is still in 3-build while this turn ends. If nothing outside is blocking it, finish it instead.`);
+  if (buildCards.length) {
+    console.error(`⚠ ${buildCards[0]} is still in 3-build while this turn ends. If nothing outside is blocking it, finish it instead.`);
   }
 } catch { /* the board is optional */ }
 
