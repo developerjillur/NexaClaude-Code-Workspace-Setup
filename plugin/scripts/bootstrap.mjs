@@ -86,10 +86,28 @@ export function decide(root, { allowTemp = false } = {}) {
   if (real(top) !== real(root)) {
     return { act: false, level: 'silent', reason: 'not the repository root' };
   }
-  // A `.git` FILE rather than a directory means a linked worktree or a submodule. Scaffolding
-  // there pollutes a checkout that shares history with the primary.
+  // A `.git` FILE rather than a directory means a linked worktree OR a submodule, and those two
+  // deserve opposite answers.
+  //
+  // A submodule is content the SUPERPROJECT tracks. Scaffolding there shows up as a dirty
+  // submodule in a repository whose owner never asked for it, so it stays refused.
+  //
+  // A linked worktree is not that. It has its own branch and its own working copy, and it is how
+  // Conductor gives every agent session a checkout — `~/conductor/workspaces/<repo>/<name>`, with
+  // `.git` a pointer file. Refusing there meant the guard could never once activate in the tool
+  // this workspace is most used from: `./nexa bootstrap` returned "linked worktree or submodule"
+  // and did nothing, silently, so no worktree on the machine had `./nexa` and every Codex and
+  // Claude hook fell through to its no-op branch. A guard that cannot reach the place the work
+  // happens is not a guard.
+  //
+  // The two are told apart by asking git, not by parsing the pointer file:
+  // `--show-superproject-working-tree` is the superproject's path inside a submodule and empty
+  // inside a worktree. Both were measured — see tests/bootstrap.test.mjs, which builds a real
+  // `git worktree add` and a real `git submodule add` rather than a fixture that mimics one.
   if (!isDir(path.join(root, '.git'))) {
-    return { act: false, level: 'silent', reason: 'linked worktree or submodule' };
+    if (git(root, ['rev-parse', '--show-superproject-working-tree'])) {
+      return { act: false, level: 'silent', reason: 'submodule' };
+    }
   }
   if (real(root) === real(os.homedir())) return { act: false, level: 'silent', reason: 'home directory' };
   // `allowTemp` exists for the fixtures, which necessarily live in mkdtemp. The hook never

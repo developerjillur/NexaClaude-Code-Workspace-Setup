@@ -58,7 +58,59 @@ returning 9.5, in this workspace's own code:
 **Falsifier.** If a card reaches `6-done` whose deliverable was never looked at and whose output
 is obviously wrong on sight, this guard did not work and printing is not enough.
 
-## 2026-07-30 — A `git worktree` checkout is not adopted, and two models disagree about it
+## 2026-08-02 — A linked worktree IS adopted; the 2026-07-30 refusal outlived its reason
+
+**Decision.** `bootstrap.decide()` now adopts a linked worktree and refuses only a submodule. The
+two are told apart by `git rev-parse --show-superproject-working-tree` — the superproject's path
+inside a submodule, empty inside a worktree — not by whether `.git` is a file, which both are.
+
+**This supersedes the 2026-07-30 entry below.** That decision was not wrong when it was made. Its
+premise expired.
+
+**The premise, and what happened to it.** The 2026-07-30 argument for refusing was asymmetric cost:
+*"Adopting one writes `board/`, `docs/` and `.claude/settings.json` into a checkout the user may
+delete tomorrow with `git worktree remove`, taking a card's history with it."* Card 003 then moved
+session state out of the repository entirely, to `~/.nexa/projects/<id>/`. Measured on 2026-08-02, a
+bootstrap writes six files into the checkout — `.claude/`, `.claudeignore`, `.nexa`, `AGENTS.md`,
+`CLAUDE.md`, `nexa` — and no `board/` and no `docs/`. Card history now lives outside the worktree and
+survives `git worktree remove`. The cost that justified the refusal is gone; what a deleted worktree
+loses is six regenerable files.
+
+**What the refusal cost, which nobody had measured.** Conductor gives every agent session a linked
+worktree at `~/conductor/workspaces/<repo>/<name>`. On a machine where all real work happens in
+Conductor, `./nexa bootstrap` therefore refused **everywhere**, silently, and no worktree ever got a
+`./nexa`. Both portable adapters key on exactly that file —
+
+```sh
+if [ -x "$(git rev-parse --show-toplevel)/nexa" ]; then ... else cat >/dev/null; fi
+```
+
+— so the Codex and Copilot hooks installed by `nexa-portable` fell through to their no-op branch on
+every edit. The guard was installed, enabled, and unreachable. Counted on the machine this was found
+on: **zero** repositories had `./nexa`.
+
+That is this workspace's own §10 failure shape — a control that reports itself present and never
+runs — sitting inside the thing built to refuse it.
+
+**Codex was right, and the record already said so.** The 2026-07-30 entry records Codex calling the
+refusal a false negative: *"a legitimate feature checkout created with `git worktree add` … is the
+user's active project root"*. It was overruled on the history-loss argument. With that argument
+retired, nothing remains on the refusing side but the nested-board worry — and a second board is not
+possible now that boards are not in the repository.
+
+**What stays refused, and why the distinction is not cosmetic.** A submodule is content the
+*superproject tracks*. Scaffolding there shows up as a dirty submodule in a repository whose owner
+never asked for it, and no amount of state relocation changes that. So `submodule` remains a
+never-fire rung, now under its own name rather than sharing one with worktrees.
+
+**Both directions are measured, with real git.** `tests/bootstrap.test.mjs` builds an actual
+`git worktree add` and an actual `git submodule add`. The fixture it replaced wrote a `.git` file by
+hand pointing at a path that did not exist — so `rev-parse --show-toplevel` failed, `decide()`
+returned "not a git repository", and the worktree rung was never reached. That assertion passed for
+weeks without testing the thing it named. Mutation-checked both ways on 2026-08-02: removing the
+submodule refusal fails the submodule test; restoring the old blanket refusal fails the worktree test.
+
+## 2026-07-30 — A `git worktree` checkout is not adopted, and two models disagree about it (SUPERSEDED 2026-08-02)
 
 **Decision.** `bootstrap.decide()` refuses any repository whose `.git` is a *file* rather than a
 directory — a linked worktree or a submodule. The user must run the workspace from the primary
@@ -142,7 +194,7 @@ object, their own `deny: ["Read(./prod-creds/**)"]` vanishes, the file stays val
 nothing ever errors.
 
 **Where it must never fire**, all required: git repo root only (`rev-parse --show-toplevel`
-equals `realpath(cwd)`); `.git` is a directory, so linked worktrees and submodules abort; not
+equals `realpath(cwd)`); a submodule aborts (linked worktrees are adopted — 2026-08-02); not
 `$HOME`, not under a temp dir; no tombstone in the plugin's own data directory; and both
 `workspace.config.json` and `board/` absent. A `board/` that is not ours aborts with one line —
 the fixture is a repo whose `board/index.html` is a deployed static site.
