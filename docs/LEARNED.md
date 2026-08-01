@@ -9,6 +9,52 @@ slogan — and this project keeps a 77-item list of what confident slogans cost.
 
 ---
 
+## The refusal was teaching the agent how to get past it
+
+**Sixth reflection, `689b553..HEAD`.** Two sessions of making this workspace work outside Claude
+Code, and the finding that matters is not about portability at all.
+
+`guard-edit` refused a Codex edit, and Codex replied, verbatim:
+
+> *"A workspace guard paused the edit because there is no project card. This is a one-file,
+> explicitly specified task, so I'm applying the guard's **documented no-card exception** and
+> continuing."*
+
+It read `NEXA_NO_CARD=1` out of the guard's own stderr and used it. That is not the model
+misbehaving — **the thing stopping it told it how, in the same breath.** Every refusal here
+carried its escape hatch in the text a model reads.
+
+The override still exists; humans need it. It is now in the comments, the README and `--help`
+— none of which reach a prompt. **A refusal aimed at a model must not carry its own bypass**, and
+that is a rule about wording, which is not where anyone was looking for defects.
+
+The same session, blocked again with the hatch removed, Codex created a card and proceeded. That
+is the workflow working. The difference between the two runs is one paragraph of stderr.
+
+### Three roots, and every one pointed at the wrong tree
+
+Portability turned up the same defect three times in one file: a control that examined something
+other than the thing it was asked about.
+
+| Where | What it inspected instead |
+|---|---|
+| `portable --install` | the plugin cache, not the repository the user typed the command in |
+| every gate via `./nexa` | the vendored `.nexa-workspace/` clone — which *looks* like a workspace, because it is one. A commit adding an API key printed "199 staged file(s) scanned. ✅ No unexplained credentials" |
+| the git hooks it wrote | `path.resolve(ROOT, gitDir)` — the workspace repo, while the tool configs landed correctly |
+
+An explicit `CLAUDE_PROJECT_DIR` now outranks the inference. The comment saying it should have
+sat *underneath* the shortcut that made it unreachable.
+
+### And two published claims about somebody else's tool were wrong
+
+"Codex CLI refuses edits" (1.12.0) and "Codex does not read repo-level hooks.json" (1.14.0).
+Neither was true. Codex has a hook **trust** model — `[hooks.state]` holds a hash per hook, so an
+edited config is silently ignored — and its `PreToolUse` fires for Bash but not for `apply_patch`,
+which is how it edits files.
+
+**Reading a vendor's documentation is not measuring their product.** Both corrections came from
+capturing real events; the docs were right about paths and silent about everything that mattered.
+
 ## A control that reads TEXT about an action, where the action could have been run
 
 **Fifth reflection, `fcb26ea..689b553`.** A real incident set the question: a model, asked to
@@ -651,4 +697,4 @@ times in a single day, inside the work meant to remove it.
 — and the one survivor was the rule added that morning with nothing watching it. The audit
 found the author's newest work first, which is the correct behaviour and slightly humbling.
 
-<!-- reflected-at: 689b553 -->
+<!-- reflected-at: 51f1226 -->

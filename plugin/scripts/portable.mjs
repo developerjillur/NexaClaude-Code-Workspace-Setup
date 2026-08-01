@@ -469,6 +469,7 @@ if (has('codex-user')) {
   }
   cfg.hooks = cfg.hooks ?? {};
   cfg.hooks.PreToolUse = cfg.hooks.PreToolUse ?? [];
+  cfg.hooks.PostToolUse = cfg.hooks.PostToolUse ?? [];
   // Idempotent: the marker is what makes running this twice safe, and what lets a later version
   // find its own entry among somebody else's.
   // **An explicit marker, not a substring of the command.** The first version matched
@@ -481,6 +482,18 @@ if (has('codex-user')) {
     console.log('\n  already installed in ' + f + '\n');
     process.exit(0);
   }
+  // PostToolUse as well as PreToolUse, and the reason is measured rather than belt-and-braces:
+  // Codex's PreToolUse fires for Bash only, so its own `apply_patch` edits are invisible there and
+  // reach PostToolUse after the write. `--post` undoes them and keeps a copy.
+  cfg.hooks.PostToolUse.push({
+    hooks: [{
+      type: 'command',
+      command: 'if [ -x "$(git rev-parse --show-toplevel 2>/dev/null)/nexa" ]; then '
+        + '"$(git rev-parse --show-toplevel)/nexa" adapter --post guard-edit.mjs; else cat >/dev/null; fi'
+        + ` # ${MARKER}`,
+      timeout: 20,
+    }],
+  });
   cfg.hooks.PreToolUse.push({
     hooks: [{
       type: 'command',
@@ -493,7 +506,7 @@ if (has('codex-user')) {
     }],
   });
   fs.writeFileSync(f, `${JSON.stringify(cfg, null, 2)}\n`);
-  console.log(`\n  ✅ merged into ${f} — other tools' entries were left alone.`);
+  console.log(`\n  ✅ merged into ${f} (PreToolUse + PostToolUse) — other tools' entries were left alone.`);
   console.log('     It is a no-op in repositories that do not carry ./nexa.\n');
   process.exit(0);
 }

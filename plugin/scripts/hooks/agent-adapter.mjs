@@ -43,6 +43,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -112,6 +113,23 @@ if (process.argv.includes('--dialects')) {
   process.exit(0);
 }
 
+/**
+ * `--post` — the after-the-fact mode, and it exists for exactly one measured reason.
+ *
+ * **Codex CLI's `PreToolUse` fires for `Bash` and not for `apply_patch`**, which is how it edits
+ * files. Captured across a full session: five PreToolUse events, all Bash; `apply_patch` appears
+ * only in `PostToolUse`, after the write. `PermissionRequest` never fires for it either, under
+ * any approval policy tried. So a Codex file edit cannot be PREVENTED on that version by anybody.
+ *
+ * What CAN be done is undo it. A PostToolUse hook exiting 2 surfaces its message to Codex's tool
+ * router — measured — so the agent is told, and this restores the file underneath.
+ *
+ * **Nothing is destroyed.** The written content is copied to the state directory first and the
+ * message names the copy. Deleting an agent's work silently would be a worse failure than the one
+ * this is fixing, and "the guard was wrong once" must not cost somebody an afternoon.
+ */
+const POST = process.argv.includes('--post');
+
 const guardArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 if (!guardArg) {
   console.error('usage: agent-adapter.mjs <guard.mjs>   (see --dialects)');
@@ -157,10 +175,26 @@ const filePath = dig(event, [
   'file_path', 'path', 'filePath', 'file', 'target_file',
   'arguments.file_path', 'arguments.path', 'args.file_path', 'input.file_path', 'input.path',
 ]);
+/**
+ * Codex's `apply_patch` arrives as a COMMAND whose text is a patch, not as a file path.
+ *
+ *   tool_input.command = "*** Begin Patch\n*** Add File: /abs/path\n+…\n*** End Patch"
+ *
+ * Handed to the guard as a shell command it matched nothing — the Bash rules look for `>`,
+ * `sed -i`, `tee`, and a patch header is none of those. So Codex's own editor was invisible to a
+ * guard that was, on paper, wired to it. The paths are right there in the header.
+ */
+const patchPaths = (text) => [...String(text).matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)]
+  .map((m) => m[1].trim());
+
 const command = dig(event, [
   'tool_input.command', 'command', 'tool_input.cmd', 'cmd',
   'arguments.command', 'args.command', 'input.command',
 ]);
+
+// A patch is a set of file edits, not a command. Each path is checked; the first refusal wins,
+// which is the same rule as a shell command touching several files.
+const patched = command ? patchPaths(command) : [];
 
 if (!dialect || (!filePath && !command)) {
   // Loud, and on stderr so it lands in the tool's log rather than in the model's context. The
@@ -175,13 +209,53 @@ if (!dialect || (!filePath && !command)) {
 }
 
 // Normalised into the Claude Code shape, which is what every guard in this workspace reads.
-const normalised = {
-  tool_name: command ? 'Bash' : 'Write',
-  tool_input: command ? { command } : { file_path: filePath },
-  _adapter: { dialect: dialect.id, original: event?.tool_name ?? event?.hook_type ?? null },
-};
+const ask = (input) => spawnSync('node', [guard], { input: JSON.stringify(input), encoding: 'utf8' });
 
-const r = spawnSync('node', [guard], { input: JSON.stringify(normalised), encoding: 'utf8' });
+let r; let target = filePath;
+if (patched.length) {
+  for (const f of patched) {
+    const one = ask({ tool_name: 'Write', tool_input: { file_path: f },
+      _adapter: { dialect: dialect.id, original: event?.tool_name ?? null } });
+    if (one.status === 2) { r = one; target = f; break; }
+    r = one;
+  }
+} else {
+  r = ask({
+    tool_name: command ? 'Bash' : 'Write',
+    tool_input: command ? { command } : { file_path: filePath },
+    _adapter: { dialect: dialect.id, original: event?.tool_name ?? event?.hook_type ?? null },
+  });
+}
+
+if (r.status === 2 && POST) {
+  // The write already happened. Save it, put the file back, and say where the copy went.
+  const abs = path.isAbsolute(target) ? target : path.join(event.cwd ?? process.cwd(), target);
+  const why = (r.stderr || 'refused by the workspace guard').trim();
+  let saved = null;
+  try {
+    if (fs.existsSync(abs)) {
+      const dir = path.join(os.tmpdir(), 'nexa-reverted');
+      fs.mkdirSync(dir, { recursive: true });
+      saved = path.join(dir, `${Date.now()}-${path.basename(abs)}`);
+      fs.copyFileSync(abs, saved);
+    }
+    const cwd = event.cwd ?? path.dirname(abs);
+    const tracked = (() => {
+      try { spawnSync('git', ['ls-files', '--error-unmatch', abs], { cwd, stdio: 'ignore' }); 
+        return spawnSync('git', ['ls-files', '--error-unmatch', abs], { cwd }).status === 0; } catch { return false; }
+    })();
+    if (tracked) spawnSync('git', ['checkout', '--', abs], { cwd });
+    else if (fs.existsSync(abs)) fs.rmSync(abs);
+  } catch (e) {
+    console.error(`${why}\n\nnexa: the edit could NOT be undone — ${e.message}. It stands; fix it by hand.`);
+    process.exit(2);
+  }
+  console.error(`${why}\n\nnexa: this edit was UNDONE, because your tool cannot be stopped before a write.\n`
+    + `      ${path.relative(event.cwd ?? process.cwd(), abs)} is back as it was.\n`
+    + (saved ? `      What you wrote is kept at ${saved} — nothing was lost.\n` : '')
+    + `      Put a card in board/3-build and try again.`);
+  process.exit(2);
+}
 
 if (r.status === 2) {
   const why = (r.stderr || 'refused by the workspace guard').trim();

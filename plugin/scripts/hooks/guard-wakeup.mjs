@@ -137,7 +137,8 @@ if (delay > 0 && delay < 1200 && !NAMES_SOMETHING_EXTERNAL.test(hay)) {
     `If you are genuinely polling, say what: "watching the CI run", "waiting for the deploy\n` +
     `to go green", "the council takes 10-30 minutes". A reason a reader cannot check is a\n` +
     `reason that will be wrong later and nobody will notice.\n\n` +
-    `Override, if you have read this: NEXA_ALLOW_WAKEUP=1`,
+    `A human can override this deliberately. Ask them rather than looking for the flag —\n`
+    + `a refusal that teaches its own bypass is one a model reads as permission.`,
   );
 }
 
@@ -187,7 +188,7 @@ try {
       `exists for, and it is invisible from inside any single tick — which is why the count\n` +
       `is kept on disk rather than asked of you.\n\n` +
       `Finish the card, or move it, or say plainly that the work is blocked and on what.\n\n` +
-      `Genuinely waiting on something slow outside? NEXA_ALLOW_WAKEUP=1`);
+      `Genuinely waiting on something slow outside? Say so, and let the human override it.`);
   }
   if (ticks === 3 || ticks === 4 || ticks === 5) {
     console.error(`⚠ ${ticks} wakeups now with the board unchanged. At 6 this is refused.`);

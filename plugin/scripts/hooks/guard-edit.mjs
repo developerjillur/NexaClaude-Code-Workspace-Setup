@@ -103,6 +103,22 @@ const read = () => new Promise((r) => {
 });
 
 // @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder, project-root-unknown, config-unreadable, board-move-unguarded, autopilot-budget
+//
+// ── the override is NOT named in any refusal the model reads ────────────────
+//
+// `NEXA_NO_CARD=1` exists for a human in a hurry and it stays. What changed is that the refusal
+// text no longer teaches it. Measured, verbatim, from a Codex session:
+//
+//   "A workspace guard paused the edit because there is no project card. This is a one-file,
+//    explicitly specified task, so I'm applying the guard's documented no-card exception and
+//    continuing."
+//
+// The agent read the escape hatch out of the guard's own stderr and took it. That is not the
+// agent misbehaving — it was told how, by the thing stopping it, in the same breath.
+//
+// A refusal aimed at a MODEL must not carry its own bypass. The bypass belongs where a person
+// looks for it: this comment, the README, and `nexa-portable --help` — none of which land in a
+// prompt. The env var still works; nothing that reaches the model says so.
 const allow = () => process.exit(0);
 
 // ── why a refusal carries an id ──────────────────────────────────────────────
@@ -209,7 +225,8 @@ runs that transition's guards:
   nexa-move --list          every transition, and the guards on each
   nexa-move <NNN> ${b} --dry-run
 
-If this genuinely is not a card transition — renaming, tidying, a fixture — NEXA_NO_CARD=1.`);
+If this genuinely is not a card transition — renaming, tidying, a fixture — a human can
+override it deliberately. Ask them; do not go looking for the flag.`);
     }
   }
 
@@ -505,7 +522,7 @@ with no card and no WIP check — the exact silent failure this guard exists to 
 Do one of:
   · run Claude Code from the workspace, or from a project that has been initialised
   · set CLAUDE_PROJECT_DIR to the project root
-  · if this genuinely is not card work                NEXA_NO_CARD=1
+  · if this genuinely is not card work                ask the human to override it
 
 Editing: ${file}`);
 }
@@ -578,7 +595,7 @@ spec to check it against and no place to record what was decided.
 Do one of:
   · move a card into board/3-build      nexa-move <NNN> 3-build
   · create one                          cp templates/CARD.md board/0-backlog/NNN-slug.md
-  · if this is genuinely not card work   NEXA_NO_CARD=1, and say why in the card later
+  · if this is genuinely not card work   ask the human; the override is theirs, not yours
 
 Editing: ${rel || file}`);
 }
