@@ -29,13 +29,18 @@ something you **cannot infer from the code**.
 > |---|---|---|
 > | **Claude Code** — CLI, VS Code, JetBrains, desktop | **refusals** | `PreToolUse` → `guard-edit` |
 > | **Cursor** | **refusals** | `.cursor/hooks.json` → `preToolUse` |
-> | **Codex CLI** | **refusals**, after one extra step | hooks are USER-level: `nexa-portable --codex-user` merges into `~/.codex/hooks.json`. **Measured: `<repo>/.codex/hooks.json` is NOT read by codex 0.144.6**, whatever the docs say — a probe hook there never ran |
+> | **Codex CLI** | **shell writes refused; its own editor not** | measured on 0.144.6. `PreToolUse` fires for **Bash only** — `apply_patch` reaches `PostToolUse`, after the write. A hook must also be **trusted** (`[hooks.state]` in `config.toml` holds a hash) — approve it on the first interactive run, or it is silently ignored |
 > | **GitHub Copilot** — CLI, cloud agent, VS Code | **refusals** | `.github/hooks/nexa.json` |
 > | **Windsurf / Devin Desktop** | **refusals** | `.windsurf/hooks.json` → `pre_write_code` |
 > | **Zed** | rules + declarative denies | reads `AGENTS.md`; `always_deny` in settings |
 > | **Antigravity, Codex cloud, ChatGPT app, Aider** | **prose** | no hook mechanism exists |
 > | **Claude desktop — Chat / Cowork tabs** | **prose** | skills and plugins there come from your claude.ai account, not from `~/.claude`. The **Code tab** is the CLI and is fully enforced |
 > | **all of the above** | **refused at `git commit`** | `pre-commit` + `pre-push` — layer 0 |
+>
+> **This table has been wrong twice, and both corrections came from running the tools rather than
+> reading their docs.** Codex was listed as refusing edits; then, when a probe hook appeared dead,
+> as not reading repo configs at all. Neither was true — it has a hook *trust* model, and its
+> PreToolUse simply does not cover its own file editor. Re-check it against your own versions.
 >
 > **Exit 2 means "block" in all five hook dialects**, so one guard serves all of them;
 > `scripts/hooks/agent-adapter.mjs` translates the event shape and the verdict. Where a tool has

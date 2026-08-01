@@ -194,20 +194,27 @@ const HOOK_CONFIGS = [
     }, null, 2) + '\n',
   },
   {
-    // **MEASURED INERT on codex 0.144.6, and written anyway — with the reason stated.**
+    // ── Codex CLI, measured on 0.144.6, and TWO earlier claims here were wrong ──
     //
-    // The vendor documents `<repo>/.codex/hooks.json`. This binary does not read it: a probe hook
-    // placed there never ran, while `hook: PreToolUse` printed from the GLOBAL config, and
-    // `codex doctor` lists only `~/.codex/config.toml` as a configuration source. The schema
-    // itself is right — it is the same shape as the working entries in `~/.codex/hooks.json`.
+    // First I wrote that Codex refuses edits. Then, when a probe hook in `<repo>/.codex/hooks.json`
+    // never ran, that Codex does not read repo-level configs. Both were wrong, and the truth is
+    // more interesting than either:
     //
-    // Kept because it is forward-compatible and costs nothing, and because deleting it would
-    // lose the one place the correct schema is written down. But `--check` reports it as INERT
-    // rather than as coverage, which is the rule this module states about config nothing reads.
+    //   1. **Codex has a hook TRUST model.** `config.toml` carries `[hooks.state]` with a
+    //      `trusted_hash` per hook file and event. Change a hooks.json and its hash no longer
+    //      matches, so Codex silently declines to run it — which is exactly what a repository
+    //      injecting a hook should meet, and it is why the probe appeared dead. Repo-level configs
+    //      ARE read: this machine's trust list contains one for another project.
+    //      `--dangerously-bypass-hook-trust` exists for automation and is how this was proved.
+    //   2. **PreToolUse fires for Bash and NOT for `apply_patch`.** Codex's own file editor
+    //      surfaces at PostToolUse — after the write. Captured across a full session: five
+    //      PreToolUse events, every one of them Bash; `apply_patch` appears only in PostToolUse.
     //
-    // Codex hooks are USER-level, and `~/.codex/hooks.json` is a shared file — Orca writes to it
-    // here. `nexa-portable --codex-user` merges one entry in, with a backup, and only when asked.
-    id: 'codex', name: 'Codex CLI', file: '.codex/hooks.json', verified: 'schema; path is INERT on codex 0.144.6', inert: true,
+    // So on this version: a shell write to product code is **refused** — proved end to end,
+    // `Command blocked by PreToolUse hook: refused: no-card-in-build`, file not created — and an
+    // `apply_patch` edit is **not blockable at all**. Half the surface, honestly labelled, with
+    // layer 0 catching the rest at commit.
+    id: 'codex', name: 'Codex CLI', file: '.codex/hooks.json', verified: 'path + schema, measured', partial: true,
     body: (rel) => JSON.stringify({
       hooks: {
         PreToolUse: [{
@@ -421,14 +428,15 @@ if (has('install')) {
   }
 
   console.log(`\n  ✅ ${wrote} git hook(s) written to ${path.relative(REPO, hookDir) || hookDir}${kept ? `, ${kept} left alone` : ''}`);
-  const inert = HOOK_CONFIGS.filter((c) => c.inert).map((c) => c.file);
-  console.log(`  ✅ ${hooked} native tool hook(s) written — Cursor, Copilot and Windsurf run the same guard`);
-  if (inert.length) {
-    console.log(`  ⚠  ${inert.join(', ')} is written but MEASURED INERT on codex 0.144.6 —`);
-    console.log('     that binary reads hooks only from ~/.codex/hooks.json. For Codex CLI:');
-    console.log('       nexa-portable --codex-user     merges one entry, with a backup');
-    console.log('     Until then Codex is covered by layer 0 — the commit gate — like any');
-    console.log('     tool without hooks.');
+  console.log(`  ✅ ${hooked} native tool hook(s) written — the same guard, in each tool's dialect`);
+  if (HOOK_CONFIGS.some((c) => c.partial)) {
+    console.log('  ⚠  Codex CLI, measured on 0.144.6:');
+    console.log('       · a hook must be TRUSTED before it runs — approve it on the first');
+    console.log('         interactive `codex` run, or the config is silently ignored');
+    console.log('       · PreToolUse fires for Bash and NOT for apply_patch, so a shell write');
+    console.log('         to product code is refused and Codex\'s own editor is not');
+    console.log('       · `nexa-portable --codex-user` also merges it at user level');
+    console.log('     Its apply_patch edits are caught at commit, by layer 0.');
   }
   console.log(`  ✅ ${pointed} instruction pointer(s) — each three lines, all pointing at AGENTS.md`);
   console.log('     These refuse EVERY tool — Cursor, Codex, Copilot, Aider, and a human.\n');
