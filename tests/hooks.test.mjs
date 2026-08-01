@@ -3044,6 +3044,99 @@ console.log('\n▸ A loop that keeps ticking and produces nothing');
 // means block in every one of them**. So the hard part is not the verdict, it is the INPUT —
 // each vendor names the tool and its arguments differently, and a guard that cannot find the
 // file path in the event is a guard that allows everything while looking installed.
+// ── orchestration, under the contract's own rules ───────────────────────────
+//
+// A fan-out is where three of this workspace's rules break quietest, and all three were prose:
+// §10 (no model reviews its own work), WIP = 1, and no product change without a card. Every
+// check below runs at PLAN time — a fan-out that discovers its own illegality half way through
+// has already spent the tokens and half-written the change.
+console.log('\n▸ nexa-orchestrate — the rules a fan-out breaks quietest');
+{
+  const orc = [PLUGIN, 'scripts', 'orchestrate.mjs'].join(path.sep);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'orc-'));
+  const plan = (o) => {
+    const f = path.join(dir, 'p.json');
+    fs.writeFileSync(f, JSON.stringify(o));
+    return spawnSync('node', [orc, '--plan', f], { cwd: ROOT, encoding: 'utf8' });
+  };
+  const rule = (r) => (r.stdout + r.stderr).match(/\[[a-z-]+\]/)?.[0] ?? '';
+
+  // §10, enforced for the first time. Two Claude models are two models and ONE vendor, which is
+  // exactly the case the rule is about — a different model is not an independent reading.
+  const same = plan({ tasks: [
+    { id: 'build', worker: 'claude-sonnet', mode: 'read', prompt: 'x' },
+    { id: 'review', needs: ['build'], worker: 'claude-fable', mode: 'read', notVendorOf: 'build', prompt: 'y' }] });
+  check('[same-vendor-review] a review on the same VENDOR as the build is refused',
+    same.status !== 0 && /same-vendor-review/.test(same.stdout + same.stderr), rule(same));
+  check('[same-vendor-review] ...naming §10 rather than only the rule id',
+    /§10/.test(same.stdout + same.stderr));
+
+  // ...and the silent half: a different vendor is the whole point, and must pass.
+  const cross = plan({ tasks: [
+    { id: 'build', worker: 'claude-sonnet', mode: 'read', prompt: 'x' },
+    { id: 'review', needs: ['build'], worker: 'codex', mode: 'read', notVendorOf: 'build', prompt: 'y' }] });
+  check('[same-vendor-review] ...while a cross-vendor review is allowed',
+    cross.status === 0, rule(cross) || `exit ${cross.status}`);
+
+  // WIP = 1. Two writers with no edge between them run together, which is two cards in build.
+  const par = plan({ tasks: [
+    { id: 'a', worker: 'codex', mode: 'write', prompt: 'x' },
+    { id: 'b', worker: 'claude-sonnet', mode: 'write', prompt: 'y' }] });
+  check('[concurrent-writers] two writing tasks with no dependency are refused',
+    /concurrent-writers/.test(par.stdout + par.stderr), rule(par));
+
+  // Sequencing them is the fix the message names, and it must then be accepted — a rule whose
+  // stated remedy does not work is worse than no rule.
+  const seq = plan({ tasks: [
+    { id: 'a', worker: 'codex', mode: 'write', prompt: 'x' },
+    { id: 'b', needs: ['a'], worker: 'claude-sonnet', mode: 'write', prompt: 'y' }] });
+  check('[concurrent-writers] ...and sequencing them removes that objection',
+    !/concurrent-writers/.test(seq.stdout + seq.stderr), rule(seq));
+
+  // A dispatched change is still a change: no card, no edit — the same rule guard-edit applies.
+  check('[no-card-for-write] a writing task with an empty 3-build is refused',
+    /no-card-for-write/.test(seq.stdout + seq.stderr), rule(seq));
+
+  const cyc = plan({ tasks: [
+    { id: 'a', needs: ['b'], worker: 'codex', mode: 'read', prompt: 'x' },
+    { id: 'b', needs: ['a'], worker: 'codex', mode: 'read', prompt: 'y' }] });
+  check('[cyclic-plan] a dependency loop is refused, naming the stuck tasks',
+    cyc.status === 2 && /a, b/.test(cyc.stdout + cyc.stderr), rule(cyc));
+
+  const bad = plan({ tasks: [{ id: 'a', worker: 'no-such-agent', mode: 'read', prompt: 'x' }] });
+  check('[unknown-worker] a worker not in the roster is refused at plan time',
+    bad.status === 2 && /unknown-worker/.test(bad.stdout + bad.stderr), rule(bad));
+
+  // [worker-failed] — a worker that cannot start must FAIL the run, not be counted as a task
+  // that did nothing wrong. `nexa-orchestrate` refuses an unknown worker at plan time, so this
+  // reaches dispatch only by naming a real roster entry whose binary is absent — proved here by
+  // pointing PATH at an empty directory so every worker is missing.
+  {
+    // A roster whose one worker EXISTS and always fails. A missing binary is refused at plan
+    // time and never reaches dispatch, so this is the only way to exercise the dispatch-failure
+    // path — via NEXA_WORKERS, which an adopter with different agents needs anyway.
+    const rosterFile = path.join(dir, 'workers.json');
+    fs.writeFileSync(rosterFile, JSON.stringify({
+      members: [{ id: 'codex', cmd: 'false', args: [] }],
+    }));
+    const f = path.join(dir, 'run.json');
+    fs.writeFileSync(f, JSON.stringify({ tasks: [{ id: 'a', worker: 'codex', mode: 'read', prompt: 'x' }] }));
+    const r = spawnSync('node', [orc, '--run', f],
+      { cwd: ROOT, encoding: 'utf8', env: { ...process.env, NEXA_WORKERS: rosterFile }, timeout: 120000 });
+    check('[worker-failed] a worker that runs and fails, fails the run',
+      r.status === 1 && /worker-failed/.test(r.stdout + r.stderr), `exit ${r.status}`);
+    check('[worker-failed] ...rather than reporting success over a task that produced nothing',
+      !/succeeded/.test(r.stdout));
+  }
+
+  // Nothing above may have executed anything: --plan validates and runs nothing, which is what
+  // makes it safe to call on a plan you have not read yet.
+  check('--plan dispatches nothing, whatever the verdict',
+    !/▹/.test(cross.stdout), cross.stdout.slice(0, 60));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log('\n▸ agent-adapter — the same refusal, in every tool that can refuse');
 {
   const ad = path.join(HOOKS, 'agent-adapter.mjs');

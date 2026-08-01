@@ -378,6 +378,7 @@ directory, symlinked**, because two copies drift. Invoke by name when the situat
 | `deploy-gate` | **every deploy, all six steps** — §11 |
 | `reflect` | when `check.mjs` says the reflection is stale, or before handing this to anyone |
 | `council` | before a decision that is expensive to reverse — five models, four vendors |
+| **`orchestration`** | **work that genuinely needs several agents at once** — and it is the exception, not the default. `nexa-orchestrate` runs the fan-out in ANY editor, and refuses a review on the build's own vendor (§10), two concurrent writers (WIP=1), and a writing task with no card |
 
 **Most work is a flow, not a skill.** The commonest mistake is hunting for the one skill that
 matches *"build this feature"* — there isn't one, because that is the whole board:

@@ -1,7 +1,7 @@
 # NexaClaude Code Workspace
 
 **A complete, opinionated workspace for Claude Code — hooks that refuse, gates that run, a
-Kanban pipeline with WIP=1, eighteen skills, three subagents, eleven commands, and a five-model
+Kanban pipeline with WIP=1, nineteen skills, three subagents, eleven commands, and a five-model
 council that reviews your decisions across four vendors.**
 
 **Install it as a plugin and open Claude Code in your repository. That is the whole of setup.**
@@ -74,7 +74,7 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **701 assertions across five suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
+beside the case it must catch. **712 assertions across five suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
 elsewhere, so the exact count moves by one — a number that drifts is worth saying so about rather
 than rounding into a claim.)
 
@@ -120,11 +120,11 @@ only after you have added the source yourself. Skip step 1 and the install repor
 | | |
 |---|---|
 | **8 plugins**, resolved automatically | `codex` (the second-model review path), `ponytail`, `code-review`, `feature-dev`, `github`, `code-simplifier`, `security-guidance`, `typescript-lsp` |
-| **18 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
+| **19 skills** | invoked by situation, not by name — `session-start`, `reuse-first`, `measure-dont-claim`, `review-gate`… |
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
 | **6 hook events** | including the one that refuses: no product edit without a card in build |
-| **27 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`… on your `PATH` (`ls bin/` for all of them) |
+| **28 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`, `nexa-orchestrate`… on your `PATH` (`ls bin/` for all of them) |
 
 ### The first session, and one thing it cannot do
 
@@ -255,7 +255,7 @@ refusal, not a note.
 
 ## What is in the box
 
-### 18 skills — `.agents/skills/`
+### 19 skills — `.agents/skills/`
 
 | Skill | When it fires |
 |---|---|
@@ -285,7 +285,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 43 scripts — `scripts/`
+### 44 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
