@@ -84,12 +84,43 @@ console.log('\n▸ where it must never fire — silently, because a hook that ta
   check('a subdirectory of a repository — the workspace belongs at the root',
     decide(sub, OPTS).reason === 'not the repository root', decide(sub, OPTS).reason);
 
-  // A linked worktree or a submodule has a .git FILE, not a directory.
-  const wt = repo({ init: false });
-  fs.writeFileSync(path.join(wt, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
+  // A linked worktree and a submodule BOTH have a `.git` FILE rather than a directory, and for a
+  // long time this rung refused both on exactly that test. That was wrong in the direction that
+  // mattered: Conductor hands every agent session a linked worktree, so the guard could never once
+  // activate in the tool the workspace is most used from — `./nexa bootstrap` returned "linked
+  // worktree or submodule" and did nothing, silently.
+  //
+  // These fixtures are REAL. The previous version wrote a `.git` file by hand pointing at a path
+  // that did not exist, so `git rev-parse --show-toplevel` failed and `decide()` returned "not a
+  // git repository" — the worktree rung was never reached and the assertion passed for the wrong
+  // reason. A fixture that mimics the shape instead of building it proves nothing about git.
+  const gitq = (cwd, args) => execFileSync('git', args, { cwd, stdio: 'ignore' });
+  const seed = (d) => {
+    fs.writeFileSync(path.join(d, 'README'), 'x\n');
+    gitq(d, ['add', '-A']);
+    gitq(d, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'seed']);
+  };
+
+  // A real linked worktree — `git worktree add`, the thing Conductor actually creates.
+  const wtPrimary = repo();
+  seed(wtPrimary);
+  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nexa-wt-')), 'ws');
+  trash.push(path.dirname(wt));
+  gitq(wtPrimary, ['worktree', 'add', '-q', '-b', 'agent-session', wt]);
   const wtVerdict = decide(wt, OPTS);
-  check('a linked worktree or submodule (.git is a file)',
-    wtVerdict.act === false, wtVerdict.reason);
+  check('a real linked worktree IS adopted — this is what Conductor gives every session',
+    wtVerdict.act === true, wtVerdict.reason);
+  check('...and its .git really is a file, so the rung under test is the one that ran',
+    fs.statSync(path.join(wt, '.git')).isFile());
+
+  // A real submodule — still refused, because that scaffold is content the superproject tracks.
+  const subOrigin = repo(); seed(subOrigin);
+  const superRepo = repo(); seed(superRepo);
+  execFileSync('git', ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', subOrigin, 'sub'],
+    { cwd: superRepo, stdio: 'ignore' });
+  const subVerdict = decide(path.join(superRepo, 'sub'), OPTS);
+  check('a real submodule is still refused — the superproject never asked for this',
+    subVerdict.act === false && subVerdict.reason === 'submodule', subVerdict.reason);
 
   check('the home directory', decide(os.homedir(), OPTS).act === false);
 

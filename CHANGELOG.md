@@ -5,6 +5,40 @@ README counts were wrong by hand before a check started counting the files inste
 
 ---
 
+## 1.17.0 — 2026-08-02
+
+**The release where the guard could finally reach Conductor.** `bootstrap.decide()` refused every
+repository whose `.git` was a file — which is a linked worktree *and* a submodule. Conductor hands
+every agent session a linked worktree, so on a machine where the work happens in Conductor,
+`./nexa bootstrap` refused everywhere, silently. No worktree ever got a `./nexa`, and both portable
+adapters key on exactly that file, so the Codex and Copilot hooks fell through to their no-op branch
+on every edit. Counted on the machine this was found on: zero repositories had `./nexa`. A control
+that reports itself present and never runs is §10's own failure shape.
+
+### A worktree is adopted; a submodule is still refused
+- Told apart by `git rev-parse --show-superproject-working-tree` — the superproject's path inside a
+  submodule, empty inside a worktree — rather than by whether `.git` is a file, which both are.
+- A submodule stays refused: that scaffold is content the superproject tracks, and it would show up
+  as a dirty submodule in a repository whose owner never asked for it.
+- The refusal it replaces was correct when written. Its premise — *"adopting writes `board/` and
+  `docs/` into a checkout you may delete tomorrow, taking a card's history with it"* — expired when
+  card 003 moved session state to `~/.nexa/projects/<id>/`. Measured: a bootstrap now writes six
+  regenerable files into the checkout and no `board/`, and card history survives
+  `git worktree remove`. Recorded in `docs/DECISIONS.md` as superseding, not by rewriting it.
+
+### The fixture that had never tested what it named
+- `tests/bootstrap.test.mjs` now builds a **real** `git worktree add` and a **real**
+  `git submodule add`. The one it replaces wrote a `.git` file by hand pointing at a path that did
+  not exist, so `rev-parse --show-toplevel` failed, `decide()` returned "not a git repository", and
+  the worktree rung was never reached — the assertion passed for weeks without exercising it.
+- Mutation-checked both ways: removing the submodule refusal fails the submodule test; restoring the
+  old blanket refusal fails the worktree test.
+
+### Vendored council re-pinned
+- `plugin/scripts/council` moves `c33f65c` → `89dfcde`, matching `all-cli-council` upstream HEAD.
+  `plugin-packaging.test.mjs` was failing on exactly this — it asserts the vendored copy is accepted
+  quietly, and a copy behind upstream is not.
+
 ## 1.7.0 — 2026-07-31
 
 **The release where the workspace stopped only reading its own paperwork.** Two independent
