@@ -965,6 +965,28 @@ try {
   }
 }
 
+// ── the gate that reaches tools other than this one ─────────────────────────
+//
+// §0 of the contract admits that every rule in it is enforced by a Claude Code hook, so the
+// document means "refusals" to one reader and "prose" to the other twenty-eight. The git hooks
+// `nexa-portable` installs are the floor under all of them: Cursor, Codex, Copilot, Aider, Zed,
+// the ChatGPT app and a human at 1am all reach the repository through a commit.
+//
+// **soft(), not bad().** A workspace without them is weaker, not broken, and this check runs in
+// repositories that legitimately have no git hooks — a fresh clone, a CI checkout, a worktree.
+// Refusing there would be the false-positive direction on the very gate meant to widen adoption.
+{
+  const portable = sibling('portable.mjs');
+  if (portable) {
+    const r = spawnSync('node', [portable, '--check'], { encoding: 'utf8', cwd: ROOT });
+    if (r.status === 0) ok('the commit-time gate is installed — every tool is refused equally');
+    else if (r.status === 1) {
+      soft('the cross-tool gate is not installed',
+        'only Claude Code is enforced here; Cursor, Codex, Copilot and Aider work under prose alone — `nexa-portable --install`');
+    }
+  }
+}
+
 // ── every control tested in both directions ──────────────────────────────────
 //
 // bad(), not soft(). Sixteen controls have been added to this workspace and every one was

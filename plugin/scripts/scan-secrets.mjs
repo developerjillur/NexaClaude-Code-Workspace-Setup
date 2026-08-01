@@ -146,15 +146,40 @@ const scan = (where, file, text) => {
 
 // ── working tree ─────────────────────────────────────────────────────────────
 console.log('\n── scan-secrets ──\n');
-const tracked = git('git ls-files').split('\n').filter(Boolean);
+// **`--staged` exists because a pre-commit hook cannot use the default.** `git ls-files` lists
+// the index as it stands, and in a repository with no commit yet — or for a file added in the
+// very change being committed — the tree pass reported **"0 tracked files scanned. ✅ No
+// unexplained credentials."** A gate that ran, found nothing, and passed, on a commit that was
+// adding an API key. Measured on a scratch repo before this flag existed.
+//
+// That is the exact shape this workspace has now found ten times: a control examining something
+// other than the thing it was asked about, and returning the code that means "all clear".
+//
+// Staged CONTENT, not the working tree: `git add`-ing a secret and then editing it out of the
+// file leaves the secret in what is about to be committed, and the file on disk is innocent.
+const STAGED = process.argv.includes('--staged');
+const tracked = STAGED
+  // `git diff --cached` compares the index to HEAD, and **a repository with no commit yet has no
+  // HEAD** — so on the very first commit it returned nothing and the staged pass scanned zero
+  // files. The first commit of a repository is exactly when a bootstrapping secret lands.
+  ? (git('git diff --cached --name-only --diff-filter=ACM').split('\n').filter(Boolean).length
+    ? git('git diff --cached --name-only --diff-filter=ACM').split('\n').filter(Boolean)
+    : git('git ls-files --cached').split('\n').filter(Boolean))
+  : git('git ls-files').split('\n').filter(Boolean);
 for (const f of tracked) {
-  const full = path.join(ROOT, f);
   try {
+    if (STAGED) {
+      // Read the blob from the index, not the disk — see the note above.
+      const body = execFileSync('git', ['show', `:${f}`], { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 << 20 });
+      scan('tree', f, body);
+      continue;
+    }
+    const full = path.join(ROOT, f);
     if (!fs.statSync(full).isFile() || fs.statSync(full).size > 2_000_000) continue;
     scan('tree', f, fs.readFileSync(full, 'utf8'));
-  } catch { /* binary or gone */ }
+  } catch { /* binary, gone, or not in the index */ }
 }
-console.log(`  [tree-pass]     ${tracked.length} tracked files scanned`);
+console.log(`  [${STAGED ? 'staged-pass' : 'tree-pass'}]     ${tracked.length} ${STAGED ? 'staged' : 'tracked'} file(s) scanned`);
 
 // ── history ──────────────────────────────────────────────────────────────────
 //

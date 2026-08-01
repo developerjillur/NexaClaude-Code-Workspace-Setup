@@ -3,7 +3,7 @@
 <!-- contract-meta
 last-verified: <date you last read this end to end>
 verified-at: INITIAL
-cost: ~6579 tokens, loaded every session — `nexa-check` recomputes and refuses on drift
+cost: ~7333 tokens, loaded every session — `nexa-check` recomputes and refuses on drift
 scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
 -->
 
@@ -16,21 +16,32 @@ something you **cannot infer from the code**.
 
 > ### Which of these rules can actually stop you depends on your tool
 >
-> **Every gate in this document is enforced by a Claude Code hook.** `guard-edit` refuses an
-> edit, `nexa-move` refuses a transition, `nexa-prove` refuses a card — all of them are
-> `PreToolUse` hooks and `bin/` commands that only Claude Code runs.
+> Run **`nexa-portable --install`** once. It wires the same guard into every tool that has a hook,
+> and puts a `git` gate underneath all of them.
 >
-> So the same file means two different things:
+> | Reading this in | What these rules are | How |
+> |---|---|---|
+> | **Claude Code** — CLI, VS Code, JetBrains, desktop | **refusals** | `PreToolUse` → `guard-edit` |
+> | **Cursor** | **refusals** | `.cursor/hooks.json` → `preToolUse` |
+> | **Codex CLI** | **refusals** | `.codex/hooks.json` → `PreToolUse` |
+> | **GitHub Copilot** — CLI, cloud agent, VS Code | **refusals** | `.github/hooks/nexa.json` |
+> | **Windsurf / Devin Desktop** | **refusals** | `.windsurf/hooks.json` → `pre_write_code` |
+> | **Zed** | rules + declarative denies | reads `AGENTS.md`; `always_deny` in settings |
+> | **Antigravity, Codex cloud, ChatGPT app, Aider** | **prose** | no hook mechanism exists |
+> | **all of the above** | **refused at `git commit`** | `pre-commit` + `pre-push` — layer 0 |
 >
-> | Reading this in | What these rules are |
-> |---|---|
-> | **Claude Code** | **refusals.** The hook exits 2 and the edit does not happen |
-> | Codex CLI, Cursor, Copilot, Aider, Zed, Windsurf | **prose.** Every word applies; nothing enforces it |
+> **Exit 2 means "block" in all five hook dialects**, so one guard serves all of them;
+> `scripts/hooks/agent-adapter.mjs` translates the event shape and the verdict. Where a tool has
+> no hook, the commit gate still refuses it — every agent reaches the repository through `git`.
 >
-> That was worth saying plainly, because a contract claiming 28+ readers while shipping
-> enforcement for one is a document whose strongest sentences are true for a minority of the
-> agents reading them. If you are not in Claude Code, treat everything below as a standard you
-> are trusted to keep — and run `nexa-check` yourself, because nothing will run it for you.
+> **This block used to say enforcement was Claude-Code-only and everyone else got prose.** That
+> was true when it was written and stopped being true; seven of ten tools now ship a
+> PreToolUse-class gate. A contract is worth re-checking against the tools that read it.
+>
+> Two honest limits. `agent-adapter` **allows** an event shape it cannot parse, rather than
+> blocking every action in a tool whose dialect it does not know — an unusable guard is an
+> uninstalled one, and layer 0 is underneath. And every git hook is skippable with
+> `--no-verify`: what that removes is the careless skip, not the considered one.
 
 **This file costs tokens on every single session**, so it earns its length or it gets shorter.
 `scripts/check.mjs` measures the real cost and **refuses when the stated number drifts more

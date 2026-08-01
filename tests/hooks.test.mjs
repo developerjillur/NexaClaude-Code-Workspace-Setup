@@ -119,8 +119,8 @@ function installScript(dest, name) {
   fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(dest, 'scripts', 'hooks', 'roots.mjs'));
 }
 
-function run(script, input = {}, env = {}) {
-  const r = spawnSync('node', [script], {
+function run(script, input = {}, env = {}, args = []) {
+  const r = spawnSync('node', [script, ...args], {
     input: JSON.stringify(input),
     env: { ...process.env, ...env },
     encoding: 'utf8',
@@ -3024,6 +3024,175 @@ console.log('\n▸ A loop that keeps ticking and produces nothing');
 
   fs.rmSync(st, { recursive: true, force: true });
   fs.rmSync(moved, { recursive: true, force: true });
+}
+
+// ── the gate that reaches every OTHER tool ──────────────────────────────────
+//
+// §0 of the contract admits that everything in it is enforced by a Claude Code hook, so the same
+// document is "refusals" to one reader and "prose" to the other twenty-eight. Every one of those
+// tools reaches the repository through a commit, so the commit is where they meet the same rules.
+//
+// These fixtures are about the two directions that matter for adoption: the gate must refuse a
+// real defect, and it must NOT refuse an ordinary change. The first version ran `check.mjs` in
+// the hook and failed the second — it audits the WORKSPACE, so an adopter's every commit was
+// refused for ".claude/skills is missing", and the secret scan never even ran. A gate wrong on
+// the ordinary case teaches one lesson, no-verify, and then the real case goes through too.
+// ── one guard, five dialects ────────────────────────────────────────────────
+//
+// §0 of the contract used to say enforcement here was Claude-Code-only. That stopped being true:
+// Cursor, Codex CLI, Copilot and Windsurf/Devin all ship a PreToolUse-class gate, and **exit 2
+// means block in every one of them**. So the hard part is not the verdict, it is the INPUT —
+// each vendor names the tool and its arguments differently, and a guard that cannot find the
+// file path in the event is a guard that allows everything while looking installed.
+console.log('\n▸ agent-adapter — the same refusal, in every tool that can refuse');
+{
+  const ad = path.join(HOOKS, 'agent-adapter.mjs');
+  const fire = (event) => run(ad, event, {}, ['guard-edit.mjs']);
+  // PRODUCT is this suite's configured product-code path — read from workspace.config.json at the
+  // top of the file, never hardcoded, for the reason documented there.
+
+  // Each dialect, blocking the same edit. The event shapes are the ones each vendor documents.
+  const DIALECTS = [
+    ['codex', { hook_event_name: 'PreToolUse', tool_name: 'apply_patch', cwd: '/x', session_id: 's',
+      tool_input: { file_path: PRODUCT } }, /permissionDecision/],
+    ['cursor', { hook_event_name: 'preToolUse', conversation_id: 'c',
+      tool_input: { file_path: PRODUCT } }, /"permission":"deny"/],
+    ['copilot', { event: 'preToolUse', tool_name: 'str_replace_editor',
+      tool_input: { file_path: PRODUCT } }, /permissionDecision/],
+    ['claude', { tool_name: 'Write', tool_input: { file_path: PRODUCT } }, /permissionDecision/],
+  ];
+  for (const [id, event, verdict] of DIALECTS) {
+    const r = fire(event);
+    check(`[${id}] the same guard refuses a product edit, with exit 2`,
+      r.code === 2, `exit ${r.code}`);
+    check(`[${id}] ...and answers in that tool's own verdict format`,
+      verdict.test(r.stdout.replace(/\s/g, '')), r.stdout.slice(0, 60));
+  }
+
+  // Windsurf/Devin is the exception and getting it wrong would be silent: exit 2 is the ONLY
+  // block signal it has, there is no JSON verdict, and anything on stdout is not read. Emitting
+  // a verdict there is not merely useless, it is a claim the tool cannot see.
+  const ws = fire({ hook_type: 'pre_write_code', file_path: PRODUCT });
+  check('[windsurf] exit 2 blocks, which is the only signal that dialect has',
+    ws.code === 2, `exit ${ws.code}`);
+  check('[windsurf] ...and NOTHING is printed to stdout, because it reads none',
+    ws.stdout.trim() === '', ws.stdout.slice(0, 60));
+  check('[windsurf] ...while the reason still reaches stderr, which it does read',
+    /refused:/.test(ws.stderr));
+
+  // The silent half, in every dialect: a file outside the product tree is not this guard's
+  // business, and a guard that fires on a README gets uninstalled before it ever sees a defect.
+  for (const [id, event] of [
+    ['codex', { hook_event_name: 'PreToolUse', tool_name: 'apply_patch', cwd: '/x', session_id: 's', tool_input: { file_path: 'README.md' } }],
+    ['windsurf', { hook_type: 'pre_write_code', file_path: 'README.md' }],
+    ['claude', { tool_name: 'Write', tool_input: { file_path: 'README.md' } }],
+  ]) {
+    check(`[${id}] ...and allows an ordinary workspace file`, fire(event).code === 0);
+  }
+
+  // [unknown-dialect] — the deliberate fail-OPEN, and the only one in this workspace. A guard
+  // that blocks everything in a tool whose dialect it cannot parse makes that tool unusable, and
+  // an unusable guard is uninstalled within the hour, taking the cases it DID understand with it.
+  // Layer 0 is what makes that acceptable: the commit is still gated.
+  const unknown = fire({ some_future_tool: { nothing: 'recognisable' } });
+  check('[unknown-dialect] an unrecognised event shape is ALLOWED, not blocked',
+    unknown.code === 0, `exit ${unknown.code}`);
+  check('[unknown-dialect] ...and says so loudly, naming the keys it saw',
+    /unknown-dialect/.test(unknown.stderr) && /keys seen/.test(unknown.stderr));
+
+  // [guard-missing] — the one case where the fail-open reasoning does NOT apply. The dialect was
+  // understood; the guard simply is not installed, and calling that "permitted" would be a broken
+  // installation certifying a repository.
+  const missing = run(ad, { tool_name: 'Write', tool_input: { file_path: PRODUCT } }, {}, ['no-such-guard.mjs']);
+  check('[guard-missing] a guard that is not installed refuses, rather than allowing',
+    missing.code === 2 && /guard-missing/.test(missing.stderr), `exit ${missing.code}`);
+}
+
+console.log('\n▸ nexa-portable — the same rules, for tools that have no hooks');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'portable-'));
+  fs.mkdirSync(path.join(proj, 'plugin', 'scripts', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.nexa'), 'id: t\n');
+  execFileSync('git', ['init', '-q', proj]);
+  for (const s of ['portable.mjs', 'scan-secrets.mjs', 'depth-check.mjs', 'card-gate.mjs', 'card-demands.mjs']) {
+    fs.copyFileSync(path.join(PLUGIN, 'scripts', s), path.join(proj, 'plugin', 'scripts', s));
+  }
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
+  const P = (...a) => spawnSync('node', [path.join(proj, 'plugin', 'scripts', 'portable.mjs'), ...a],
+    { cwd: proj, encoding: 'utf8' });
+  const commit = (msg) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', msg],
+    { cwd: proj, encoding: 'utf8' });
+  const add = (f, body) => { fs.writeFileSync(path.join(proj, f), body); execFileSync('git', ['add', f], { cwd: proj }); };
+
+  const before = P('--check');
+  check('[hooks-missing] a repo without the commit gate is reported, not passed',
+    before.status === 1 && /hooks-missing/.test(before.stdout), `exit ${before.status}`);
+
+  P('--install');
+  check('[hooks-missing] ...and --install satisfies it',
+    P('--check').status === 0);
+  check('[hooks-stale] ...writing a hook that carries the version marker',
+    /nexa-hook-version/.test(fs.readFileSync(path.join(proj, '.git', 'hooks', 'pre-commit'), 'utf8')));
+
+  // A hook whose body predates the current gate set must be REPLACED, not trusted. Without the
+  // marker this could only ever say "missing", so an out-of-date hook would read as installed.
+  fs.writeFileSync(path.join(proj, '.git', 'hooks', 'pre-commit'),
+    '#!/bin/sh\n# nexa-workspace: managed. Edit AGENTS.md, not this file.\n# nexa-hook-version: 0\nexit 0\n');
+  const st = P('--check');
+  check('[hooks-stale] an out-of-date managed hook is refused, not counted as installed',
+    st.status === 1 && /hooks-stale/.test(st.stdout), `exit ${st.status}`);
+  P('--install');
+
+  // THE SILENT CASE, and it is the one that decides whether anybody keeps this installed.
+  add('ok.js', 'export const x = 1;\n');
+  check('an ORDINARY commit is not refused — the case that gets a gate uninstalled',
+    commit('ordinary').status === 0);
+
+  // And the two it must catch, from tools that have no hook of their own.
+  add('leak.js', 'const k = "sk-ant-api03-' + 'A'.repeat(88) + '";\n');
+  const secret = commit('key');
+  check('...a secret committed by ANY tool is refused',
+    secret.status !== 0 && /scan-secrets/.test(secret.stdout + secret.stderr), `exit ${secret.status}`);
+  execFileSync('git', ['reset', '-q', 'HEAD', '--', 'leak.js'], { cwd: proj });
+  fs.rmSync(path.join(proj, 'leak.js'), { force: true });
+
+  // Inside the product tree: depth-check --changed is scoped to codeDirs, because a repo's TEST
+  // suite legitimately contains stub shapes — this very file does, to test those rules.
+  fs.mkdirSync(path.join(proj, 'code'), { recursive: true });
+  add('code/stub.mjs', 'export function loadUser(id) {\n  return null;\n}\n');
+  const stub = commit('stub');
+  check('...and a stub is refused',
+    stub.status !== 0 && /stub-return/.test(stub.stdout + stub.stderr), `exit ${stub.status}`);
+
+  // Skippable on purpose: the same ceiling guard-edit states about heredocs. What this removes
+  // is the careless skip. A deliberate one is a decision somebody can be asked about.
+  check('...while --no-verify still passes, deliberately',
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--no-verify', '-m', 'x'],
+      { cwd: proj, encoding: 'utf8' }).status === 0);
+
+  // A hook the user wrote is theirs. Overwriting it silently is how a tool loses somebody's work.
+  P('--uninstall');
+  fs.writeFileSync(path.join(proj, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho mine\n', { mode: 0o755 });
+  P('--install');
+  check('a pre-existing FOREIGN hook is left alone, not clobbered',
+    fs.readFileSync(path.join(proj, '.git', 'hooks', 'pre-commit'), 'utf8').includes('echo mine'));
+
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
+// [not-a-git-repo] — layer 0 is the only enforcement that reaches every tool, and it needs a
+// commit to attach to. Saying so beats writing hooks into a directory git will never read.
+{
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'nogit-'));
+  fs.mkdirSync(path.join(bare, 'plugin', 'scripts', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(bare, '.nexa'), 'id: t\n');
+  fs.copyFileSync(path.join(PLUGIN, 'scripts', 'portable.mjs'), path.join(bare, 'plugin', 'scripts', 'portable.mjs'));
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(bare, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
+  const r = spawnSync('node', [path.join(bare, 'plugin', 'scripts', 'portable.mjs'), '--install'],
+    { cwd: bare, encoding: 'utf8' });
+  check('[not-a-git-repo] --install refuses where there is no repository to gate',
+    r.status === 2 && /not-a-git-repo/.test(r.stderr), `exit ${r.status}`);
+  fs.rmSync(bare, { recursive: true, force: true });
 }
 
 console.log('\n▸ Controls that certified nothing');

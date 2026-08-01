@@ -176,11 +176,36 @@ function filesUnder(p) {
   return out;
 }
 
+/**
+ * `--changed` is scoped to the PRODUCT tree, and it was not.
+ *
+ * This scanner looks for stub SHAPES — a body that returns a constant, a `throw new Error("not
+ * implemented")`, a placeholder string. A test suite whose job is to prove the scanner finds
+ * those shapes contains every one of them, on purpose, inside string literals. So `--changed`
+ * over a diff that touched `tests/` reported three findings in the fixtures written to test
+ * these exact rules, and the pre-commit hook refused the commit that added them.
+ *
+ * Scoping to `codeDirs` is what `check.mjs` already does when it calls this with explicit paths;
+ * `--changed` was the path that had never been given the same treatment. Passing files
+ * explicitly still scans whatever you name — the caller has said what it means.
+ */
+const scopeToCode = (list) => {
+  let dirs = ['code'];
+  try {
+    const cfgPath = ['workspace.config.json', path.join('..', 'workspace.config.json')].find((f) => fs.existsSync(f));
+    if (cfgPath) {
+      const c = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (Array.isArray(c.codeDirs) && c.codeDirs.length) dirs = c.codeDirs;
+    }
+  } catch { /* the default is deliberately narrow */ }
+  return list.filter((f) => dirs.some((d) => f === d || f.startsWith(`${d}/`)));
+};
+
 let files = [];
 if (useChanged) {
   try {
-    files = execSync('git diff --name-only HEAD', { encoding: 'utf8' })
-      .split('\n').filter((f) => SOURCE.test(f) && fs.existsSync(f));
+    files = scopeToCode(execSync('git diff --name-only HEAD', { encoding: 'utf8' })
+      .split('\n').filter((f) => SOURCE.test(f) && fs.existsSync(f)));
   } catch { files = []; }
 } else {
   files = targets.flatMap(filesUnder);
