@@ -1,6 +1,6 @@
 {
   "name": "nexa-workspace",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Blocking hooks, a WIP=1 pipeline, auto-loading skills and a multi-vendor council — the workspace as an installable plugin.",
   "author": {
     "name": "Jillur Rahman",

@@ -109,6 +109,8 @@ file or a gate in this repo — not a good intention.
 | **A green suite that catches nothing** | **`mutation-test`** deletes a real invariant and asks if anything notices | `scripts/mutation-test.mjs` |
 | **A secret pushed to a remote** | **`scan-secrets`** — working tree **and full history**, before any push | `scripts/scan-secrets.mjs` |
 | **Every gate passed and the app is still broken** | **`nexa-prove`** runs the APPLICATION and asserts the four invariants that cost money: cross-tenant read, double charge, open endpoint, unsurvivable migration | `scripts/prove-invariants.mjs` |
+| **An agent grades its own work and passes** | **`deliverable-shown`** — the move to `5-verify` names the artifact, resolves it, and **prints it on screen**. It scores nothing; it makes the output impossible to move past unseen | `scripts/move-card.mjs`, `templates/CARD.md` §5 |
+| **A gate that ran nothing and said PASS** | `nexa-prove` refuses a command that cannot fail; `mutation-test` refuses when every mutation was skipped; `check.mjs` refuses when the configured code path does not exist | measured — see below |
 
 **The last row is the one most likely to be happening right now.** A stub has no TODO in it —
 it has a signature, a doc comment, a plausible name, and a body that returns a constant. It

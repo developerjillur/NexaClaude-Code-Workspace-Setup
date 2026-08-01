@@ -47,7 +47,7 @@
 // files, mutation-test with no mutations, guard-coverage with zero controls, and a card gate
 // that could not start. A tool that examined nothing must never return the code that means
 // "examined everything and found nothing wrong".
-// @rules invariant-violated, no-invariants, invariant-command-missing, prove-unreachable
+// @rules invariant-violated, no-invariants, invariant-command-missing, prove-unreachable, invariant-command-noop
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,6 +73,15 @@ const KINDS = {
 };
 
 const FILE = path.join(ROOT, 'invariants.json');
+
+/**
+ * Shell commands that exit 0 no matter what the application does.
+ *
+ * Deliberately narrow: `true`, `:`, `exit 0`, a bare `echo`, and any of those chained with `;`
+ * or `&&`. A broad pattern would start refusing real commands, and a gate that cries wolf gets
+ * the flag that disables it added in the same afternoon.
+ */
+const NO_OP = /^(?:\s*(?:true|:|exit\s+0|echo(?:\s+[^;&|]*)?)\s*(?:;|&&)?\s*)+$/i;
 const EXAMPLE = path.join(PLUGIN_ROOT, 'templates', 'invariants.example.json');
 
 if (argv.includes('--list')) {
@@ -129,6 +138,22 @@ for (const inv of chosen) {
     results.push({ ...inv, status: 'invariant-command-missing' });
     continue;
   }
+  // **A command that cannot fail is the same object as an examiner told to return 9.5.**
+  //
+  // This gate is the only one in the workspace that runs the application, and every other stage
+  // rides on its credibility. Measured before this check existed: an `invariants.json` whose four
+  // commands were `true`, `:`, `exit 0` and `echo ok` printed "4 held, 0 violated" and exited 0 in
+  // 16ms. The strongest gate here certified nothing, in a form indistinguishable on screen from a
+  // real proof — and the file is written by the same party the gate is meant to constrain.
+  //
+  // A denylist of shell no-ops does not make that impossible; `npm run always-passes` is one level
+  // down and this cannot see it. It closes the one-line version, which is the version somebody
+  // reaches for at 2am when the invariant is failing and the deploy is waiting.
+  if (NO_OP.test(inv.command.trim())) {
+    console.log(`  🚨 ${label.padEnd(26)} command cannot fail — \`${inv.command.trim()}\` proves nothing`);
+    results.push({ ...inv, status: 'invariant-command-noop' });
+    continue;
+  }
   process.stdout.write(`  ${label.padEnd(26)} ${String(inv.what ?? '').slice(0, 44).padEnd(46)}`);
   const started = Date.now();
   // The adopter's command, in their code directory, with their environment. A shell is correct
@@ -160,7 +185,8 @@ for (const inv of chosen) {
 }
 
 const violated = results.filter((r) => r.status === 'invariant-violated');
-const broken = results.filter((r) => ['prove-unreachable', 'invariant-command-missing'].includes(r.status));
+const broken = results.filter((r) => ['prove-unreachable', 'invariant-command-missing',
+  'invariant-command-noop'].includes(r.status));
 const held = results.filter((r) => r.status === 'held');
 
 console.log(`\n${'─'.repeat(70)}`);

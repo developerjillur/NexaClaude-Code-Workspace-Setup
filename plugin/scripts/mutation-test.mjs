@@ -132,6 +132,28 @@ const resolved = MUTATIONS.filter((m) => {
 console.log(`\n${'═'.repeat(70)}`);
 console.log('  MUTATION TEST — break it on purpose, see if the suite notices');
 console.log('═'.repeat(70));
+
+// **Zero mutations ran, and this used to exit 0.** The last line of this script is
+// `process.exit(survived.length ? 1 : 0)`, and with nothing resolved, nothing survives — so a run
+// that tested NOTHING was byte-identical, at the exit code, to a run where the suite caught
+// everything. That is the exact fail-open this script exists to find in other people's suites.
+//
+// It is not a hypothetical, it is the DEFAULT ADOPTION PATH: `templates/mutations.example.json`
+// points at `src/auth.js`, which no adopter has. Copy it as instructed, run the gate, get a green
+// tick, and `skills/definition-of-done` ticks a criterion against a control that did nothing —
+// forever, silently, with the skip lines scrolling past above the pass.
+//
+// The skips were always printed. Printing a problem and then exiting 0 is not a warning, it is a
+// confession the exit code contradicts, and the exit code is the half that gets read by CI.
+if (!resolved.length) {
+  console.log(`\n  🚨 NOTHING WAS MUTATED — ${MUTATIONS.length} declared, 0 resolved.\n`);
+  console.log('  This is not a pass. A mutation test that mutated nothing has told you nothing');
+  console.log('  about your suite, and the skip lines above say why each one was dropped:');
+  console.log('  a file that does not exist, or a line that has since changed.\n');
+  console.log('  Point mutations.json at YOUR code. The shipped example targets src/auth.js,');
+  console.log('  which is a placeholder and not a file you have.\n');
+  process.exit(2);
+}
 console.log(`\n  ${resolved.length} mutation(s). Each runs the full offline suite; this takes minutes.\n`);
 
 const results = [];

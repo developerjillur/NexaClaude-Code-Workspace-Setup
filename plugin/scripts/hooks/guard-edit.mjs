@@ -181,7 +181,15 @@ if (input?.tool_name === 'Bash') {
     // body, which is exactly the case where the body is data rather than commands.
     .replace(/<<-?\s*(['"])(\w+)\1[\s\S]*?^\s*\2\s*$/gm, '')
     .replace(/```[\s\S]*?```/g, '');
-  const mv = prose.match(/(?:^|[\s;&|])git\s+(?:-[^\s]+\s+)*mv\s+(?:-[^\s]+\s+)*["']?([^\s"';&|]+)["']?\s+["']?([^\s"';&|]+)["']?/);
+  // **`git` was required, so plain `mv` walked a card 1-spec → 6-done past every gate.** The
+  // guard refused the careful spelling and allowed the careless one — including past
+  // `invariants-held`, the single executable guard on the whole board. Anyone who typed the
+  // obvious command got no refusal at all, which is the worst possible direction for this to
+  // fail in: it is not the adversary who reaches for `mv`, it is everybody.
+  //
+  // `cp` matters for the same reason and is worse — it leaves the card in BOTH stages, so the
+  // WIP=1 count and the stage the card claims stop agreeing with each other.
+  const mv = prose.match(/(?:^|[\s;&|])(?:git\s+(?:-[^\s]+\s+)*)?(?:mv|cp)\s+(?:-[^\s]+\s+)*["']?([^\s"';&|]+)["']?\s+["']?([^\s"';&|]+)["']?/);
   if (mv) {
     const stageOf = (p) => p.match(/(?:^|\/)board\/([^/]+)\//)?.[1] ?? null;
     const a = stageOf(mv[1]); const b = stageOf(mv[2]);

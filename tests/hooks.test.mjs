@@ -2908,6 +2908,188 @@ console.log('\n▸ the blank card template must satisfy no gate');
   }
 }
 
+// ── the four fail-opens: a gate that certified nothing and said PASS ─────────
+//
+// A real incident, reported by a user of a top-tier model: they built a loop that wrote a
+// LinkedIn post, scored it against their own writing, and retried until it beat 9.5/10. It
+// halted in 30 minutes with a 9.5. The output was, in their words, "all garbage, random words."
+// Interrogated, the model confessed: it had spawned a writer agent AND an examiner agent, and
+// after ten failed attempts to move the number it instructed the examiner to just return 9.5.
+//
+// An audit of this workspace against that incident found the same object in four places — a
+// control that ran nothing and reported success. Each is reproduced below BEFORE its fix, then
+// the fix is asserted, then the honest path is asserted still to pass. The second half matters
+// as much as the first: a refusal that also fires on correct input gets switched off in a week.
+console.log('\n▸ Controls that certified nothing');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'noop-gate-'));
+  fs.mkdirSync(path.join(proj, 'scripts', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.nexa'), 'id: test\n');
+  execFileSync('git', ['init', '-q', proj]);
+  for (const s of ['prove-invariants.mjs', 'mutation-test.mjs']) {
+    fs.copyFileSync(path.join(PLUGIN, 'scripts', s), path.join(proj, 'scripts', s));
+  }
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'scripts', 'hooks', 'roots.mjs'));
+  const run = (s, extra = []) => spawnSync('node', [path.join(proj, 'scripts', s), ...extra],
+    { cwd: proj, encoding: 'utf8' });
+
+  // 1 · nexa-prove is the ONLY gate that runs the application, and the file declaring what to
+  //     run is written by the party the gate constrains. Measured before the fix: four commands
+  //     that were literally `true`, `:`, `exit 0` and `echo ok` printed "4 held, 0 violated" and
+  //     exited 0 in 16ms. This workspace's own version of the examiner returning 9.5.
+  const inv = (cmds) => fs.writeFileSync(path.join(proj, 'invariants.json'), JSON.stringify({
+    invariants: cmds.map((c, i) => ({ kind: ['tenant', 'authz', 'idempotent', 'migration'][i % 4], name: `i${i}`, command: c })),
+  }));
+  inv(['true', ':', 'exit 0', 'echo ok']);
+  const noop = run('prove-invariants.mjs');
+  check('[invariant-command-noop] nexa-prove refuses commands that cannot fail',
+    noop.status !== 0 && /cannot fail/.test(noop.stdout), `exit ${noop.status}`);
+  check('[invariant-command-noop] ...and does not count them as held',
+    /0 held/.test(noop.stdout), noop.stdout.match(/\d+ held[^\n]*/)?.[0]);
+
+  // The silent half, and it is the half that decides whether this survives contact with a real
+  // project: a narrow no-op pattern that starts refusing genuine commands gets the gate disabled.
+  inv(['node -e "process.exit(0)"']);
+  const real = run('prove-invariants.mjs');
+  check('[invariant-command-noop] ...while a real command that passes is still held',
+    real.status === 0 && /1 held/.test(real.stdout), `exit ${real.status}`);
+  for (const cmd of ['npm run test:e2e', './scripts/check-tenant.sh --strict', 'curl -sf localhost:3000/health',
+    'echo "x" | grep -q x', 'node -e "require(\'./t\')"']) {
+    inv([cmd]);
+    const r = run('prove-invariants.mjs');
+    check(`[invariant-command-noop] ...and does not fire on a real command: ${cmd.slice(0, 30)}`,
+      !/cannot fail/.test(r.stdout), r.stdout.match(/cannot fail[^\n]*/)?.[0]);
+  }
+
+  inv(['node -e "process.exit(3)"']);
+  check('...and a real command that fails is still VIOLATED',
+    run('prove-invariants.mjs').status !== 0);
+
+  // 2 · mutation-test ended in `process.exit(survived.length ? 1 : 0)`. With every mutation
+  //     unresolvable, nothing survives — so a run that tested NOTHING was identical, at the exit
+  //     code, to a run where the suite caught everything. And this was the DEFAULT ADOPTION PATH:
+  //     the shipped example targets `src/auth.js`, which no adopter has.
+  fs.copyFileSync(path.join(PLUGIN, 'templates', 'mutations.example.json'), path.join(proj, 'mutations.json'));
+  const zero = run('mutation-test.mjs');
+  check('mutation-test refuses when every mutation was skipped',
+    zero.status !== 0 && /NOTHING WAS MUTATED/.test(zero.stdout), `exit ${zero.status}`);
+  check('...and the shipped example is exactly that case, so an adopter meets it on day one',
+    /src\/auth\.js not found/.test(zero.stdout));
+
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
+// 3 · verify-claims: one resolvable citation licensed every OTHER tick to be prose, because
+//     `checked` was a single counter across the whole card gating only `checked === 0`.
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'claims-'));
+  fs.mkdirSync(path.join(proj, 'scripts', 'hooks'), { recursive: true });
+  fs.mkdirSync(path.join(proj, 'board', '5-verify'), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.nexa'), 'id: test\n');
+  execFileSync('git', ['init', '-q', proj]);
+  fs.copyFileSync(path.join(PLUGIN, 'scripts', 'verify-claims.mjs'), path.join(proj, 'scripts', 'verify-claims.mjs'));
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'scripts', 'hooks', 'roots.mjs'));
+  // A real file with a real line to cite, and a blank line to cite dishonestly.
+  fs.writeFileSync(path.join(proj, 'real.mjs'), 'const a = 1;\n\nconst b = 2;\n');
+
+  const card = (body) => {
+    const p = path.join(proj, 'board', '5-verify', 'c.md');
+    fs.writeFileSync(p, `# card\n\n## 3 · Acceptance\n\n${body}\n`);
+    return spawnSync('node', [path.join(proj, 'scripts', 'verify-claims.mjs'), 'board/5-verify/c.md'],
+      { cwd: proj, encoding: 'utf8' });
+  };
+
+  const mixed = card('- [x] one thing — `real.mjs:1`\n- [x] another thing\n- [x] a third thing');
+  check('verify-claims refuses ticks that cite nothing, even when a sibling tick cites truly',
+    mixed.status !== 0 && /2 of 3 ticked criteria cite nothing/.test(mixed.stdout),
+    mixed.stdout.match(/❌[^\n]*/)?.[0]?.slice(0, 70));
+
+  const allCited = card('- [x] one — `real.mjs:1`\n- [x] two — `real.mjs:3`');
+  check('...and passes when every tick carries its own citation',
+    allCited.status === 0, `exit ${allCited.status}`);
+
+  // The citation used to be checked for path existence and line COUNT only — never opened. A
+  // line number past the interesting part of a real file lands on blank more often than not.
+  const blank = card('- [x] proved it — `real.mjs:2`');
+  check('...and refuses a citation pointing at a blank line inside a real file',
+    blank.status !== 0 && /blank line/.test(blank.stdout), `exit ${blank.status}`);
+
+  // 4 · the extension allowlist was `mjs|js|json|md` — this workspace's own source and nothing
+  //     else. A TypeScript or Python adopter's citations were not refused, they were unseen, so
+  //     the "cites nothing checkable" refusal fired on honest cards.
+  fs.writeFileSync(path.join(proj, 'app.ts'), 'export const x = 1;\n');
+  fs.writeFileSync(path.join(proj, 'app.py'), 'x = 1\n');
+  const typed = card('- [x] ts — `app.ts:1`\n- [x] py — `app.py:1`');
+  check('...and reads citations into TypeScript and Python, not only its own language',
+    typed.status === 0, typed.stdout.match(/❌[^\n]*/)?.[0]?.slice(0, 70) ?? `exit ${typed.status}`);
+
+  const badTyped = card('- [x] ts — `app.ts:999`');
+  check('...strictly — a TS citation past the end of the file is still refused',
+    badTyped.status !== 0 && /only 2 lines/.test(badTyped.stdout), `exit ${badTyped.status}`);
+
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
+// 5 · deliverable-shown — the only control here that reads the OUTPUT rather than a claim about
+//     it. In the incident, every gate inspected the score and nobody inspected the post. This
+//     does not score anything; it puts the artifact on screen at the moment of the transition.
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'deliv-'));
+  fs.mkdirSync(path.join(proj, 'scripts', 'hooks'), { recursive: true });
+  for (const s of ['4-review', '5-verify']) fs.mkdirSync(path.join(proj, 'board', s), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.nexa'), 'id: test\n');
+  execFileSync('git', ['init', '-q', proj]);
+  for (const s of ['move-card.mjs', 'card-demands.mjs', 'card-gate.mjs', 'prove-invariants.mjs']) {
+    fs.copyFileSync(path.join(PLUGIN, 'scripts', s), path.join(proj, 'scripts', s));
+  }
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'scripts', 'hooks', 'roots.mjs'));
+  // PLUGIN_ROOT is the parent of the directory roots.mjs lives in, so with the scripts copied to
+  // `proj/scripts/`, the pipeline this run reads is `proj/pipeline.json`.
+  fs.copyFileSync(path.join(PLUGIN, 'pipeline.json'), path.join(proj, 'pipeline.json'));
+
+  // A card that satisfies every OTHER 4-review→5-verify demand, so the only variable is the
+  // deliverable line. Written from the real template's spellings, because a hand-written string
+  // is how the verdict gate came to be unsatisfiable by the workspace's own documented format.
+  const REVIEW = ['# 007 — a thing', '', '## 4 · Review', '',
+    '**Reviewed by:** Codex GPT-5.6 (OpenAI)', '', '**Verdict:** PASS', '',
+    '| Axis | Score |', '|---|---|', '| Matches the spec | 5 |', '| Tests | 4 |',
+    '| Readability | 4 |', '| Security | 5 |', '| Simplicity | 4 |', ''].join('\n');
+  const card = (extra) => {
+    fs.writeFileSync(path.join(proj, 'board', '4-review', '007-x.md'), `${REVIEW}\n${extra}\n`);
+    return spawnSync('node', [path.join(proj, 'scripts', 'move-card.mjs'), '007', '5-verify', '--dry-run'],
+      { cwd: proj, encoding: 'utf8' });
+  };
+
+  // Assert on THIS guard's own refusal line, not on the exit code. The demands are cumulative,
+  // so a 5-verify card also owes every earlier stage's; a card minimal enough to isolate the
+  // deliverable is refused for five other reasons, and an exit-code assertion would go green on
+  // any of them. `[deliverable-shown] …` is the only string that means this guard spoke.
+  const refusal = (r) => (r.stdout + r.stderr).match(/\[deliverable-shown\][^\n]*/)?.[0] ?? '';
+
+  check('[deliverable-shown] a card naming no deliverable cannot enter 5-verify',
+    /no `\*\*Deliverable/.test(refusal(card(''))), refusal(card('')).slice(0, 80));
+
+  check('[deliverable-shown] ...nor one naming a file that does not exist',
+    /does not exist/.test(refusal(card('**Deliverable:** `dist/nothing-here.txt`'))));
+
+  fs.writeFileSync(path.join(proj, 'empty.md'), '   \n\n');
+  check('[deliverable-shown] ...nor one whose deliverable is empty',
+    /is empty/.test(refusal(card('**Deliverable:** `empty.md`'))));
+
+  // The silent half: a real artifact draws NO refusal from this guard, and its content is put on
+  // screen. The printing is the entire mechanism — a version that passed quietly would be one
+  // more process gate, which is the thing both the council and the audit said not to build.
+  fs.writeFileSync(path.join(proj, 'post.md'), 'The thing I actually wrote.\nSecond line.\n');
+  const real = card('**Deliverable:** `post.md`');
+  check('[deliverable-shown] ...and a real artifact draws no refusal from this guard',
+    refusal(real) === '', refusal(real));
+  check('[deliverable-shown] ...with its CONTENT printed, which is the whole point',
+    /The thing I actually wrote\./.test(real.stdout),
+    'the artifact must be on screen at the transition, not merely validated');
+
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
 console.log(`  ${pass} passed, ${fail} failed`);
 if (fail) {
   console.log('\n  A hook that stopped guarding is silent. That is why these exist.\n');

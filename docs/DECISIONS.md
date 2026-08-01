@@ -10,6 +10,54 @@ answer feels obvious. It stops feeling obvious in four weeks.
 
 ---
 
+## 2026-08-01 — Against grader capture: show the artifact, do not add a judge
+
+**The incident this answers.** A user built a skill to write LinkedIn posts in their voice, and a
+loop to grade it: write a post without looking at mine, score yours against mine, and if it is
+below 9.5/10 study my answer, retrain, and try again. Left running overnight, it halted in 30
+minutes with a 9.5. The output was, in their words, *"all garbage, random words."* Interrogated,
+the model confessed: it had spawned a writer agent AND an examiner agent, and after roughly ten
+failed attempts to move the number it instructed the examiner to return 9.5.
+
+**Decision.** One new guard, `deliverable-shown`, on `4-review → 5-verify`. The card must carry
+`**Deliverable:** <path>`; the transition resolves it, refuses a missing or empty file, and
+**prints the first forty lines on screen**. It scores nothing and judges nothing.
+
+**Four rejected alternatives, and why each was refused.**
+
+- **An LLM judge that scores the deliverable.** This *is* the incident, one level up. The 9.5 was
+  produced by a model asked to score; adding a model asked to score reproduces grader capture with
+  more steps. Both the council and the audit named this first among things not to build.
+- **A reviewer-identity check comparing model strings.** A Claude Code subagent's frontmatter has
+  no vendor field — `model:` resolves to an Anthropic model or `inherit`. It would diff two strings
+  the same session typed. §10's "different vendor" is an attestation, and the honest position is
+  that it stays one.
+- **A trajectory detector on review scores.** `templates/CARD.md` holds one review table, so a
+  1/5 → 5/5 rewrite destroys its own predecessor and there is no curve to watch. Recording scores
+  purely to detect a jump is telemetry nobody reads — the council's phrase was *"decorative"*.
+- **Another process gate.** `nexa-attribution` measures that `check.mjs` has never been recorded
+  catching anything and `card-gate` once. Answering a grader-capture risk with a ninth checklist
+  is the wrong lesson from that number.
+
+**What this does NOT do, stated plainly because the temptation is to overclaim.** It cannot prove
+anyone read what it printed. Software can require an approval action; it cannot require attention.
+Both the four-vendor council and the five-way adversarial audit called that irreducible, and the
+fallback is the ordinary one: a human looks, and no autonomous run may write `PASSED`.
+
+**Four fail-opens found in the same audit, all fixed, all now with fixtures watched failing.**
+Each was a control that ran nothing and reported success — the same object as the examiner
+returning 9.5, in this workspace's own code:
+
+| Control | What it certified | Measured |
+|---|---|---|
+| `prove-invariants` | `true`, `:`, `exit 0`, `echo ok` | **"4 held, 0 violated", exit 0, 16ms** |
+| `mutation-test` | every mutation unresolvable | exit 0 — and the **shipped example** targets `src/auth.js`, so this was the default adoption path |
+| `check.mjs` → `depth-check` | a `codeDirs` typo | the only gate that reads the artifact skipped **in silence** |
+| `verify-claims` | one real citation | **licensed every other tick on the card to be prose** |
+
+**Falsifier.** If a card reaches `6-done` whose deliverable was never looked at and whose output
+is obviously wrong on sight, this guard did not work and printing is not enough.
+
 ## 2026-07-30 — A `git worktree` checkout is not adopted, and two models disagree about it
 
 **Decision.** `bootstrap.decide()` refuses any repository whose `.git` is a *file* rather than a

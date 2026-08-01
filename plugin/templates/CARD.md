@@ -116,6 +116,17 @@ cannot leave `5-verify` without this line._
 
 ## 5 · Verify
 
+**Deliverable:** `<path to the thing this card actually produced>`
+
+> Not optional, and not paperwork. `nexa-move … 5-verify` resolves this path, refuses it if it is
+> missing or empty, and **prints the first forty lines on screen** as the card moves. It scores
+> nothing and judges nothing — it exists so that the one artifact every other gate only ever read
+> a *claim* about is impossible to move past without seeing.
+>
+> A model once passed its own overnight test by writing incomprehensible output, having a second
+> agent it controlled score it 9.5/10, and halting. Every control in that loop was reading the
+> score. The post was obvious on sight, and nobody looked. This is the line that makes you look.
+
 - [ ] Acceptance criteria met, each by name
 - [ ] `npm run test:offline` green
 - [ ] **The new guard was watched to fail** — paste the failing output

@@ -117,15 +117,40 @@ if (!ticked.length) {
   console.log('  ·  no ticked criteria yet');
 } else {
   let checked = 0;
+  // **Per-tick, not per-card.** `checked` was a single counter across every ticked criterion, and
+  // the only thing it gated was `checked === 0`. So ONE resolvable citation anywhere on the card
+  // licensed every other tick to be pure prose — nine invented ticks and one real `file:line`
+  // reported "all citations resolve". The gate's whole promise is that a tick carries evidence,
+  // and it was enforcing that at most one tick did.
+  const uncited = [];
 
   for (const line of ticked) {
+    let citesHere = 0;
     // file:line — the citation that is cheapest to invent and never followed.
-    for (const [, file, ln] of line.matchAll(/([\w./-]+\.(?:mjs|js|json|md)):(\d+)/g)) {
-      checked++;
+    //
+    // **The extension list used to be `mjs|js|json|md`**, which is this workspace's own source
+    // and nothing else. Every adopter writing TypeScript, Python, Go, Rust, Ruby or Java had
+    // their citations silently skipped — not refused, not warned about, simply not seen — so the
+    // `checked === 0` refusal below fired on honest cards and the gate looked broken to exactly
+    // the people it was built for. A guard that cannot read the adopter's language is not strict,
+    // it is absent.
+    for (const [, file, ln] of line.matchAll(
+      /([\w./-]+\.(?:mjs|cjs|jsx?|tsx?|mts|cts|json|md|py|go|rs|rb|java|kt|swift|php|cs|sql|ya?ml|sh)):(\d+)/g)) {
+      checked++; citesHere++;
       const real = resolve(file);
       if (!real) { bad(`cited file does not exist: ${file}:${ln}`, line.trim().slice(0, 70)); continue; }
-      const count = fs.readFileSync(real, 'utf8').split('\n').length;
-      if (+ln > count) bad(`${file}:${ln} — file has only ${count} lines`, line.trim().slice(0, 70));
+      const lines = fs.readFileSync(real, 'utf8').split('\n');
+      if (+ln > lines.length) { bad(`${file}:${ln} — file has only ${lines.length} lines`, line.trim().slice(0, 70)); continue; }
+      // **Open the line.** This check resolved the path and compared a number to the line count,
+      // which proves the file is long enough — not that anything is there. A citation pointing at
+      // a blank line inside a real file passed, and blank is where an invented line number lands
+      // most often, because the inventor picks a round number past the end of the interesting part.
+      //
+      // It cannot judge whether the line SUPPORTS the claim; nothing mechanical can. It can refuse
+      // to call an empty line evidence.
+      if (!lines[+ln - 1]?.trim()) {
+        bad(`${file}:${ln} is a blank line`, `${line.trim().slice(0, 70)} — a citation must point at something`);
+      }
     }
 
     // `npm run x` — must be a real script, in EITHER package.json.
@@ -140,7 +165,7 @@ if (!ticked.length) {
     // the refusal now says which files were actually consulted, so a genuine miss is
     // debuggable instead of mysterious.
     for (const [, script] of line.matchAll(/`npm run ([\w:-]+)`/g)) {
-      checked++;
+      checked++; citesHere++;
       const seen = [];
       const known = new Set();
       for (const cand of [path.join(ROOT, 'package.json'), ...codeDirs.map((d) => path.join(ROOT, d, 'package.json'))]) {
@@ -157,15 +182,17 @@ if (!ticked.length) {
 
     // `node path/to.mjs` — must be a real file.
     for (const [, file] of line.matchAll(/`node ([\w./-]+\.mjs)/g)) {
-      checked++;
+      checked++; citesHere++;
       if (!resolve(file)) bad(`cited command points at a missing file: node ${file}`, line.trim().slice(0, 70));
     }
+
+    if (!citesHere) uncited.push(line.trim().slice(0, 70));
   }
 
-  if (checked === 0) {
-    bad(`${ticked.length} ticked criteri${ticked.length === 1 ? 'on' : 'a'} cite nothing checkable`,
-      'a tick must carry a file:line, an npm script, or a node command');
-  } else if (!fail) ok(`${checked} citation(s) across ${ticked.length} ticked criteria all resolve`);
+  if (uncited.length) {
+    bad(`${uncited.length} of ${ticked.length} ticked criteri${ticked.length === 1 ? 'on cites' : 'a cite'} nothing checkable`,
+      `each tick needs its own file:line, npm script or node command — e.g. "${uncited[0]}"`);
+  } else if (!fail) ok(`${checked} citation(s) — every one of ${ticked.length} ticked criteria carries its own`);
 }
 
 // ── 3 · a test was claimed. Does it exist, and does it assert anything? ──────

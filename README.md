@@ -74,7 +74,7 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **648 assertions across three suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
+beside the case it must catch. **659 assertions across five suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
 elsewhere, so the exact count moves by one — a number that drifts is worth saying so about rather
 than rounding into a claim.)
 
@@ -285,7 +285,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 41 scripts — `scripts/`
+### 42 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -305,7 +305,7 @@ before any code exists)
 | `mutation-test.mjs` | delete an invariant — does the suite notice? |
 | `scan-secrets.mjs` | tree **and full git history**, with a named allowlist |
 | `reflect.mjs` | what has happened since the last consolidation |
-| `council/*.mjs` | 15 files — the council, below |
+| `council/*.mjs` | 16 files — the council, below |
 
 ### The council — four vendors, three stages, no API keys
 

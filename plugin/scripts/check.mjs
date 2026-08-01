@@ -174,8 +174,35 @@ for (const stage of STAGE_ORDER) {
     // a file in the repository an agent can write — interpolating it into a shell string is a
     // command-injection path, not a hypothetical one.
     const cfg = readConfig(ROOT).config;
-    const scanPaths = (cfg.depthCheckPaths?.length ? cfg.depthCheckPaths : codeDirs(ROOT).dirs)
-      .filter((d) => fs.existsSync(path.join(ROOT, d)));
+    const configured = cfg.depthCheckPaths?.length ? cfg.depthCheckPaths : codeDirs(ROOT).dirs;
+    const scanPaths = configured.filter((d) => fs.existsSync(path.join(ROOT, d)));
+    // **A path that does not exist used to remove this gate in silence.** `scanPaths.length` on
+    // the line below is the whole condition: filter every configured dir away and the block never
+    // runs, prints nothing, and the card passes. depth-check is the ONE control in this workspace
+    // that reads the produced artifact rather than a claim about it, and a typo in `codeDirs`
+    // deleted it with no output distinguishing that from a clean scan.
+    //
+    // depth-check itself already refuses to call an empty scan a clean one. That refusal was
+    // simply unreachable from the only gate that invokes it — a check that exists and cannot fire.
+    // **Configured-and-missing is a defect; unconfigured-and-missing is a repo without product
+    // code yet**, which this very repository is. Refusing both would fire on every workspace-only
+    // clone from its first card onward, and a guard that is wrong on the ordinary case gets
+    // switched off long before it ever meets the case it was written for.
+    // `codeDirs: ["code"]` is what the shipped config says before anybody edits it, so a missing
+    // `code/` means "no product code yet" — true of this repository and of every adopter on day
+    // one. A path the adopter actually WROTE and that does not exist is the different thing: a
+    // typo that removes the gate without saying so.
+    const missing = configured.filter((d) => !fs.existsSync(path.join(ROOT, d)));
+    const chosen = missing.filter((d) => d !== 'code');
+    if (['4-review', '5-verify', '6-done'].includes(stage) && missing.length) {
+      if (chosen.length) {
+        bad(`${stage}/${f} — depth-check scanned nothing: ${chosen.join(', ')} does not exist`,
+          'a code path you configured is missing, so the only gate that reads the artifact was skipped in silence');
+      } else {
+        soft(`${stage}/${f} — depth-check scanned nothing: no code/ yet`,
+          'expected before there is product code — but note that nothing read an artifact for this card');
+      }
+    }
     const depthScript = sibling('depth-check.mjs');
     if (['4-review', '5-verify', '6-done'].includes(stage) && scanPaths.length && depthScript) {
       try {
@@ -799,9 +826,18 @@ try {
       // advertised "15 bare commands" while `bin/` shipped 26 — eleven commands on the reader's
       // PATH that the README gave them no way to discover. `scripts`, `skills` and `commands`
       // were each verified here; the one class of thing a user actually TYPES was not.
-      ['bare commands', fs.existsSync(path.join(PLUGIN_ROOT, 'bin'))
-        ? fs.readdirSync(path.join(PLUGIN_ROOT, 'bin')).filter((d) => !d.startsWith('.')).length : 0,
-        /\*\*(\d+) bare commands\*\*/],
+      // `bin/` is looked for beside the plugin AND beside the README being read. When neither has
+      // one there is nothing to compare, and the regex is set to null so the loop skips it — the
+      // same rule as a README with no such section. **This check first shipped counting a missing
+      // directory as zero**, which turned "I cannot see bin/" into "your README overstates by 26"
+      // — a confident wrong refusal, which is the failure mode that gets a gate deleted rather
+      // than fixed.
+      (() => {
+        const dir = [path.join(PLUGIN_ROOT, 'bin'), path.join(ROOT, 'bin')].find((d) => fs.existsSync(d));
+        return ['bare commands',
+          dir ? fs.readdirSync(dir).filter((d) => !d.startsWith('.')).length : 0,
+          dir ? /\*\*(\d+) bare commands\*\*/ : null];
+      })(),
     ];
     let drift = 0;
     for (const [label, actual, re] of counts) {

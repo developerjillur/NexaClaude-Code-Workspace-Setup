@@ -2,35 +2,35 @@
   "$comment": [
     "THE PIPELINE, as data. One definition, several consumers.",
     "",
-    "\u2500\u2500 why this file exists \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "── why this file exists ────────────────────────────────────────────────────",
     "",
-    "The nine stages were copy-pasted into eight places \u2014 card-gate's ORDER, check.mjs's",
+    "The nine stages were copy-pasted into eight places — card-gate's ORDER, check.mjs's",
     "stages AND its STAGE_ORDER, bootstrap's STAGES, reflect.mjs, verify-install.mjs, the",
     "AGENTS.md diagram and the /card move table. They had already drifted:",
     "",
-    "  \u00b7 reflect.mjs iterated eight stages; check.mjs iterated nine (0-discovery was missing)",
-    "  \u00b7 card-gate's REQUIRED was cumulative; check.mjs's demands was not, so a requirement",
+    "  · reflect.mjs iterated eight stages; check.mjs iterated nine (0-discovery was missing)",
+    "  · card-gate's REQUIRED was cumulative; check.mjs's demands was not, so a requirement",
     "    was discharged by moving past it. The two gates disagreed about the same board, and",
     "    CI ran the looser one.",
     "",
     "An audit and a four-vendor council both landed on the same sentence from different",
     "directions: the board is a state machine with no transition function. This is the first",
-    "half of the answer \u2014 states and transitions as data. `nexa-move` is the second half.",
+    "half of the answer — states and transitions as data. `nexa-move` is the second half.",
     "",
-    "\u2500\u2500 what this is NOT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "── what this is NOT ────────────────────────────────────────────────────────",
     "",
     "Not an XState machine, and deliberately not an interpreter. **Git owns this state.** A",
     "runtime holding the board in memory would be a second source of truth and a",
-    "reconciliation bug. What is borrowed from XState is the SHAPE \u2014 named states, explicit",
-    "transitions, guards as data rather than as regexes buried in two scripts \u2014 because that",
+    "reconciliation bug. What is borrowed from XState is the SHAPE — named states, explicit",
+    "transitions, guards as data rather than as regexes buried in two scripts — because that",
     "shape is what makes a gate testable. `Verdict: BACK` satisfied the 5-verify gate for",
     "weeks precisely because no fixture could ask what an anonymous regex does with a failing",
     "verdict. See docs/XSTATE-LESSONS.md.",
     "",
-    "\u2500\u2500 events, which the linear diagram never had \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+    "── events, which the linear diagram never had ──────────────────────────────",
     "",
     "The diagram shows one implicit event: forward. Real work rejects, abandons, reopens and",
-    "supersedes, and a card that fails review had nowhere defined to go \u2014 so it went wherever",
+    "supersedes, and a card that fails review had nowhere defined to go — so it went wherever",
     "somebody dragged it.",
     "",
     "`guards` name the checks a transition must satisfy. They are ids, not code: card-gate and",
@@ -103,7 +103,8 @@
       "guards": [
         "review-verdict-pass",
         "review-score-at-least-3",
-        "reviewed-by"
+        "reviewed-by",
+        "deliverable-shown"
       ]
     },
     {
@@ -178,7 +179,7 @@
     }
   ],
   "kinds": {
-    "$comment": "kind: on a card changes what it owes. Waivers make it cheaper; migration makes it dearer \u2014 see card-gate.mjs REQUIRED_BY_KIND.",
+    "$comment": "kind: on a card changes what it owes. Waivers make it cheaper; migration makes it dearer — see card-gate.mjs REQUIRED_BY_KIND.",
     "feature": {
       "waives": []
     },
