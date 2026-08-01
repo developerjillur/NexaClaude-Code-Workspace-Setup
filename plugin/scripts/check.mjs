@@ -923,6 +923,48 @@ try {
 // spawns a missing file reports "not fetched" forever — absence where there is none, which is
 // how a check teaches people to ignore it.
 
+// ── autopilot: what it did, read back ───────────────────────────────────────
+//
+// `autopilot-ctl.mjs` claimed, in a comment, that *"`check.mjs` reports it on every run"*. It
+// did not — `grep -n autopilot check.mjs` returned two comments about hooks.json and nothing
+// else. A source file asserting a check that does not exist is the exact shape this workspace
+// has now found nine times, and it was sitting inside the description of the one loop here that
+// runs unattended.
+//
+// The decision log was the only per-iteration record in the workspace and NOTHING read it back.
+// A council reviewing the grader-capture incident was blunt about what that is worth:
+// *"trajectory monitoring without a trusted log, alert, or blocking action is decorative
+// telemetry."* So this reads it — and reports the shape that matters, which is not the count of
+// continues but a run that kept going and finished by declaring itself done.
+{
+  const logFile = path.join(stateRoot(ROOT), 'autopilot-log.jsonl');
+  const stateF = path.join(stateRoot(ROOT), 'autopilot.json');
+  const on = (() => {
+    try { return JSON.parse(fs.readFileSync(stateF, 'utf8')).enabled === true; } catch { return false; }
+  })();
+  const entries = (() => {
+    try {
+      return fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch { return []; }
+  })();
+
+  if (on) soft('autopilot is ON', 'it continues sessions on your behalf — `nexa-autopilot off` to stop');
+  if (entries.length) {
+    const cont = entries.filter((e) => e.decision === 'continue').length;
+    const runs = entries.filter((e) => e.decision === 'stop' && /complete|finish|done/i.test(e.why ?? ''));
+    ok(`autopilot log: ${entries.length} decision(s), ${cont} continue(s)`);
+    // The incident's signature was a loop that halted by declaring success. This cannot know
+    // whether the work was real; it can refuse to let the halt be invisible.
+    if (runs.length) {
+      soft(`${runs.length} autopilot run(s) ended by declaring the work finished`,
+        'a loop that stops because it says it is done has graded itself — check what it produced');
+    }
+  } else if (on) {
+    soft('autopilot is ON and has never recorded a decision', `expected a log at ${logFile}`);
+  }
+}
+
 // ── every control tested in both directions ──────────────────────────────────
 //
 // bad(), not soft(). Sixteen controls have been added to this workspace and every one was

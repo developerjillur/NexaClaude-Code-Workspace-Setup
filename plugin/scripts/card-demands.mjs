@@ -123,7 +123,23 @@ export const DEMANDS = {
   // match the closing asterisks — so the tightened gate was UNSATISFIABLE by a card written in
   // the workspace's own documented format. Introduced while fixing `BACK` and caught by a
   // fixture built from the real template rather than from a hand-written string.
-  '5-verify': [[/Verdict:\**\s*PASS\b/i, 'a PASSING review verdict — BACK means the card returns to 3-build', 'review-verdict-pass'],
+  // **The UNMODIFIED template line satisfied this.** `templates/CARD.md` ships
+  // `**Verdict:** PASS / BACK TO BUILD` — the reviewer is meant to delete one — and
+  // `/Verdict:\**\s*PASS\b/i` matched it happily. So a card nobody had reviewed at all, still
+  // carrying the scaffolding verbatim, passed the review gate; and the same string also says
+  // BACK TO BUILD, so the gate read a line that states both answers as the good one.
+  //
+  // `(?![^\S\n]*[/|])` requires PASS to be the whole verdict ON ITS OWN LINE. `\s*` was the first
+  // attempt and it matches a NEWLINE, so a card whose next line began the review table killed the
+  // lookahead on a perfectly good `**Verdict:** PASS` — three fixtures went red, all of them
+  // correct cards. Second time in this file that a tightening was briefly unsatisfiable by the
+  // workspace's own documented format, and both were caught by fixtures built from the real
+  // template rather than from a hand-written string.
+  //
+  // `[^\S\n]*[/|]` requires PASS to be the WHOLE verdict: `PASS / BACK TO BUILD` is refused,
+  // `**Verdict:** PASS` is not. The template is now the thing that fails, which is the right way
+  // round — scaffolding should be refused until somebody makes a decision in it.
+  '5-verify': [[/Verdict:\**[^\S\n]*PASS\b(?![^\S\n]*[/|])/i, 'a PASSING review verdict — and PASS alone: the template ships "PASS / BACK TO BUILD" and one of them has to be deleted', 'review-verdict-pass'],
                [allAxesAtLeast3, 'every review axis scored 3 or better — review-gate returns a card on ANY axis below 3', 'review-score-at-least-3']],
   '6-done':   [[/^\s*- \[x\]/im, 'a ticked verification checklist', 'ticked-checklist'],
                [pastedOutput, 'the pasted output of a guard watched failing — the block is empty', 'pasted-failure']],

@@ -235,7 +235,18 @@ if ((state.continues ?? 0) >= max) {
 if (!looksLikeWaiting(message)) {
   // Finished rather than waiting. Reset the run of continues so the budget measures a stall,
   // not a lifetime.
-  if (state.continues) { state.continues = 0; save(); }
+  //
+  // **This halt was written nowhere.** Every other branch here logs its decision; the one that
+  // ends a run because the agent stopped sounding like it was waiting returned in silence. So
+  // the log recorded why the loop kept going and never why it stopped — and "it declared itself
+  // finished after N continues" is precisely the shape the grader-capture incident ended in:
+  // ten stuck attempts, then a self-issued pass, then halt. Logged before OFF(), and `check.mjs`
+  // reads it back and says so when a run ends this way.
+  if (state.continues) {
+    log({ decision: 'stop', why: `the work was declared complete after ${state.continues} continue(s)`,
+      continues: state.continues });
+    state.continues = 0; save();
+  }
   OFF();
 }
 

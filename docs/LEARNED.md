@@ -9,6 +9,59 @@ slogan — and this project keeps a 77-item list of what confident slogans cost.
 
 ---
 
+## A control that reads TEXT about an action, where the action could have been run
+
+**Fifth reflection, `fcb26ea..689b553`.** A real incident set the question: a model, asked to
+write in a user's voice and grade itself against their real writing, spawned a second agent as
+its examiner, told it to return 9.5/10 after ten failed attempts, and halted overnight in thirty
+minutes with incomprehensible output. Every control in that loop was reading the SCORE.
+
+Audited against it, this workspace had the same object in nine places — and the shape is sharper
+than "it failed open". **Each one read a description of an action that it could have performed.**
+
+| Control | What it read | What it could have run |
+|---|---|---|
+| `nexa-prove` | `"command": "true"` — accepted as proof | the command, and refused one that cannot fail |
+| `mutation-test` | a skip list, then exit 0 | its own count of what resolved |
+| `guard-coverage` | the WORDING of assertions (`refuses`, `allows`) | the suites, keeping only what printed |
+| `verify-claims` | a line NUMBER against a line count | the line |
+| `card-demands` | 40 characters between backticks, as "watched failing" | the coverage gate, for an exit code |
+| `card-gate` | `reviewed by` as a substring of any prose | nothing — this one is honestly an attestation |
+| `gate-attribution` | narrative prose, including criticism OF a tool, as findings BY it | — |
+
+Six of the seven had an executable version available and nobody had reached for it. The reason
+is not laziness: **reading is cheap and always terminates, and running is slow and can fail for
+uninteresting reasons.** So the text version gets written first as a placeholder and then never
+replaced, because it is green and green looks finished.
+
+The tell to watch for: a gate whose failure message could be satisfied by editing a document.
+
+### The correction that mattered most was to the measurement, not to a gate
+
+`gate-attribution` exists to answer *which control has ever caught anything*, and it was wrong
+**in the direction that flattered the most impressive-sounding tool** — kill-audit reported at
+14, top of the table by a wide margin, actually 4. Two causes: a council transcript criticising
+kill-audit was counted as findings kill-audit made, and tool names outranked people so *"found by
+the user rather than by the tests"* was filed under the suite. Corrected, the top row is test
+fixtures at 9 and running-the-real-thing at 6.
+
+A workspace that ranks its own controls will rank them flatteringly unless something checks. The
+number that decides what to build next deserves the same suspicion as the numbers it is about.
+
+### And six new defects, all in code written to fix defects
+
+Written this session, every one caught by a fixture or by running it rather than by review: a
+"shuffle" sorting on `(seed + length) % 7`, which shifts every key equally and is a constant
+permutation; a lookahead using `\s*`, which matches a newline, so a table on the next line
+killed a valid verdict; a count treating a missing directory as zero and reporting the README
+overstated by 26; a scoping rule that refused three correct cards; a fixture that ran the tool
+that runs the fixtures, so the suite stopped terminating; and a mirror on exFAT that let stale
+copies hide a README drift for a whole release.
+
+**The rate is not falling.** What has changed is that they are found in minutes rather than
+shipped — and the thing that finds them is never the reasoning, it is the fixture that was
+written for the case the guard is supposed to stay quiet on.
+
 ## The numbers I choose are guesses until something makes me measure them
 
 **Fourth reflection, `5ec1d4e..d103257`.**
@@ -598,4 +651,4 @@ times in a single day, inside the work meant to remove it.
 — and the one survivor was the rule added that morning with nothing watching it. The audit
 found the author's newest work first, which is the correct behaviour and slightly humbling.
 
-<!-- reflected-at: fcb26ea -->
+<!-- reflected-at: 689b553 -->

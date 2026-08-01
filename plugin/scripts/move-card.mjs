@@ -29,12 +29,12 @@
 // them is what lets `guard-coverage` demand a firing fixture and a silent fixture for each —
 // `Verdict: BACK` satisfied the review gate for weeks because no fixture could ask what an
 // anonymous regex does with a failing verdict.
-// @rules unknown-transition, guard-refused, card-not-found, wip-limit-move, gate-unavailable, guard-unimplemented, invariants-held, deliverable-shown
+// @rules unknown-transition, guard-refused, card-not-found, wip-limit-move, gate-unavailable, guard-unimplemented, invariants-held, deliverable-shown, guards-watched-failing
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { projectRootFor, paths, pipeline, transitionsFor, PLUGIN_ROOT } from './hooks/roots.mjs';
+import { projectRootFor, paths, pipeline, transitionsFor, statePath, PLUGIN_ROOT } from './hooks/roots.mjs';
 import { demandsFor, unmet } from './card-demands.mjs';
 
 // Guard ids card-gate implements rather than card-demands. Named here so an id that neither
@@ -200,6 +200,33 @@ const EXECUTABLE_GUARDS = {
     console.log('\n  ↑ READ THIS. Every other gate on this card inspected a claim about it.\n');
     return { ok: true };
   },
+  // ── "a guard was watched failing", executed rather than pasted ─────────────
+  //
+  // The demand behind that claim was `/```[\s\S]{40,}?```/` — a LENGTH TEST on a fenced block.
+  // Forty characters of anything between backticks satisfied it, so pasted SUCCESS output passed
+  // as pasted failure, and so did lorem ipsum.
+  //
+  // The council was explicit about the wrong repair: *"any pattern over prose the graded party
+  // writes is the same class of control as the length test — adding /FAIL|AssertionError/ only
+  // teaches the next fabricator which words to paste. **Capture the exit code or leave it
+  // alone.**"* So this captures an exit code. `guard-coverage --run` executes every suite and
+  // keeps only the assertions that actually PRINTED and passed, then refuses any declared rule
+  // no executed assertion names. That is the claim, verified by running it.
+  //
+  // Its own ceiling, stated rather than implied: a passing assertion can still assert nothing.
+  // Proving a fixture would go RED if the rule were deleted is `kill-audit`'s question, and this
+  // does not pretend to answer it.
+  'guards-watched-failing': () => {
+    const script = [path.join(PLUGIN_ROOT, 'scripts', 'guard-coverage.mjs'),
+      path.join(ROOT, 'scripts', 'guard-coverage.mjs')].find((p) => fs.existsSync(p));
+    if (!script) return { ok: false, why: 'guard-coverage.mjs is not in this plugin or this repository' };
+    const r = spawnSync('node', [script, '--run'], { encoding: 'utf8', cwd: ROOT, timeout: 20 * 60_000 });
+    if (r.status === 0) return { ok: true };
+    const tail = (r.stdout || r.stderr || '').split('\n').filter((l) => l.includes('❌')).slice(0, 3);
+    return { ok: false, why: r.status === 2
+      ? `a suite is red, so coverage cannot be measured from it.\n       ${tail.join('\n       ')}`
+      : `a declared rule has no assertion that actually ran and passed.\n       ${tail.join('\n       ')}` };
+  },
   'invariants-held': () => {
     const script = [path.join(PLUGIN_ROOT, 'scripts', 'prove-invariants.mjs'),
       path.join(ROOT, 'scripts', 'prove-invariants.mjs')].find((p) => fs.existsSync(p));
@@ -337,6 +364,61 @@ if (!gate) {
     for (const f of findings) console.error(`    · ${f.missing}\n      ${f.hint}`);
     console.error('');
     process.exit(1);
+  }
+}
+
+// ── the transition record, and reading it back at the moment it matters ─────
+//
+// **This was the workspace's only transition function and it recorded nothing.** A card's
+// attempt count was zero-retained: `templates/CARD.md` holds ONE review table, so a 1/5 → 5/5
+// rewrite destroys its own predecessor, and after seven moves nothing anywhere knew the card had
+// moved at all. The incident that prompted this audit had its evidence in the SHAPE of the data
+// — 5.5, ten stuck attempts, then 9.5 and halt — and nothing was watching the curve.
+//
+// The council was equally clear that a log by itself is not a control: *"trajectory monitoring
+// without a trusted log, alert, or blocking action is decorative telemetry."* So this does not
+// merely append. **It prints the card's own history back, here, at the moment somebody is
+// authorising the next move** — the same principle as `deliverable-shown`. A card that has
+// bounced out of review three times and is now scoring higher says so on screen, to the person
+// deciding, rather than into a file for someone who may never open it.
+//
+// It judges nothing and refuses nothing. Whether a rise is honest improvement or a rewritten
+// table is a question about intent, and no regex settles that.
+{
+  const log = statePath(ROOT, 'transitions.jsonl');
+  const scores = [...cardText.matchAll(/^\|\s*[^|]+\|\s*([1-5])\s*(?:\/\s*5\s*)?\|/gm)].map((m) => +m[1]);
+  const mean = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+
+  const prior = (() => {
+    try {
+      return fs.readFileSync(log, 'utf8').split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+        .filter((e) => e && e.card === file);
+    } catch { return []; }
+  })();
+
+  try {
+    fs.mkdirSync(path.dirname(log), { recursive: true });
+    fs.appendFileSync(log, `${JSON.stringify({
+      card: file, from, to, on: chosen.on, at: new Date().toISOString(),
+      axes: scores.length || undefined, meanScore: mean === null ? undefined : +mean.toFixed(2),
+    })}\n`);
+  } catch { /* a record that cannot be written must not undo a move that succeeded */ }
+
+  if (prior.length) {
+    console.log(`\n  ── ${file} has moved ${prior.length} time(s) before ──`);
+    for (const e of prior.slice(-6)) {
+      console.log(`     ${String(e.at ?? '').slice(0, 16)}  ${e.from} → ${e.to}`
+        + `${e.meanScore ? `   review ${e.meanScore}/5` : ''}`);
+    }
+    // The one shape worth saying out loud: back out of review, and now scoring better.
+    const wasReturned = prior.some((e) => e.from === '4-review' && e.to === '3-build');
+    const best = Math.max(...prior.map((e) => e.meanScore ?? 0));
+    if (wasReturned && mean !== null && mean > best) {
+      console.log(`\n     ⚠ this card was returned from review before, and now scores ${mean.toFixed(2)}/5 —`);
+      console.log('       higher than any previous attempt. That is what real improvement looks like');
+      console.log('       and also what a rewritten score table looks like. Check the diff, not the number.');
+    }
   }
 }
 

@@ -209,7 +209,7 @@ console.log('\n▸ guard-edit — refuses product-code edits that belong to no c
       check('an over-determined case still refuses', r.code === 2);
       check('...and names wip-limit specifically, which the exit code cannot',
         /^refused: wip-limit$/m.test(r.stderr));
-      check('...and NOT the other rule that would also have fired',
+      check('...and NOT [no-reuse-ladder], the other rule that would also have fired',
         !/^refused: no-reuse-ladder$/m.test(r.stderr));
     } finally { fs.rmSync(second, { force: true }); }
   });
@@ -881,7 +881,7 @@ console.log(`\n${'─'.repeat(72)}`);
     const r = spawnSync('node', [gate, f, '--json'], { encoding: 'utf8' });
     try { return (JSON.parse(r.stdout || '{}').findings ?? []).map((x) => x.rule); } catch { return []; }
   };
-  check('card-gate refuses a placeholder where a real answer would pass — one word changed',
+  check('[the-number-that-moves][kill-condition] card-gate refuses a placeholder where a real answer would pass',
     rulesOf(mk('1-spec', 'h.md', ANSWERED.replace(/(\*\*What number moves\?\*\*).*/, '$1 TBD')))
       .join() === 'the-number-that-moves');
   check('card-gate refuses a card missing only the kill condition',
@@ -917,7 +917,7 @@ console.log(`\n${'─'.repeat(72)}`);
   const OPERATED = `${ANSWERED}
 **Observed in production:** no new errors in three days; p95 unchanged at 240ms.
 **Fed back:** nothing to feed back — no support questions since the deploy.`;
-  check('a card in 7-operate owes what production actually did',
+  check('[observed-in-production][fed-back] a card in 7-operate owes what production actually did',
     rulesOf(mk('7-operate', 'v.md', ANSWERED)).sort().join() === 'fed-back,observed-in-production');
   check('...and passes once both are answered', fire(mk('7-operate', 'w.md', OPERATED)) === 0);
   check('...and "nothing to feed back" is a complete answer, not an empty one',
@@ -935,7 +935,7 @@ console.log(`\n${'─'.repeat(72)}`);
   // could not express. The silent case matters as much as the refusal: a `feature` card must
   // not suddenly owe migration answers.
   const MIGRATION = `> kind: migration\n\n${ANSWERED}`;
-  check('a migration card owes expand/contract and mixed-version at 2-plan',
+  check('[expand-contract] a migration card owes expand/contract and mixed-version at 2-plan',
     rulesOf(mk('2-plan', 'q.md', MIGRATION)).sort().join() === 'expand-contract,mixed-version');
   check('...and data-rollback as well once it reaches 5-verify',
     rulesOf(mk('5-verify', 'r.md', MIGRATION)).includes('data-rollback'));
@@ -1484,7 +1484,7 @@ console.log(`\n${'─'.repeat(72)}`);
     (out.controls ?? []).some((c) => c.name === 'guard-edit' && c.refuses > 0 && c.silent > 0));
   check('...and finds guard-edit specifically, rather than nothing at all',
     (out.controls ?? []).some((c) => c.name === 'guard-edit'));
-  check('guard-coverage refuses a control with no fixtures, and names it',
+  check('[untested][no-refusal] guard-coverage refuses a control with no fixtures, and names it',
     (() => {
       // A control with no assertions anywhere must be reported. Simulated rather than
       // asserted: a throwaway script that can exit 1, and no test mentioning it.
@@ -1509,7 +1509,7 @@ console.log(`\n${'─'.repeat(72)}`);
   //
   // This probe carries a refusal assertion and no silent one — one variable changed from the
   // case above — which is the only shape that reaches the second branch.
-  check('guard-coverage refuses a control watched refusing but never staying silent',
+  check('[no-silent-case] guard-coverage refuses a control watched refusing but never staying silent',
     (() => {
       const name = ['zz', String(process.pid), 'halfprobe'].join('-');
       const probe = path.join(ROOT, 'scripts', `${name}.mjs`);
@@ -1654,9 +1654,29 @@ console.log(`\n${'─'.repeat(72)}`);
   // SILENT: a mutation the suite notices. Nothing survives, nothing is unresolved, exit 0.
   {
     const r = scratch([K('watched', WATCHED)]);
-    check('kill-audit is silent when the suite notices the deletion',
+    check('[SURVIVED] kill-audit is silent when the suite notices the deletion — nothing SURVIVED',
       r.status === 0 && /caught/.test(r.stdout) && !/SURVIVED/.test(r.stdout));
     check('...and puts the control back byte for byte', r.control.includes(WATCHED));
+  }
+
+  // [unresolved] — the rule that had no fixture at all, and the way that was hidden is the
+  // point. `guard-coverage` searched the suite text for the word "unresolved" and found it: a
+  // local variable in an unrelated macOS path-resolution block, four hundred lines away. An
+  // id matched as a bare word will eventually collide with somebody's variable name, and the
+  // collision reads as coverage. `guard-coverage --run` found it because that variable is never
+  // PRINTED by a passing assertion, which is the whole reason --run exists.
+  //
+  // The rule itself is the one kill-audit's own header calls its worst historical bug: a
+  // mutation whose `from` no longer matches was silently dropped from the denominator, so the
+  // audit "converged, over time, on printing success while testing less and less."
+  {
+    const r = scratch([K('drifted', "if (a === 'this-line-was-edited-away') process.exit(1);")]);
+    check('[unresolved] kill-audit refuses a mutation whose pattern no longer matches',
+      r.status === 1 && /unresolved/.test(r.stdout), `exit ${r.status}`);
+    check('[unresolved] ...and calls it a failure of the AUDIT, not a result about the control',
+      /failure of the AUDIT/.test(r.stdout));
+    check('[unresolved] ...rather than dropping it from the denominator and reporting success',
+      !/^\s*── 0 caught, 0 survived, 0 unresolved/m.test(r.stdout));
   }
 
   // REFUSES: a real survivor — a rule with no fixture. This is the whole product.
@@ -1989,7 +2009,7 @@ console.log(`\n${'─'.repeat(72)}`);
       return r.status === 0 && /product code: code/.test(r.stdout); })());
 
   // REFUSES: configured and absent. Two ways to configure it, both must refuse.
-  check('ci-code-paths refuses when CODE_REPO is set and the checkout brought nothing',
+  check('[configured-but-absent] ci-code-paths refuses when CODE_REPO is set and the checkout brought nothing',
     (() => { const r = scratch({ codeDirs: ['code'] }, {}, { CODE_REPO: 'someone/thing' });
       return r.status === 1 && /^refused: configured-but-absent$/m.test(r.stderr); })());
   check('...and when workspace.config.json names directories this checkout does not have',
@@ -2050,7 +2070,10 @@ console.log(`\n${'─'.repeat(72)}`);
     plugin: `host${'inger'}`,
   };
 
-  check('refuses the original private repository name',
+  // The rule id belongs in the assertion NAME, not only in the predicate. `guard-coverage --run`
+  // matches against what the suite actually PRINTS, so an id visible only inside the callback is
+  // an id no reader of the output — and no coverage check — can see was exercised.
+  check('[forbidden-word] refuses the original private repository name',
     (() => { const r = scratch({ '.github/workflows/x.yml': `repository: someone/${forbidden.repo}\n` });
       return r.status === 1 && r.findings.every((f) => f.rule === 'forbidden-word'); })());
   check('refuses a product name left in a skill',
@@ -2467,6 +2490,11 @@ console.log('\n▸ move-card — an undefined transition is not a failed one');
       '## 3 · Build',
       'Added the predicate at the queue boundary.',
       '',
+      // The review lives under its own heading, as the template writes it. It did not, and
+      // `reviewed-by` matched anywhere in the file — so this fixture certified a card whose
+      // verdict and score table sat under "## 3 · Build" with no review section at all.
+      '## 4 · Review',
+      '**Reviewed by:** Codex GPT-5.6 (OpenAI) · /codex:review --effort xhigh',
       '**Verdict:** PASS',   // the template's own format — see the regex note in card-demands
       '| Axis | Score | Note |',
       '|---|---|---|',
@@ -2920,6 +2948,29 @@ console.log('\n▸ the blank card template must satisfy no gate');
 // control that ran nothing and reported success. Each is reproduced below BEFORE its fix, then
 // the fix is asserted, then the honest path is asserted still to pass. The second half matters
 // as much as the first: a refusal that also fires on correct input gets switched off in a week.
+// [autopilot-budget] — the budget is the ONLY real bound on a loop that runs unattended, and it
+// lives in a JSON file the agent inside that loop could write. `isProductCode` is false for it,
+// so guard-edit handed it straight through: an agent wanting more turns did not have to defeat
+// `maxContinues`, it could raise it — or set `enabled` and switch the mode on for a user who
+// never asked for it.
+console.log('\n▸ The loop cannot edit its own stopping condition');
+{
+  const fire = (f) => run(path.join(HOOKS, 'guard-edit.mjs'), { tool_name: 'Write', tool_input: { file_path: f } });
+  const r = fire(path.join(os.homedir(), '.nexa', 'projects', 'anything', 'autopilot.json'));
+  check('[autopilot-budget] guard-edit refuses a write to autopilot.json',
+    r.code === 2 && /refused: autopilot-budget/.test(r.stderr), `exit ${r.code}`);
+  check('[autopilot-budget] ...and says why, naming the budget rather than the path',
+    /maxContinues/.test(r.stderr));
+  check('[autopilot-budget] ...wherever it sits, since the state dir is configurable',
+    fire('autopilot.json').code === 2);
+  // The silent half. A name that merely CONTAINS the word must not be caught, or the guard
+  // starts refusing an adopter's own `src/autopilot.json` and gets switched off.
+  check('[autopilot-budget] ...and is silent on an ordinary workspace file',
+    fire(path.join(ROOT, 'README.md')).code === 0);
+  check('[autopilot-budget] ...and on a file that merely mentions it in its name',
+    fire(path.join(ROOT, 'docs', 'autopilot-notes.md')).code === 0);
+}
+
 console.log('\n▸ Controls that certified nothing');
 {
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'noop-gate-'));
@@ -3086,6 +3137,45 @@ console.log('\n▸ Controls that certified nothing');
   check('[deliverable-shown] ...with its CONTENT printed, which is the whole point',
     /The thing I actually wrote\./.test(real.stdout),
     'the artifact must be on screen at the transition, not merely validated');
+
+  // [guards-watched-failing] — the 6-done answer to "a guard was watched failing", which was a
+  // LENGTH TEST on a fenced block: forty characters of anything between backticks, so pasted
+  // SUCCESS output passed as pasted failure. The council refused the obvious repair — *"any
+  // pattern over prose the graded party writes is the same class of control; adding
+  // /FAIL|AssertionError/ only teaches the next fabricator which words to paste. Capture the
+  // exit code or leave it alone."* So it captures one: `guard-coverage --run` executes the
+  // suites and refuses any declared rule that no EXECUTED assertion names.
+  {
+    fs.writeFileSync(path.join(proj, 'board', '5-verify', '008-y.md'),
+      `${REVIEW}\n**Deliverable:** \`post.md\`\n- [x] done\n\`\`\`\nrefused: x\nsomething failed here\n\`\`\`\n`);
+    const at6 = () => spawnSync('node', [path.join(proj, 'scripts', 'move-card.mjs'), '008', '6-done', '--dry-run'],
+      { cwd: proj, encoding: 'utf8', timeout: 300000 });
+
+    // The gate is absent in this scratch project, and a gate that cannot run has not passed —
+    // the same fail-closed rule move-card already applies to card-gate itself.
+    const r = at6();
+    check('[guards-watched-failing] a gate that cannot run refuses the move to 6-done',
+      /\[guards-watched-failing\][^\n]*guard-coverage/.test(r.stdout + r.stderr),
+      (r.stdout + r.stderr).match(/\[guards-watched-failing\][^\n]*/)?.[0]?.slice(0, 80) ?? 'no mention');
+
+    // The silent half, in two parts, because the scratch project cannot supply it alone: copying
+    // guard-coverage.mjs in makes IT a control owing its own fixtures, so the scratch tree is
+    // legitimately never coverage-clean. What the scratch tree CAN prove is that the guard stops
+    // reporting "not installed" and starts reporting a real verdict — i.e. that it executed.
+    fs.copyFileSync(path.join(PLUGIN, 'scripts', 'guard-coverage.mjs'), path.join(proj, 'scripts', 'guard-coverage.mjs'));
+    fs.mkdirSync(path.join(proj, 'tests'), { recursive: true });
+    fs.writeFileSync(path.join(proj, 'tests', 'tiny.test.mjs'), 'process.exit(0);\n');
+    const ran = at6();
+    const line = (ran.stdout + ran.stderr).match(/\[guards-watched-failing\][^\n]*/)?.[0] ?? '';
+    check('[guards-watched-failing] ...and once present it actually RUNS, rather than reporting itself absent',
+      line !== '' && !/is not in this plugin/.test(line), line.slice(0, 90));
+
+    // **NOT tested from here against this repository, and the reason is a bug this fixture had
+    // for one run:** `guard-coverage --run` executes every suite in tests/, and this file IS one
+    // of them — so the assertion re-entered itself and the suite stopped terminating. A control
+    // that runs the suites cannot be exercised from inside the suites. Its clean case belongs to
+    // CI and to `deploy-gate`, which call `guard-coverage --run` directly.
+  }
 
   fs.rmSync(proj, { recursive: true, force: true });
 }

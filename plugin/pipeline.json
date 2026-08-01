@@ -115,7 +115,8 @@
         "ticked-checklist",
         "pasted-failure",
         "where-errors-surface",
-        "invariants-held"
+        "invariants-held",
+        "guards-watched-failing"
       ]
     },
     {

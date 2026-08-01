@@ -35,6 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { projectRootFor, codeDirs } from './hooks/roots.mjs';
 
 // Two roots — see hooks/roots.mjs. This one is the PROJECT being checked, which is not
@@ -45,6 +46,27 @@ if (!ROOT_TRUSTED) {
   process.exit(2);
 }
 const JSON_OUT = process.argv.includes('--json');
+
+// ── --run: stop reading the suite and execute it ─────────────────────────────
+//
+// An audit put this plainly: *"guard-coverage certifies controls by the WORDING of assertions
+// and never runs a test."* True, and the consequence is specific — a rule id sitting in a
+// commented-out fixture, inside a block guarded by an `if` that is false on this platform, or in
+// an assertion that never executes because the loop above it returned early, all read as covered.
+// The text is there; nothing ever ran.
+//
+// `--run` executes each suite and keeps only the assertion lines the suite actually PRINTED and
+// marked ✅. A rule is then covered when a passing assertion named it at runtime, which is a
+// different and much stronger claim than "the id appears in a file under tests/".
+//
+// It is opt-in because the suites take ~42s here and this is called from `check.mjs`, which the
+// per-prompt hook already refuses to run at 1.1s. CI and `deploy-gate` pass `--run`; an
+// interactive `nexa-coverage` gets the static read and is told so in the footer.
+//
+// **What --run still does NOT prove:** that the fixture would go red if the rule were deleted.
+// A passing assertion can assert nothing. That is `kill-audit`'s job and this does not duplicate
+// it — the two are a pair, and the footer says which question each answers.
+const RUN = process.argv.includes('--run');
 
 // ── per-RULE coverage, for controls that declare their rules ─────────────────
 //
@@ -178,6 +200,32 @@ if (fs.existsSync(tdir)) {
 }
 
 /**
+ * Under `--run`: the assertion lines the suites actually PRINTED and passed.
+ *
+ * Everything else in this file reads source. This runs it, then keeps only lines the suite put
+ * on stdout with a ✅ — so an id in a commented-out fixture, in a platform-skipped branch, or
+ * after an early return contributes nothing, where reading the file counts all three as covered.
+ *
+ * A failing suite makes this refuse rather than fall back to the static read: coverage measured
+ * from a red suite is a number about a broken thing.
+ */
+const EXECUTED = (() => {
+  if (!RUN) return '';
+  const out = [];
+  for (const s of suites) {
+    const r = spawnSync('node', [path.join(tdir, s.name)], { cwd: ROOT, encoding: 'utf8', timeout: 10 * 60_000 });
+    const body = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+    if (r.status !== 0) {
+      console.error(`\n  [suite-red] tests/${s.name} exited ${r.status} — refusing to measure coverage from it.`);
+      console.error('  Coverage read off a failing suite is a number about something broken.\n');
+      process.exit(2);
+    }
+    out.push(...body.split('\n').filter((l) => l.includes('\u2705')));
+  }
+  return out.join('\n');
+})();
+
+/**
  * Assertions that mention a control, taken from the whole suite.
  *
  * Matching is by the control's own name, so a suite has to SAY which control it is testing.
@@ -252,7 +300,7 @@ for (const c of found) {
   // Everything above is about the CONTROL. This is about each rule inside it — the level at
   // which the confounding actually happens, where a fixture tripping two rules proves neither
   // and either can be deleted in silence.
-  const allTests = suites.map((s) => s.body).join('\n');
+  const allTests = RUN ? EXECUTED : suites.map((s) => s.body).join('\n');
   for (const id of c.rules) {
     // Searched as a whole word so `wip-limit` is not satisfied by `wip-limits`, and outside
     // the control's own file so a control cannot cover itself.

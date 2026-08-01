@@ -21,8 +21,20 @@
 //
 // The corpus is the repository's own attribution habit: it records HOW a defect was found —
 // "found by running it rather than reading it", "caught by 5-verify", "found by the user rather
-// than by the tests". 191 such sentences across 95 tracked files, written before anybody
+// than by the tests". 161 such sentences across 94 tracked files, written before anybody
 // thought to count them, which is the closest thing to an unbiased sample available here.
+//
+// **The first published table was wrong and the correction is worth more than the table.** It
+// reported kill-audit at 14, the top row by a wide margin. Two things were inflating it: the
+// corpus included `CHANGELOG.md` and a council transcript under `docs/examples/` that CRITICISES
+// kill-audit — five sentences about its weaknesses, counted as five findings it made — and the
+// bucket order let tool names outrank people, so *"found by the user rather than by the tests"*
+// was filed under the suite. Corrected, kill-audit is **4**, and the top row is test fixtures at
+// 9 followed by running-the-real-thing at 6.
+//
+// A control that measures which control works, measured wrong, in the direction that flattered
+// the most impressive-sounding tool. Found by a council reading this file rather than by
+// anything here.
 //
 // ── what this CANNOT tell you, and it is the important half ─────────────────
 //
@@ -65,6 +77,16 @@ const SHOW = argv.find((a) => a.startsWith('--show='))?.split('=')[1];
  * `guard-coverage` catching something in `check.mjs` is a guard-coverage finding.
  */
 const CONTROLS = [
+  // **WHO found it wins over WHAT was involved, and that ordering was backwards.** These are
+  // tried in order and the first match takes the sentence, so the generic buckets — "a test
+  // fixture", matched on `fixture|tests?/|suite|assertion` — used to swallow sentences whose
+  // actual subject was a person: *"found by the user rather than by the tests"* is an
+  // attribution TO the user and against the suite, and it was counted as a suite finding.
+  //
+  // A council auditing this file put it plainly: the top row "is not a record of detections."
+  // The human and user buckets therefore run first, before anything named after a tool.
+  ['a USER reported it', /\buser (rather|reported|said|found|hit)|in the user's hands|somebody (?:else )?(?:noticed|hit)/i],
+  ['a human reading it', /by eye|reading (?:the|it)|read (?:it|the) side by side|noticed while/i],
   ['kill-audit', /kill-audit|mutation-test|mutation/i],
   ['guard-coverage', /guard-coverage/i],
   ['verify-claims', /verify-claims/i],
@@ -78,14 +100,18 @@ const CONTROLS = [
   ['the council', /council/i],
   ['a test fixture', /fixture|tests?\/|suite|assertion/i],
   ['running the real thing', /running it|running the|ran it|probing|live session|live instance|by installing|printing the values|by measuring|end to end/i],
-  ['a human reading it', /\breview\b|reading the|by eye|noticed/i],
-  ['a USER reported it', /\buser (rather|reported|said)|in the user's hands/i],
 ];
 
 const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
 const files = tracked.filter((f) => (f.endsWith('.mjs') || f.endsWith('.md'))
   // Vendored code is somebody else's history, and node_modules is nobody's.
-  && !f.startsWith('plugin/scripts/council/') && !f.includes('node_modules'));
+  && !f.startsWith('plugin/scripts/council/') && !f.includes('node_modules')
+  // **Narrative files are not attribution.** `CHANGELOG.md` restates findings in summary form and
+  // `docs/examples/` contains a council transcript that CRITICISES kill-audit — five sentences
+  // about its weaknesses, counted as five findings it made. Both inflate whichever control is
+  // being discussed rather than recording what caught anything, which is the opposite of the
+  // question this file asks.
+  && !/^CHANGELOG\.md$/.test(f) && !f.startsWith('docs/examples/'));
 
 // A sentence that states how something was found.
 const SENT = /[^.\n]{0,220}?\b(?:found|caught|discovered|revealed|surfaced)\b[^.\n]{0,220}\./gi;

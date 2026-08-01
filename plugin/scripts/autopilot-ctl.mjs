@@ -8,7 +8,14 @@
 //
 // **Off is the default and there is no way to make it the default the other way round.** A mode
 // that continues a session on your behalf has to be something you switched on and can remember
-// switching on, which is also why `check.mjs` reports it on every run.
+// switching on, which is also why `check.mjs` reports it on every run — the ON state, the
+// decision count, and any run that ended by declaring its own work finished.
+//
+// **That sentence was false for as long as it existed.** `grep -n autopilot check.mjs` returned
+// two comments about hooks.json and no code at all: a source file asserting a check nobody had
+// written, describing the one loop here that runs unattended. Found by an audit against a real
+// grader-capture incident, and fixed on both sides — the claim now names what is reported, and
+// check.mjs now reports it.
 
 import fs from 'node:fs';
 import os from 'node:os';

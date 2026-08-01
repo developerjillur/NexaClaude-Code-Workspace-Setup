@@ -102,7 +102,7 @@ const read = () => new Promise((r) => {
   process.stdin.on('end', () => r(s));
 });
 
-// @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder, project-root-unknown, config-unreadable, board-move-unguarded
+// @rules discard-uncommitted, no-card-in-build, wip-limit, no-reuse-ladder, project-root-unknown, config-unreadable, board-move-unguarded, autopilot-budget
 const allow = () => process.exit(0);
 
 // ── why a refusal carries an id ──────────────────────────────────────────────
@@ -528,6 +528,29 @@ report that the tree is clean.`);
 
 // 1. The workspace, the plan, and docs are edited by process work, not by cards.
 const rel = path.relative(ROOT, file);
+
+// ── the autopilot budget, which is the only real bound on an unattended run ──
+//
+// `autopilot.json` holds `enabled` and `maxContinues`. The budget is the ONE thing that stops a
+// loop running all night, and it lives in a JSON file the agent inside that loop can write —
+// `isProductCode` is false for it, so the next line handed it straight through. An agent that
+// wanted more turns did not need to defeat the budget; it could raise it, or set `enabled` and
+// switch the whole mode on for a user who never asked.
+//
+// Not unbypassable: `nexa-autopilot` writes this file legitimately, and a determined bypass is a
+// subprocess away — the same ceiling the Bash guard states about heredocs. What it removes is the
+// quiet direct edit, which is the one that actually happens.
+if (/(^|[/\\])autopilot\.json$/.test(rel) || /(^|[/\\])autopilot\.json$/.test(file)) {
+  block('autopilot-budget',
+`BLOCKED — autopilot.json is the budget on a loop that runs without you.
+
+  It holds \`enabled\` and \`maxContinues\`: whether a session continues itself, and how
+  many times before it must stop. An agent editing its own stopping condition is the
+  shape of the failure this workspace was audited against.
+
+  Use \`nexa-autopilot on | off | budget <n>\` — deliberately, as yourself.`);
+}
+
 const isProductCode = isCode(file);
 if (!isProductCode) allow();
 

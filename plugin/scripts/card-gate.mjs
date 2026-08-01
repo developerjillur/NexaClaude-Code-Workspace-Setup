@@ -84,8 +84,23 @@ const REQUIRED = {
   // Required at 5-verify rather than 4-review: 4-review is where the reviewing happens, and a
   // card is allowed to sit there mid-review. Leaving it is the commitment.
   '5-verify': [
-    ['reviewed-by', 'who reviewed it', /reviewed[_ -]?by/i,
-      'name the model and vendor that reviewed this — e.g. "Codex GPT-5.6 (OpenAI), /codex:review". §10: no model reviews its own work'],
+    // **It must be a FIELD, and it was matched as a substring.** `/reviewed[_ -]?by/i` matched
+    // anywhere in the file, so the sentence "random prose reviewed by foo" buried in a card's body
+    // satisfied the §10 gate — measured, on a card whose only match was ordinary prose.
+    //
+    // Anchoring to the start of a line takes that away: `**Reviewed by:** X` is a field somebody
+    // wrote deliberately; `…, reviewed by foo, …` mid-sentence is not. Requiring it under the
+    // `## 4 · Review` heading was tried first and refused three correct fixture cards that named
+    // a reviewer without the heading — the false-positive direction, which is how a guard gets
+    // switched off within a week and takes the real case with it.
+    //
+    // What this deliberately does NOT do: compare the named model to the one that built the card.
+    // A council reviewing the grader-capture incident called that theatre, with a specific
+    // reason — a Claude Code subagent's frontmatter has no vendor field, `model:` resolves to an
+    // Anthropic model or `inherit`, so the check would diff two strings the same session typed.
+    // **This is an attestation and stays one.** Scoping it stops ordinary prose from signing it.
+    ['reviewed-by', 'who reviewed it', /^[^\S\n]*[*_>\s-]*reviewed[_ -]?by\b/im,
+      'name the model and vendor that reviewed this, INSIDE "## 4 · Review" — e.g. "Codex GPT-5.6 (OpenAI), /codex:review". §10: no model reviews its own work'],
   ],
   // operate-after-done: a card cannot be called finished without naming where its failures
   // will surface. This is the one automatable piece the skill itself identified.
