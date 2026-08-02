@@ -117,7 +117,8 @@
     "code-simplifier@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "claude-code-setup@claude-plugins-official": true
   },
   "$plugins": [
     "Why each, since §10 says this list names what we DEPEND on rather than what happens to be",

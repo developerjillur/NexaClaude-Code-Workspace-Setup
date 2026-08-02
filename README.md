@@ -144,7 +144,7 @@ hand.** The in-repo tests stayed green through every one of them, because on the
 built it the paths always agreed.
 
 That is why `tests/` exists and why every guard here ships with the case it must *ignore*
-beside the case it must catch. **712 assertions across five suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
+beside the case it must catch. **721 assertions across five suites, and the blocking paths were watched blocking.** (One is macOS-specific and skips
 elsewhere, so the exact count moves by one — a number that drifts is worth saying so about rather
 than rounding into a claim.)
 
@@ -194,7 +194,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
 | **6 hook events** | including the one that refuses: no product edit without a card in build |
-| **28 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`, `nexa-orchestrate`… on your `PATH` (`ls bin/` for all of them) |
+| **29 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`, `nexa-orchestrate`, `nexa-adopt`… on your `PATH` (`ls bin/` for all of them) |
 
 ### The first session, and one thing it cannot do
 
@@ -355,7 +355,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 44 scripts — `scripts/`
+### 45 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -542,6 +542,29 @@ runner: three rules that were prose until now, all refused at **plan** time.
 
 In Orca, use Orca's own orchestration — it is richer. This is the floor everywhere else, and it
 runs inside Orca too, so a plan is not stranded when you change editor.
+
+### Adopting what a recommender recommends
+
+`claude-code-setup` — Anthropic's own, in `claude-plugins-official` — reads your codebase and
+suggests hooks, skills, MCP servers and subagents. **Its SKILL.md says in bold that it is
+read-only and creates nothing**, and it carries zero install commands. So it answers *what should
+I add* and never *add it*, and the second half was five manual steps: install, declare in
+`.claude/settings.json`, check nothing here already covers it, write the `docs/DECISIONS.md` line
+§6 requires, re-run the gate.
+
+`nexa-adopt` is that half — and it **refuses** without `--why` and `--checked`, because the
+record is the part people skip and one written later is written by somebody who has forgotten.
+
+```bash
+nexa-adopt --list                                    what is DECLARED, not what happens to be installed
+nexa-adopt plugin foo@bar --why "…" --checked "…"    install · declare · record, or refuse
+```
+
+**It will not adopt a third-party skill, and that is deliberate.** A skill is instructions
+entering the model's context, so installing one is closer to running code than to reading a
+document — `skills/skill-finder` keeps that gate, and a command that appeared to automate it
+would be read as permission to skip it. A failed install records nothing: a decision about a
+thing that is not there is worse than no decision.
 
 ### The measurements that grade the workspace itself
 

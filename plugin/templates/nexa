@@ -113,6 +113,7 @@ if [ "$cmd" = "where" ] || [ -z "$cmd" ]; then
   [ -z "$cmd" ] && echo "
   ./nexa check | prove | claims | depth | secrets | coverage | mutate | move
   ./nexa portable --install      wire every tool's hooks
+  ./nexa adopt --list            what this workspace DECLARES, not what happens to be installed
   ./nexa orchestrate --workers   which agents are installed here
   ./nexa adapter <guard>         hook entry point (used by .cursor/, .codex/, .github/)
   ./nexa bootstrap               fetch the scripts into this repo"
@@ -144,6 +145,7 @@ case "$cmd" in
   mutate)      f=mutation-test.mjs ;;
   move)        f=move-card.mjs ;;
   portable)    f=portable.mjs ;;
+  adopt)       f=adopt.mjs ;;
   orchestrate) f=orchestrate.mjs ;;
   audit)       f=kill-audit.mjs ;;
   attribution) f=gate-attribution.mjs ;;

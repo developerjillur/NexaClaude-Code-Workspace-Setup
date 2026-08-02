@@ -3227,6 +3227,85 @@ console.log('\n▸ agent-adapter — the same refusal, in every tool that can re
     missing.code === 2 && /guard-missing/.test(missing.stderr), `exit ${missing.code}`);
 }
 
+// ── nexa-adopt — the half a recommender does not do ─────────────────────────
+//
+// `claude-code-setup` reads the codebase and recommends hooks, skills, MCP servers and
+// subagents. Its own SKILL.md says in bold that it is READ-ONLY and creates nothing, and it
+// carries zero install commands — measured. So the second half was five manual steps, and a
+// five-step chore after a recommendation is a chore people skip.
+//
+// What this must NOT become is an auto-installer. `skills/skill-finder` refuses that
+// deliberately: a skill is instructions entering the model's context, so installing one is
+// closer to running code than to reading a document. The fixtures below are mostly about what
+// it declines to do.
+console.log('\n▸ nexa-adopt — installs the clerical half, refuses the reading half');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'adopt-'));
+  fs.mkdirSync(path.join(proj, 'plugin', 'scripts', 'hooks'), { recursive: true });
+  fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
+  fs.mkdirSync(path.join(proj, 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(proj, '.nexa'), 'id: t\n');
+  fs.writeFileSync(path.join(proj, '.claude', 'settings.json'),
+    JSON.stringify({ enabledPlugins: { 'already@here': true } }, null, 2));
+  fs.writeFileSync(path.join(proj, 'docs', 'DECISIONS.md'), '# Decisions\n');
+  fs.copyFileSync(path.join(PLUGIN, 'scripts', 'adopt.mjs'), path.join(proj, 'plugin', 'scripts', 'adopt.mjs'));
+  fs.copyFileSync(path.join(HOOKS, 'roots.mjs'), path.join(proj, 'plugin', 'scripts', 'hooks', 'roots.mjs'));
+  // The scratch plugin needs its manifest, or `projectRootFor` treats `plugin/` itself as the
+  // project — which is the INSTALLED layout's whole distinction. Without it the script reads a
+  // settings.json that is not there and every assertion fails for the fixture's reason, not the
+  // code's. CLAUDE_PROJECT_DIR names the project explicitly, as ./nexa does.
+  fs.mkdirSync(path.join(proj, 'plugin', '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(proj, 'plugin', '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'scratch', version: '0.0.0', description: 'x', license: 'MIT' }));
+  const A = (...a) => spawnSync('node', [path.join(proj, 'plugin', 'scripts', 'adopt.mjs'), ...a],
+    { cwd: proj, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+  const said = (r) => (r.stdout + r.stderr);
+
+  // [missing-rationale] — the part people skip, made the part that blocks. §6 of the contract
+  // asks for a DECISIONS.md line per dependency, and a record written later is written by
+  // somebody who has forgotten.
+  const bare = A('plugin', 'x@y');
+  check('[missing-rationale] adopting without --why and --checked is refused',
+    bare.status === 1 && /missing-rationale/.test(said(bare)), `exit ${bare.status}`);
+  check('[missing-rationale] ...and nothing was installed, declared or recorded',
+    fs.readFileSync(path.join(proj, 'docs', 'DECISIONS.md'), 'utf8').trim() === '# Decisions');
+
+  // [already-declared] — the reuse ladder, asked before anything is fetched.
+  const dup = A('plugin', 'already@here', '--why', 'w', '--checked', 'c');
+  check('[already-declared] a plugin already in enabledPlugins is refused',
+    dup.status === 1 && /already-declared/.test(said(dup)), `exit ${dup.status}`);
+
+  // [unknown-kind] — and the refusal that matters most: a SKILL is not adopted by a command.
+  const sk = A('skill', 'something', '--why', 'w', '--checked', 'c');
+  check('[unknown-kind] a third-party SKILL is refused, not automated',
+    sk.status === 1 && /unknown-kind/.test(said(sk)));
+  check('[unknown-kind] ...and it points at the reading gate rather than a flag',
+    /skill-finder/.test(said(sk)) && /VENDOR it/.test(said(sk)));
+  const bad = A('nonsense', 'x', '--why', 'w', '--checked', 'c');
+  check('[unknown-kind] ...as is a kind it does not know', bad.status === 2);
+
+  // The silent halves: --list reports, and --dry-run touches nothing.
+  const list = A('--list');
+  check('--list reports what is DECLARED, and exits 0',
+    list.status === 0 && /already@here/.test(list.stdout), `exit ${list.status}`);
+  const dry = A('plugin', 'new@thing', '--why', 'w', '--checked', 'c', '--dry-run');
+  check('--dry-run changes nothing at all',
+    dry.status === 0
+      && fs.readFileSync(path.join(proj, 'docs', 'DECISIONS.md'), 'utf8').trim() === '# Decisions'
+      && !JSON.parse(fs.readFileSync(path.join(proj, '.claude', 'settings.json'), 'utf8')).enabledPlugins['new@thing'],
+    `exit ${dry.status}`);
+
+  // [install-failed] — an install that did not work must leave NO decision behind. A record
+  // about a thing that is not there is worse than no record.
+  const fail = A('plugin', 'definitely-not-a-real-plugin@nowhere', '--why', 'w', '--checked', 'c');
+  check('[install-failed] a failed install records nothing',
+    fail.status === 1
+      && fs.readFileSync(path.join(proj, 'docs', 'DECISIONS.md'), 'utf8').trim() === '# Decisions',
+    `exit ${fail.status}`);
+
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
 console.log('\n▸ nexa-portable — the same rules, for tools that have no hooks');
 {
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'portable-'));

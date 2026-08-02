@@ -30,6 +30,7 @@ machine fails loudly instead of silently losing the review path.
 |---|---|
 | **`codex@openai-codex`** | **Load-bearing.** `/codex:review`, `/codex:rescue`, and a **Stop gate that can BLOCK a turn** when Codex finds something unfixed |
 | `ponytail@ponytail` | the laziness ladder, every turn — §5 |
+| **`claude-code-setup@claude-plugins-official`** | Anthropic's own **recommender**: reads the codebase and suggests hooks, skills, MCP servers and subagents. **It is read-only and installs nothing** — its SKILL.md says so in bold, and it carries no install command. `nexa-adopt` is the other half: it installs, declares the plugin in `settings.json`, and writes the `docs/DECISIONS.md` line §6 requires — and it **refuses** without `--why` and `--checked`. A third-party *skill* it will not adopt at all; that gate is a reading exercise (`skills/skill-finder`) and a command that appeared to automate it would be read as permission to skip it |
 | `code-review` · `feature-dev` · `github` | Anthropic's own review, explorer/architect subagents, PR work |
 | `code-simplifier` · `security-guidance` | edit-time simplification and security warnings |
 | *your stack's plugins* | **add them yourself** — the SDK you call, the host you deploy to. None ship enabled, because a plugin declared for somebody else's product is a dependency nobody here asked for |
