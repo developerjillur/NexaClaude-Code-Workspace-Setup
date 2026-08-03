@@ -3,7 +3,7 @@
 <!-- contract-meta
 last-verified: <date you last read this end to end>
 verified-at: INITIAL
-cost: ~2790 tokens, loaded every session — `nexa-check` recomputes and refuses on drift
+cost: ~2865 tokens, loaded every session — `nexa-check` recomputes and refuses on drift
 scope: this workspace and your configured codeDirs; subdirectories carry their own CLAUDE.md
 -->
 
@@ -147,6 +147,14 @@ the graph in one window, **split the card**. Do not continue in a new session an
 anything that means reading widely and keep its conclusion, not its file dumps; bound command
 output at the source (`| head`, `-n`, `--json`); never re-read a file to confirm an edit that
 already reported success.
+
+**`nexa-tokens` measures both halves** — neither is visible while you work. Run it when spend
+feels wrong, and before claiming any change made things cheaper:
+
+```bash
+nexa-tokens                 # the dearest sessions of the last 7 days
+nexa-tokens <file.jsonl>    # one session, and what grew its context
+```
 
 ---
 

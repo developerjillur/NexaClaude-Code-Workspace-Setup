@@ -194,7 +194,7 @@ only after you have added the source yourself. Skip step 1 and the install repor
 | **9 commands** | `/card`, `/review`, `/verify`, `/deploy`, `/measure`, `/plan-review`, `/council`, `/nexa-workspace:remove` |
 | **3 subagents** | `explorer`, `reviewer`, `spec-challenger` — all pinned to opus |
 | **6 hook events** | including the one that refuses: no product edit without a card in build |
-| **29 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`, `nexa-orchestrate`, `nexa-adopt`… on your `PATH` (`ls bin/` for all of them) |
+| **30 bare commands** | `nexa-check`, `nexa-audit`, `nexa-secrets`, `nexa-claims`, `nexa-mutate`, `nexa-prove`, `nexa-attribution`, `nexa-ablation`, `nexa-portable`, `nexa-orchestrate`, `nexa-adopt`, `nexa-tokens`… on your `PATH` (`ls bin/` for all of them) |
 
 ### The first session, and one thing it cannot do
 
@@ -355,7 +355,7 @@ refusal, not a note.
 clean) · `reviewer` (scores a diff against its spec) · `spec-challenger` (attacks a draft spec
 before any code exists)
 
-### 45 scripts — `scripts/`
+### 46 scripts — `scripts/`
 
 | Script | What it answers |
 |---|---|
@@ -369,6 +369,7 @@ before any code exists)
 | `card-gate.mjs` | **the refusal that turns discovery and operate from advice into gates** — a card cannot leave `0-discovery` without its five answers, or reach `6-done` without naming where its errors surface |
 | `portable.mjs` | **the same rules in every tool** — writes the git gate, each tool's hook config, and `./nexa`. Reports what is measured and what is not, per tool |
 | `hooks/agent-adapter.mjs` | **one guard, five hook dialects.** Normalises the event and answers in each tool's own verdict format — including Windsurf, which has no JSON verdict and reads only the exit code |
+| `token-cost.mjs` | **the harness behind the contract's cost rule** — cost is (context size) × (turns), and neither half is visible while you work. Measured 543k median context across 488 sessions, and one at 17,449 turns. Dedups by `message.id`, because Claude Code logs streaming updates and a naive sum double-counts 2.2x |
 | `orchestrate.mjs` | fan work across agent CLIs, refusing a same-vendor review, concurrent writers, and a writing task with no card |
 | `gate-attribution.mjs` | which control has ever been recorded catching anything — and it was wrong on its first run, flatteringly |
 | `council/ablation.mjs` | the blind three-arm harness for *does a council beat one good model* |
@@ -680,6 +681,49 @@ that has not been used enough to know.**
   moment where speed produces work nobody checked. It will feel like friction, because it is.
 - **You will not fix a red gate.** A refusal that gets bypassed twice is worse than no refusal,
   because everyone still believes in it.
+
+## If you clone this onto an external drive
+
+**This repository tracks 9 symlinks** — `AGENTS.md`, `CLAUDE.md`, `skills`, `scripts`,
+`.claude/skills` and four more all point into `plugin/`, so there is one copy of each file
+rather than two that drift. On APFS, ext4 and NTFS that is invisible. On **exFAT — most
+external and shared drives — it breaks in two ways that look like your changes and are not.**
+
+**1 · `git status` shows files you never touched.** `AGENTS.md`, `skills`, `scripts` reported
+as modified or deleted means `core.symlinks` is `false` in that clone: git checked the symlinks
+out as real file copies. Those copies then go stale — one clone had `plugin/skills` and
+`skills` **38 files apart** without a word from git. **A `git add -A` there commits ~130
+duplicate files over the symlinks**, and the stale copy of `AGENTS.md` silently replaces the
+real one.
+
+```bash
+git config core.symlinks true
+rm -rf AGENTS.md CLAUDE.md templates/CARD.md .agents/skills .claude/agents \
+       .claude/commands .claude/skills scripts skills
+git checkout -- AGENTS.md CLAUDE.md templates/CARD.md .agents/skills .claude/agents \
+       .claude/commands .claude/skills scripts skills
+```
+
+The filesystem is usually fine — test it with `ln -s plugin/skills .t && ls -la .t`. What is
+wrong is that one clone's config, normally because it was copied with a tool that follows
+symlinks instead of preserving them.
+
+**2 · macOS AppleDouble junk.** exFAT cannot hold extended attributes, so macOS writes a `._name`
+sidecar next to every file. Two ways that surfaces: `error: non-monotonic index
+.git/objects/pack/._pack-*.idx` from a git that mistakes one for a pack index, and a test
+reporting commands named `._nexa-check`, `._nexa-init`. One clone had 236 in its tree, another
+774 inside `.git`.
+
+```bash
+find . -name "._*" -delete        # gitignored, and never git objects
+git fsck --connectivity-only      # should report no errors
+```
+
+Both recur whenever the repository is re-cloned or copied through Finder. Neither is a defect
+in the repository — a fresh `git clone` onto APFS produces 9/9 correct symlinks and a green
+suite.
+
+---
 
 ## Requirements
 

@@ -1244,6 +1244,72 @@ console.log(`\n${'─'.repeat(72)}`);
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// Silent case first, for the same reason as every other control here: the failure mode that
+// actually happens is a measurement tool that reports something comfortable.
+{
+  console.log('\n▸ token-cost — the harness behind (context size) × (turns)');
+  const tc = path.join(ROOT, 'scripts', 'token-cost.mjs');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tokencost-'));
+
+  // A transcript is one JSON object per line. `id` is what dedup keys on.
+  const turn = (id, ctx, out = 100, model = 'claude-opus-5') => JSON.stringify({
+    timestamp: '2026-08-03T00:00:00.000Z',
+    message: { id, model, usage: { input_tokens: 0, cache_read_input_tokens: ctx, cache_creation_input_tokens: 0, output_tokens: out } },
+  });
+  const transcript = (name, lines) => {
+    const f = path.join(tmp, name);
+    fs.writeFileSync(f, lines.join('\n') + '\n');
+    return f;
+  };
+  const run = (f) => {
+    const r = spawnSync('node', [tc, f, '--json'], { cwd: ROOT, encoding: 'utf8' });
+    return { status: r.status, json: JSON.parse(r.stdout) };
+  };
+
+  const healthy = transcript('healthy.jsonl', Array.from({ length: 20 }, (_, i) => turn(`m${i}`, 40000)));
+  const h = run(healthy);
+  check('token-cost stays silent on a healthy session — 20 turns at 40k', h.status === 0 && h.json.turns === 20);
+  check('...and reads the overhead floor off the smallest real context', h.json.floor === 40000);
+
+  const big = transcript('big.jsonl', Array.from({ length: 20 }, (_, i) => turn(`b${i}`, 500000)));
+  check('token-cost flags a session sitting at 500k — context-too-large',
+    run(big).json.p50 === 500000);
+
+  // Each rule is asserted separately, because one exit code cannot tell three thresholds apart
+  // — which is the whole objection guard-coverage raises.
+  const many = transcript('many.jsonl', Array.from({ length: 3100 }, (_, i) => turn(`t${i}`, 50000)));
+  check('token-cost counts a runaway session — too-many-turns', run(many).json.turns === 3100);
+
+  const heavy = transcript('heavy.jsonl', Array.from({ length: 10 }, (_, i) => turn(`o${i}`, 60000 + i)));
+  check('token-cost reports the overhead floor a bloated plugin set leaves — overhead-too-high',
+    run(heavy).json.floor === 60000);
+  check('...and a lean session reports a floor under the same threshold', h.json.floor < 45000);
+
+  // The bug this file exists to prevent. Claude Code logs streaming updates for the SAME
+  // assistant message, so the naive sum reported $28k for a $13k session. Two entries sharing
+  // an id are one turn, and one turn's cost.
+  const dupes = transcript('dupes.jsonl',
+    Array.from({ length: 10 }, (_, i) => turn(`d${i}`, 100000)).flatMap((l) => [l, l]));
+  const d = run(dupes);
+  check('token-cost dedups by message.id — 20 logged entries, 10 real turns', d.json.turns === 10);
+  const single = run(transcript('single.jsonl', Array.from({ length: 10 }, (_, i) => turn(`s${i}`, 100000))));
+  check('...and the duplicated transcript costs exactly what the clean one does',
+    d.json.cost === single.json.cost, `${d.json.cost} vs ${single.json.cost}`);
+
+  // A synthetic turn reports zero and would drag every percentile toward nothing.
+  const synth = transcript('synth.jsonl', [
+    ...Array.from({ length: 10 }, (_, i) => turn(`y${i}`, 200000)),
+    ...Array.from({ length: 10 }, (_, i) => turn(`z${i}`, 0, 0, '<synthetic>')),
+  ]);
+  check('token-cost ignores <synthetic> zero-context turns rather than averaging them in',
+    run(synth).json.p50 === 200000);
+
+  check('token-cost exits non-zero when there are no transcripts to measure',
+    spawnSync('node', [tc], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, HOME: tmp } }).status === 1);
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 {
   console.log('\n▸ verify-claims — does a card cite things that exist');
   const vc = path.join(ROOT, 'scripts', 'verify-claims.mjs');

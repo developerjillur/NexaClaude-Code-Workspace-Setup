@@ -5,6 +5,34 @@ README counts were wrong by hand before a check started counting the files inste
 
 ---
 
+## 1.20.0 — 2026-08-03
+
+**The cost rule got its harness.** §7 has said *cost is (context size) × (turns)* since 1.19.0,
+and nothing measured it — which is the exact shape this repo refuses everywhere else. Now
+`nexa-tokens` (`scripts/token-cost.mjs`) prints both halves: the dearest sessions of a window,
+or one session broken down by what grew its context.
+
+Measured on the author's environment over 488 sessions: the median context was **543k on every
+project**, and one session reached **17,449 turns** — 9.28B cache-read tokens. No single turn
+looked alarming, which is why it went unnoticed for days. The per-turn view is the wrong view.
+
+**The dedup is the load-bearing part.** Claude Code logs streaming updates for the same
+assistant message, so a naive sum over `usage` double-counts by ~2.2x — 38,343 usage entries for
+17,437 distinct messages. The first version of the script reported $28k for a $13k session. Two
+assertions now hold it: a transcript with every line duplicated must report the same turn count
+and the same cost as the clean one.
+
+`guard-coverage` refused the first version — three declared rules, one exit code, and no
+assertion naming two of them. Each threshold is asserted separately now.
+
+**New in the README: what happens when you clone this onto an external drive.** The repo tracks
+9 symlinks, and on exFAT both of the following look like your changes and are not —
+`core.symlinks=false` checking them out as stale real copies (one clone had `plugin/skills` and
+`skills` **38 files apart**, and a `git add -A` there would have committed ~130 duplicates over
+the symlinks), and macOS AppleDouble `._*` sidecars, which break `git` with *non-monotonic
+index* and make the packaging test see a command called `._nexa-tokens`. Both hit this repo
+while 1.19.0 was being published. Recognition and repair for each.
+
 ## 1.19.0 — 2026-08-03
 
 **The contract was costing 7,818 tokens on every turn, and most of it was history.**
