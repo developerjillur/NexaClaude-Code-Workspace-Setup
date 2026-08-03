@@ -44,3 +44,6 @@ docs/.prompt-check-state.json
 # Present only while a run is in flight, or after one was killed — the next run restores from it
 # and deletes it. Never committed; it is machine state, not a record.
 .nexa-kill-audit-inflight.json
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
