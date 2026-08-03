@@ -1,6 +1,6 @@
 ---
 name: deploy-gate
-description: Run before every deployment, without exception. Security scan, test suite, and the live checks that have caught real holes in this project. Use whenever the words deploy, ship, push to production, or redeploy appear.
+description: Run before every deployment, without exception. Use whenever the words deploy, ship, push to production, or redeploy appear.
 ---
 
 # Deploy gate

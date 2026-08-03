@@ -22,6 +22,13 @@ before moving a card to `5-verify`.
 against a different model than the one that wrote the code (§4 of the contract requires
 this), or a broad search. Do not use one to avoid reading the spec.
 
+**They are also the cheapest thing here.** Cost is (context size) × (turns), so a 60k-token
+survey read in the main thread is re-billed on every turn after it; the same survey in a
+subagent returns a conclusion and costs nothing again. Anything that means reading widely —
+many files, a long log, an unfamiliar subsystem — goes to a subagent. Bound command output at
+the source (`| head`, `-n`, `--json`), and never re-read a file to confirm an edit that already
+reported success.
+
 **Plugins — how §10's "second model, always" is actually wired.** Declared in
 `.claude/settings.json` rather than left to whatever happens to be installed, so a fresh
 machine fails loudly instead of silently losing the review path.

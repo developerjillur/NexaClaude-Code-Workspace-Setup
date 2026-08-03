@@ -1,6 +1,6 @@
 ---
 name: generate-image
-description: Use whenever the user asks for an image to be generated, created, drawn, rendered or made — a logo, icon, illustration, diagram, banner, mockup, photo, texture or placeholder art. Generates it with the Codex CLI through `nexa-image` and returns the path. Also use when asked where a generated image was saved, or to regenerate one.
+description: Use whenever the user asks for an image to be generated, created, drawn, rendered or made — logo, icon, illustration, diagram, banner, mockup, photo, texture, placeholder art — or asks where a generated one was saved.
 ---
 
 # Generating an image

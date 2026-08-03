@@ -1,6 +1,6 @@
 ---
 name: context-budget
-description: Run at 2-plan, before any code. Decides whether a card fits in one context window — and splits it if not. Stops the failure where an agent forgets the start of its own work.
+description: Run at 2-plan, before any code. Decides whether a card fits one context window, and splits it if not.
 ---
 
 # Context budget

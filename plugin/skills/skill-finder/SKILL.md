@@ -1,6 +1,6 @@
 ---
 name: skill-finder
-description: Run before starting any new kind of work — find the skill that already covers it, here first and outside second. Answers "which skill applies now?", and gates installing a third-party one. Use when a task does not obviously match a skill you already know.
+description: Run before starting any new kind of work, and before installing any third-party skill. Answers "which skill applies now?"
 ---
 
 # Skill finder

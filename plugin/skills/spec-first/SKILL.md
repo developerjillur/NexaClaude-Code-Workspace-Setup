@@ -1,6 +1,6 @@
 ---
 name: spec-first
-description: Write or challenge a spec before any code exists. Use when a card enters 1-spec, or whenever an implementation question has no answer in the card. Stops the drift between what was asked for and what gets built.
+description: Write or challenge a spec before any code exists. Use when a card enters 1-spec, or whenever an implementation question has no answer in the card.
 ---
 
 # Spec first

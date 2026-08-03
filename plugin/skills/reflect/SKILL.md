@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: Read the records back and consolidate what they add up to. Run when check.mjs reports the reflection is stale, at the end of a long session, or before handing the project to someone else. Turns decisions, cards and prompts into the patterns none of them state on their own.
+description: Run when check.mjs reports the reflection is stale, at the end of a long session, or before handing the project to someone else.
 ---
 
 # Reflect

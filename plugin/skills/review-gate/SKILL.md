@@ -1,6 +1,6 @@
 ---
 name: review-gate
-description: Score a change on five axes before it may leave 4-review. Must be run by a different model than the one that wrote the code. Any axis below 3 sends the card back.
+description: Score a change on five axes before it may leave 4-review. Must be run by a different model than the one that wrote the code.
 ---
 
 # Review gate

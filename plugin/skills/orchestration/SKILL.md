@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: Use when work genuinely needs more than one agent at once — a survey across subsystems nobody has read, a build and an independent review that must not share a vendor, or a fan-out over a list too long for one context. Not for ordinary cards: one card in one context is the default and orchestration is the exception. Says which runtime to use in the editor you are actually in, and enforces WIP=1, §10 and the card rule across all of them.
+description: Use when work genuinely needs several agents at once — a survey across subsystems nobody has read, a build plus an independent review that must not share a vendor, or a fan-out too long for one context. The exception, not the default.
 ---
 
 # Orchestration

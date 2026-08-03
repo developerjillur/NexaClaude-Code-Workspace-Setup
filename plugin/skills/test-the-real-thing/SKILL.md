@@ -1,6 +1,6 @@
 ---
 name: test-the-real-thing
-description: Run before claiming any feature works, ships, or is fixed — and immediately when a user says something is not working. A green suite is not a working product. Every lesson here was paid for by a user who had to report the same failure ten times while the tests stayed green.
+description: Run before claiming any feature works, ships, or is fixed — and immediately when a user says something is not working.
 ---
 
 # Test the real thing

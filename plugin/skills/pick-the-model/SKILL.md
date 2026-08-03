@@ -1,6 +1,6 @@
 ---
 name: pick-the-model
-description: Choose which agent or model does a piece of work. Use at 2-plan and whenever a task is about to be handed off. Based on measurements taken in this project, not on marketing.
+description: Choose which agent or model does a piece of work. Use at 2-plan and whenever a task is about to be handed off.
 ---
 
 # Pick the model

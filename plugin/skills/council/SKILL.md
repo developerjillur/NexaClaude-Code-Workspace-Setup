@@ -1,6 +1,6 @@
 ---
 name: council
-description: Use before a decision that is expensive to reverse — architecture, schema, a security judgement, a plan, or anything whose failure is data loss or an outage. Five models across four vendors answer independently, rank each other anonymised, and you synthesise. Not for questions with a knowable answer.
+description: Use before a decision expensive to reverse — architecture, schema, a security judgement, anything whose failure is data loss or an outage. Five models, four vendors, anonymised ranking. Not for questions with a knowable answer.
 ---
 
 # Council

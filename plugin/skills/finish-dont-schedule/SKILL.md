@@ -1,6 +1,6 @@
 ---
 name: finish-dont-schedule
-description: Run before ending a turn with work still on the list, and whenever /loop or ScheduleWakeup is about to be used. Decides whether there is anything real to wait for — and if there is not, the answer is to finish the work now rather than set a timer. Also run when a loop has been ticking without producing anything.
+description: Run before ending a turn with work still on the list, and whenever /loop or ScheduleWakeup is about to be used.
 ---
 
 # Finish, do not schedule

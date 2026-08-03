@@ -1,6 +1,6 @@
 ---
 name: security-gate
-description: Run before any card leaves 4-review. Separate from the review score and cannot be traded against it. Covers the specific holes this project has actually shipped.
+description: Run before any card leaves 4-review. Separate from the review score and cannot be traded against it.
 ---
 
 # Security gate

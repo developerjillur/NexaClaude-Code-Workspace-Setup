@@ -1,6 +1,6 @@
 ---
 name: session-start
-description: Run first, every session, before any other action. Rebuilds the context a new session does not have and cannot infer. Two minutes that prevent the most expensive failure — an agent confidently continuing work it has forgotten.
+description: Run first, every session, before any other action. Rebuilds the context a new session does not have and cannot infer.
 ---
 
 # Session start
@@ -46,9 +46,34 @@ One short paragraph, before doing anything:
 thing — and it catches the case where you read the wrong card, or the card moved and nobody
 said so.
 
+## Then size the work before you wrap it in process
+
+**Ask what the change can break, and match the process to that** — AGENTS.md §3. The board and
+its gates exist for changes that can hurt a caller; running all of them on a typo is not rigour,
+it is cost.
+
+- **Reversible and contained** — a typo, a comment, a log line, a version bump, a local
+  script: just do it. No card, no gate, no second model. Say in one line that you skipped
+  them and why.
+- **Ordinary product change** — the full board, one card, one context.
+- **Expensive to reverse** — schema, auth, money, migration, public API, deploy: the board
+  *plus* `council` and `deploy-gate`.
+
+**Unsure which bucket? It is the middle one.**
+
+This is about the *scope of process*, never about the *care taken inside it*. The tier stays
+pinned and thinking stays full for whatever you are actually doing — see `pick-the-model`.
+
+**Both directions fail, and the second is the quiet one.** Skipping a gate on something that
+needed it ships a bug, and you find out. Running every gate on everything burns the budget and
+teaches everyone to route around the process for small work — which is exactly when the process
+stops catching anything.
+
 ## What a fresh session reliably gets wrong
 
 - **Starting something new** while a card sits in build. Check first.
+- **Wrapping a two-line change in the full pipeline.** Process is a cost like any other; §3
+  above is how you decide how much to spend.
 - **Re-deciding a settled question.** `docs/DECISIONS.md` exists for this. Read it before
   proposing an architecture that was already rejected, with reasons.
 - **Re-implementing what exists.** `graphify explain` before writing, always.

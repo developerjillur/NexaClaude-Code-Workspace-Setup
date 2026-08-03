@@ -1,6 +1,6 @@
 ---
 name: measure-dont-claim
-description: Run whenever you are about to state a number, a rate, a speed, a cost, or a "this is faster/cheaper/safer". The single highest-value habit in this project — 77 of its claims were disproven, and nearly all of them were plausible when written.
+description: Run whenever you are about to state a number, a rate, a speed, a cost, or a "this is faster/cheaper/safer".
 ---
 
 # Measure, do not claim

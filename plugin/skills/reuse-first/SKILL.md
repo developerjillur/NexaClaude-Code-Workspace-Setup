@@ -1,6 +1,6 @@
 ---
 name: reuse-first
-description: Run before writing any new code, adding any dependency, or creating any file. Stops the three most expensive vibe-coding failures — rewriting what exists, duplicating logic, and adding a package for something already available.
+description: Run before writing any new code, adding any dependency, or creating any file.
 ---
 
 # Reuse first

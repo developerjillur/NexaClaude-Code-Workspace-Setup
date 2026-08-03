@@ -1,6 +1,6 @@
 ---
 name: discovery-first
-description: Run before a card may enter 1-spec, and whenever a feature is described without a named person who wants it. Turns an idea into evidence a specification can be written from — who asked, what they do today, what changes if it exists, and the number that says it worked. Refuses ideas that arrive fully formed, because those are the expensive ones.
+description: Run before a card may enter 1-spec, and whenever a feature is described without a named person who wants it.
 ---
 
 # Discovery first

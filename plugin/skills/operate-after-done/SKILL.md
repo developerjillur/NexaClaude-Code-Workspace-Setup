@@ -1,6 +1,6 @@
 ---
 name: operate-after-done
-description: Run after a card reaches 6-done and before the next one starts, and whenever production behaviour is mentioned — an error, a slow page, a confused user, a bill. Closes the loop the board leaves open, because merging is not shipping and shipping is not working. Turns what production says back into cards.
+description: Run after a card reaches 6-done and before the next one starts, and whenever production behaviour is mentioned — an error, a slow page, a confused user, a bill.
 ---
 
 # Operate, after done

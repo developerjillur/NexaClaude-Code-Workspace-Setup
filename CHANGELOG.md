@@ -5,6 +5,39 @@ README counts were wrong by hand before a check started counting the files inste
 
 ---
 
+## 1.19.0 — 2026-08-03
+
+**The contract was costing 7,818 tokens on every turn, and most of it was history.**
+`AGENTS.md` 31,274 → 11,144 chars, skill descriptions 4,801 → 2,494. **~5,609 tokens saved
+per turn** in an adopted project.
+
+Nothing was deleted. The reasoning moved to a new **`docs/WHY.md`** (~3,900 tokens), written by
+`bootstrap` alongside `DECISIONS.md` and `LEARNED.md` — the tool-support matrix, the failure-mode
+catalogue, why state left the repository, the 532-green-assertions story, every measurement.
+**A rule has to be in context to be followed; its history only has to be findable.**
+
+Skill descriptions now carry the trigger and nothing else. Each rationale was verified present in
+its own SKILL.md body before being cut from the frontmatter.
+
+**New: §3 Proportionality**, in the contract and in `session-start`. The gates exist for changes
+that can hurt a caller; running all of them on a typo is not rigour, it is cost — and it teaches
+everyone to route around the process for small work, which is when the process stops catching
+anything. Three buckets: reversible-and-contained (just do it), ordinary (the board), expensive
+to reverse (board + council + deploy-gate). **This governs the scope of process, never the care
+taken inside it** — the tier stays pinned and `check.mjs` still refuses a downgrade.
+
+Measured on the author's own environment the same day: cost is **(context size) × (turns)**, and
+one session reached 17,449 turns at a 543k median context. Process that adds turns is not free.
+
+Two of this repo's own guards caught the work and were obeyed rather than adjusted: `check.mjs`
+refused the contract-meta cost line at 32% drift, and `plugin-packaging` refused `WHY.md` as
+untracked — *"absent from a clone and from an install"*, which it would have been.
+
+**Also fixed: `core.symlinks = false` in a working clone.** All 9 tracked symlinks had
+materialised as real copies, `plugin/skills/` and `skills/` had already drifted 38 files apart,
+and a `git add -A` would have committed ~130 duplicates over the symlinks — silently reverting
+the contract to its 31k version. The repo was never wrong; one clone's config was.
+
 ## 1.17.1 — 2026-08-02
 
 **A hook that printed a node stack trace where a reason belongs.** `prompt-check` spawned

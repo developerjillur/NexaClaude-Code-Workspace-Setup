@@ -1,6 +1,6 @@
 ---
 name: definition-of-done
-description: The checklist a card must pass to reach 6-done. Run at 5-verify. Includes the rule that separates this workspace from most — a guard must be watched failing, not just passing.
+description: The checklist a card must pass to reach 6-done. Run at 5-verify.
 ---
 
 # Definition of done

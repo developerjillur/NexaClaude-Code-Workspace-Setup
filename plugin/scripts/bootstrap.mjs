@@ -675,6 +675,13 @@ export function bootstrap(root, templatesDir, opts = {}) {
     seed('Decisions', 'One entry per decision that was expensive to reverse. A decision recorded only in chat did not happen.'), created);
   createOnly(path.join(P.docs, 'LEARNED.md'),
     seed('Learned', 'Patterns across the records that no single record states. Written by `skills/reflect`.'), created);
+  // **`WHY.md` is the half of the contract nobody should pay for every turn.** `AGENTS.md` went
+  // from ~7,800 tokens to ~2,790 by moving its reasoning here — every measurement, every "this
+  // broke once", the tool-support matrix. A rule has to be in context to be followed; its
+  // history only has to be findable. It lands in `docs/` rather than the repo root for the same
+  // reason the board does: the repository still receives exactly three files.
+  createOnly(path.join(P.docs, 'WHY.md'),
+    fs.readFileSync(path.join(templatesDir, 'WHY.md'), 'utf8'), created);
   createOnly(path.join(P.templates, 'CARD.md'),
     fs.readFileSync(path.join(templatesDir, 'CARD.md'), 'utf8'), created);
   // `.claudeignore` is read by Claude Code from the project tree, so it has nowhere else to be —
